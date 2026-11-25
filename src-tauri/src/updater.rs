@@ -147,16 +147,23 @@ fn push_unique_channel(
     }
 }
 
+fn is_direct_first_keyword(raw: &str) -> bool {
+    let trimmed = raw.trim();
+    trimmed.eq_ignore_ascii_case("direct") || trimmed == "直连"
+}
+
 /// Builds the ordered multi-node channel list for both manifest checks and binary downloads.
-/// - When `proxy_url` is empty: Direct GitHub is tried first, with the built-in mirror pool
-///   serving as automatic fallback when direct connectivity is blocked or slow.
-/// - When `proxy_url` is non-empty: user-specified proxy prefix(es) go first, followed by the
-///   remaining built-in mirror pool, and Direct GitHub as the final fallback.
+/// - When `proxy_url` is empty (default): uses the built-in multi-node acceleration pool
+///   (`gh-proxy.com` first, then fallbacks), with Direct GitHub as the final fallback.
+/// - When `proxy_url` is `"direct"` / `"直连"`: tries Direct GitHub first, falling back to
+///   the built-in mirror pool when direct connectivity is blocked or slow.
+/// - When `proxy_url` has custom prefix(es): user-specified proxy prefix(es) go first,
+///   followed by the remaining built-in mirror pool, and Direct GitHub last.
 pub fn build_update_channels(proxy_url: &str) -> Vec<UpdateChannel> {
     let mut channels = Vec::with_capacity(BUILTIN_PROXY_POOL.len() + 3);
     let mut seen = HashSet::new();
 
-    if proxy_url.trim().is_empty() {
+    if is_direct_first_keyword(proxy_url) {
         push_unique_channel(&mut channels, &mut seen, UpdateChannel::Direct);
         for builtin in BUILTIN_PROXY_POOL {
             if let Some(norm) = normalize_proxy_prefix(builtin) {
@@ -769,14 +776,18 @@ mod tests {
 
     #[test]
     fn test_build_update_channels_default_custom_and_direct_first() {
-        // Default proxy puts gh-proxy.com first, then remaining built-in mirrors, then Direct
-        let default_chs = build_update_channels("https://gh-proxy.com/");
-        assert_eq!(default_chs.len(), BUILTIN_PROXY_POOL.len() + 1);
+        // Empty proxy uses built-in multi-node acceleration pool first, then Direct
+        let empty_default = build_update_channels("");
+        assert_eq!(empty_default.len(), BUILTIN_PROXY_POOL.len() + 1);
         assert_eq!(
-            default_chs[0],
+            empty_default[0],
             UpdateChannel::Proxy("https://gh-proxy.com/".to_string())
         );
-        assert_eq!(default_chs.last(), Some(&UpdateChannel::Direct));
+        assert_eq!(empty_default.last(), Some(&UpdateChannel::Direct));
+
+        // Explicit default proxy matches empty default order without duplication
+        let default_chs = build_update_channels("https://gh-proxy.com/");
+        assert_eq!(default_chs, empty_default);
 
         // Custom proxy goes ahead of all built-in nodes and deduplicates
         let custom_chs =
@@ -792,14 +803,16 @@ mod tests {
         );
         assert_eq!(custom_chs.last(), Some(&UpdateChannel::Direct));
 
-        // Empty proxy puts Direct first, then falls back to built-in mirror pool
-        let direct_first = build_update_channels("");
-        assert_eq!(direct_first.len(), BUILTIN_PROXY_POOL.len() + 1);
-        assert_eq!(direct_first[0], UpdateChannel::Direct);
-        assert_eq!(
-            direct_first[1],
-            UpdateChannel::Proxy("https://gh-proxy.com/".to_string())
-        );
+        // Explicit "direct" / "直连" puts Direct first, then falls back to built-in mirror pool
+        for kw in ["direct", "DIRECT", "直连"] {
+            let direct_first = build_update_channels(kw);
+            assert_eq!(direct_first.len(), BUILTIN_PROXY_POOL.len() + 1);
+            assert_eq!(direct_first[0], UpdateChannel::Direct);
+            assert_eq!(
+                direct_first[1],
+                UpdateChannel::Proxy("https://gh-proxy.com/".to_string())
+            );
+        }
     }
 
     #[test]

@@ -285,8 +285,8 @@ fn seed_default_settings(conn: &Connection) -> Result<(), String> {
             "weekly_notice",
             "定期核查监视与测量设备校准有效期，确保量值溯源准确可靠",
         ),
-        ("github_repo", DEFAULT_GITHUB_REPO),
-        ("update_proxy_url", DEFAULT_UPDATE_PROXY_URL),
+        ("github_repo", ""),
+        ("update_proxy_url", ""),
         ("company_logo_path", ""),
         ("admin_title", DEFAULT_ADMIN_TITLE),
         ("admin_avatar_path", ""),
@@ -434,8 +434,24 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
             "weekly_notice",
             "定期核查监视与测量设备校准有效期，确保量值溯源准确可靠",
         ),
-        github_repo: get_or("github_repo", DEFAULT_GITHUB_REPO),
-        update_proxy_url: get_or("update_proxy_url", DEFAULT_UPDATE_PROXY_URL),
+        github_repo: {
+            let v = get_or("github_repo", "");
+            if v.trim().eq_ignore_ascii_case(DEFAULT_GITHUB_REPO) {
+                String::new()
+            } else {
+                v
+            }
+        },
+        update_proxy_url: {
+            let v = get_or("update_proxy_url", "");
+            let norm_v = v.trim().trim_end_matches('/');
+            let norm_def = DEFAULT_UPDATE_PROXY_URL.trim().trim_end_matches('/');
+            if norm_v.eq_ignore_ascii_case(norm_def) {
+                String::new()
+            } else {
+                v
+            }
+        },
         company_logo_path: get_or("company_logo_path", ""),
     })
 }
@@ -645,21 +661,28 @@ mod tests {
         let root = std::env::temp_dir().join(format!("inst_upd_test_{}", uuid::Uuid::new_v4()));
         let db_path = root.join("ledger.db");
 
-        // Fresh DB seeds default GitHub repo and download proxy
+        // Fresh DB leaves custom overrides empty so UI displays built-in defaults as placeholders
         let conn = init_db(&db_path).expect("init_db failed");
         let s1 = load_app_settings(&conn).unwrap();
-        assert_eq!(s1.github_repo, DEFAULT_GITHUB_REPO);
-        assert_eq!(s1.update_proxy_url, DEFAULT_UPDATE_PROXY_URL);
+        assert_eq!(s1.github_repo, "");
+        assert_eq!(s1.update_proxy_url, "");
 
-        // Explicitly clearing proxy or changing repo must persist across reopen
+        // Legacy untouched default values normalize cleanly to empty overrides
+        set_setting(&conn, "github_repo", DEFAULT_GITHUB_REPO).unwrap();
+        set_setting(&conn, "update_proxy_url", DEFAULT_UPDATE_PROXY_URL).unwrap();
+        let s_legacy = load_app_settings(&conn).unwrap();
+        assert_eq!(s_legacy.github_repo, "");
+        assert_eq!(s_legacy.update_proxy_url, "");
+
+        // Custom overrides must persist across reopen
         set_setting(&conn, "github_repo", "other/repo").unwrap();
-        set_setting(&conn, "update_proxy_url", "").unwrap();
+        set_setting(&conn, "update_proxy_url", "https://custom.example.com/").unwrap();
         drop(conn);
 
         let conn2 = init_db(&db_path).expect("reopen failed");
         let s2 = load_app_settings(&conn2).unwrap();
         assert_eq!(s2.github_repo, "other/repo");
-        assert_eq!(s2.update_proxy_url, "");
+        assert_eq!(s2.update_proxy_url, "https://custom.example.com/");
 
         let _ = std::fs::remove_dir_all(&root);
     }

@@ -109,7 +109,21 @@ interface SettingsModalProps {
 }
 
 const INPUT_CLS =
-  "precision-field w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-[#fafafa] hover:bg-white focus:bg-white dark:bg-white/[0.03] dark:focus:bg-white/[0.05] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400";
+  "precision-field w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-[#fafafa] hover:bg-white focus:bg-white dark:bg-white/[0.03] dark:focus:bg-white/[0.05] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500";
+
+const DEFAULT_GITHUB_REPO = "MuY-DG/instrument-ledger";
+const DEFAULT_UPDATE_PROXY_URL = "https://gh-proxy.com/";
+
+function normalizeOptionalRepoInput(raw: string): string {
+  const trimmed = raw.trim();
+  return trimmed.toLowerCase() === DEFAULT_GITHUB_REPO.toLowerCase() ? "" : raw;
+}
+
+function normalizeOptionalProxyInput(raw: string): string {
+  const norm = raw.trim().replace(/\/+$/, "").toLowerCase();
+  const defNorm = DEFAULT_UPDATE_PROXY_URL.replace(/\/+$/, "").toLowerCase();
+  return norm === defNorm ? "" : raw;
+}
 
 function formatPublishDate(raw: string): string {
   const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2})/);
@@ -151,8 +165,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [docTitle, setDocTitle] = useState(settings.docTitle);
   const [docSubtitle, setDocSubtitle] = useState(settings.docSubtitle);
   const [weeklyNotice, setWeeklyNotice] = useState(settings.weeklyNotice);
-  const [githubRepo, setGithubRepo] = useState(settings.githubRepo);
-  const [updateProxyUrl, setUpdateProxyUrl] = useState(settings.updateProxyUrl);
+  const [githubRepo, setGithubRepo] = useState(() =>
+    normalizeOptionalRepoInput(settings.githubRepo)
+  );
+  const [updateProxyUrl, setUpdateProxyUrl] = useState(() =>
+    normalizeOptionalProxyInput(settings.updateProxyUrl)
+  );
   const [logoPreview, setLogoPreview] = useState("");
   const [savingGeneral, setSavingGeneral] = useState(false);
   const {
@@ -271,8 +289,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setDocTitle(settings.docTitle);
     setDocSubtitle(settings.docSubtitle);
     setWeeklyNotice(settings.weeklyNotice);
-    setGithubRepo(settings.githubRepo);
-    setUpdateProxyUrl(settings.updateProxyUrl);
+    setGithubRepo(normalizeOptionalRepoInput(settings.githubRepo));
+    setUpdateProxyUrl(normalizeOptionalProxyInput(settings.updateProxyUrl));
     setProfileUsername(settings.adminUsername);
     setProfileTitle(settings.adminTitle || "系统管理员");
     if (settings.companyLogoPath) {
@@ -2050,8 +2068,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               更新源设置
                             </span>
                             <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500 truncate">
-                              {githubRepo || "未配置仓库"}
-                              {updateProxyUrl.trim() ? " · 多节点加速" : " · 直连优先/自动兜底"}
+                              {githubRepo.trim() || DEFAULT_GITHUB_REPO}
+                              {!updateProxyUrl.trim()
+                                ? " · 默认多节点加速"
+                                : updateProxyUrl.trim().toLowerCase() === "direct" ||
+                                    updateProxyUrl.trim() === "直连"
+                                  ? " · 直连优先/自动兜底"
+                                  : " · 自定义加速"}
                             </span>
                           </div>
                           <ChevronDown
@@ -2065,15 +2088,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <div className="px-4 pb-4 pt-3 border-t border-zinc-200/70 dark:border-white/[0.07] space-y-3">
                             <div className="grid grid-cols-1 gap-3">
                               <div>
-                                <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                                  <span>GitHub 仓库</span>
-                                  <InfoTip content="格式：用户名/仓库名，如 MuY-DG/instrument-ledger" />
-                                </label>
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+                                    <span>GitHub 仓库</span>
+                                    <InfoTip content="选填，留空默认使用 MuY-DG/instrument-ledger；自定义格式为 用户名/仓库名。" />
+                                  </label>
+                                  {githubRepo.trim() !== "" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setGithubRepo("")}
+                                      className="text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+                                    >
+                                      恢复默认
+                                    </button>
+                                  )}
+                                </div>
                                 <input
                                   type="text"
                                   value={githubRepo}
                                   onChange={(e) => setGithubRepo(e.target.value)}
-                                  placeholder="用户名/仓库名"
+                                  placeholder={DEFAULT_GITHUB_REPO}
                                   className={`${INPUT_CLS} font-mono text-xs`}
                                 />
                               </div>
@@ -2081,12 +2115,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 <div className="flex items-center justify-between gap-2 mb-1">
                                   <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
                                     <span>加速代理（检测与下载通用）</span>
-                                    <InfoTip content="同时用于检测更新与安装包下载，支持逗号分隔多个自定义前缀。首选节点异常或超时时自动并发切换内置多节点池与 GitHub 直连；留空则直连优先并自动兜底。" />
+                                    <InfoTip content="选填，留空默认启用内置多节点加速（优先 gh-proxy.com 等节点，异常时自动并发切换与回退 GitHub 直连）；支持逗号分隔多个自定义前缀，填写 direct 可切换为直连优先。" />
                                   </label>
-                                  {updateProxyUrl.trim() !== "https://gh-proxy.com/" && (
+                                  {updateProxyUrl.trim() !== "" && (
                                     <button
                                       type="button"
-                                      onClick={() => setUpdateProxyUrl("https://gh-proxy.com/")}
+                                      onClick={() => setUpdateProxyUrl("")}
                                       className="text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
                                     >
                                       恢复默认
@@ -2097,11 +2131,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   type="text"
                                   value={updateProxyUrl}
                                   onChange={(e) => setUpdateProxyUrl(e.target.value)}
-                                  placeholder="留空则直连优先，不通时自动切换内置多节点"
-                                  className={`${INPUT_CLS} font-mono text-xs`}
+                                  placeholder="默认：内置 5 节点自动加速 + GitHub 直连（选填自定义前缀，多个用逗号分隔）"
+                                  className={`${INPUT_CLS} ${updateProxyUrl ? "font-mono" : ""} text-xs`}
                                 />
                                 <p className="mt-1.5 text-[10.5px] text-zinc-400 dark:text-zinc-500 leading-relaxed">
-                                  内置自动兜底节点：
+                                  内置线路：
                                   <span className="font-mono">
                                     gh-proxy.com · ghfast.top · gh-proxy.org · cdn.gh-proxy.org · edgeone.gh-proxy.org · GitHub 直连
                                   </span>

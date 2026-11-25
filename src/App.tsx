@@ -135,8 +135,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   docSubtitle:
     "The management record and plan of monitoring and measuring equipment",
   weeklyNotice: "定期核查监视与测量设备校准有效期，确保量值溯源准确可靠",
-  githubRepo: "MuY-DG/instrument-ledger",
-  updateProxyUrl: "https://gh-proxy.com/",
+  githubRepo: "",
+  updateProxyUrl: "",
   companyLogoPath: "",
 };
 

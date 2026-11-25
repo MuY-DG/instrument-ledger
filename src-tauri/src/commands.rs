@@ -17,7 +17,7 @@ use crate::db::{
     load_app_settings, now_iso, query_instrument_by_id, query_instruments,
     query_reports_for_instrument, sanitize_admin_session_days, sanitize_close_behavior,
     sanitize_popup_frequency, sanitize_warning_thresholds, set_setting,
-    DEFAULT_ADMIN_SESSION_DAYS, DEFAULT_ADMIN_TITLE,
+    DEFAULT_ADMIN_SESSION_DAYS, DEFAULT_ADMIN_TITLE, DEFAULT_GITHUB_REPO,
 };
 use crate::models::{
     AddReportInput, AppSettings, AuthStatus, BackupResult, CalibrationReport, DataDirInfo,
@@ -1392,6 +1392,27 @@ pub fn reset_app_with_backup(
 
 // ---------------- Updates ----------------
 
+fn resolve_effective_repo(override_val: Option<String>, saved_val: &str) -> String {
+    match override_val {
+        Some(v) => {
+            let trimmed = v.trim();
+            if trimmed.is_empty() {
+                DEFAULT_GITHUB_REPO.to_string()
+            } else {
+                trimmed.to_string()
+            }
+        }
+        None => {
+            let saved = saved_val.trim();
+            if saved.is_empty() {
+                DEFAULT_GITHUB_REPO.to_string()
+            } else {
+                saved.to_string()
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn check_for_updates(
     app: AppHandle,
@@ -1403,9 +1424,7 @@ pub async fn check_for_updates(
         let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
         let settings = load_app_settings(&conn)?;
         (
-            github_repo_override
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or(settings.github_repo),
+            resolve_effective_repo(github_repo_override, &settings.github_repo),
             proxy_override.unwrap_or(settings.update_proxy_url),
         )
     };
@@ -1427,9 +1446,7 @@ pub async fn download_and_launch_update(
         let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
         let settings = load_app_settings(&conn)?;
         (
-            github_repo_override
-                .filter(|s| !s.trim().is_empty())
-                .unwrap_or(settings.github_repo),
+            resolve_effective_repo(github_repo_override, &settings.github_repo),
             proxy_override.unwrap_or(settings.update_proxy_url),
         )
     };

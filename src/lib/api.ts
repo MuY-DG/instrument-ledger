@@ -203,7 +203,7 @@ export const api = {
 
   checkForUpdates: (githubRepoOverride?: string, proxyOverride?: string) =>
     invoke<UpdateCheckResult>("check_for_updates", {
-      githubRepoOverride: githubRepoOverride || null,
+      githubRepoOverride: githubRepoOverride ?? null,
       proxyOverride: proxyOverride ?? null,
     }),
   downloadAndLaunchUpdate: (
@@ -211,7 +211,7 @@ export const api = {
     proxyOverride?: string
   ) =>
     invoke<string>("download_and_launch_update", {
-      githubRepoOverride: githubRepoOverride || null,
+      githubRepoOverride: githubRepoOverride ?? null,
       proxyOverride: proxyOverride ?? null,
     }),
 };
