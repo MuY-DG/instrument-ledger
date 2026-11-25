@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Edit3, Eye, FileText, Plus, Trash2 } from "lucide-react";
 import { calTypeLabel, type InstrumentStatusInfo } from "@/lib/status";
 import { getThresholdVisuals } from "@/lib/thresholdColors";
@@ -8,12 +9,52 @@ import { StatusBadge } from "@/components/StatusBadge";
 import type { CategoryTab, Instrument } from "@/types";
 
 const ROW_HEIGHT = 66;
-const OVERSCAN = 8;
-const VIRTUALIZE_THRESHOLD = 50;
+const HEADER_HEIGHT = 38;
+const DEFAULT_VIRTUALIZE_THRESHOLD = 50;
+
+// Directional overscan: allocate larger lookahead in scroll direction
+// while keeping a full-viewport trailing buffer for sudden scroll reversals.
+const OVERSCAN_LEAD = 22;
+const OVERSCAN_TRAIL = 10;
+// Only recompute React slice once leading/trailing buffer shrinks by at least STEP rows,
+// avoiding unnecessary reconciliations on smooth frame-by-frame scrolling.
+const REFILL_STEP = 4;
+
+// Pixel-aligned CSS Grid matching the previous 9-column table-fixed proportions
+// (fixed utility columns + 22:16:18 elastic columns, min total <= 1040px)
+const TABLE_GRID_COLS =
+  "grid-cols-[54px_minmax(150px,22fr)_minmax(112px,16fr)_minmax(124px,18fr)_126px_108px_122px_132px_108px]";
+
+interface WindowRange {
+  start: number;
+  end: number;
+}
+
+function computeWindowRange(
+  scrollTop: number,
+  viewportHeight: number,
+  total: number,
+  direction: 1 | -1
+): WindowRange {
+  if (total <= 0) return { start: 0, end: 0 };
+  const effectiveTop = Math.max(0, scrollTop - HEADER_HEIGHT);
+  const visibleCount = Math.max(1, Math.ceil(viewportHeight / ROW_HEIGHT));
+  const visibleStart = Math.floor(effectiveTop / ROW_HEIGHT);
+  const visibleEnd = visibleStart + visibleCount;
+
+  const topOverscan = direction === -1 ? OVERSCAN_LEAD : OVERSCAN_TRAIL;
+  const bottomOverscan = direction === 1 ? OVERSCAN_LEAD : OVERSCAN_TRAIL;
+
+  const start = Math.max(0, visibleStart - topOverscan);
+  const end = Math.min(total, visibleEnd + bottomOverscan);
+  return { start, end };
+}
 
 interface InstrumentRowProps {
   inst: Instrument;
   rowNumber: number;
+  rowIndex: number;
+  virtualized: boolean;
   statusInfo: InstrumentStatusInfo;
   showCategoryBadge: boolean;
   isAdmin: boolean;
@@ -29,6 +70,8 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
   ({
     inst,
     rowNumber,
+    rowIndex,
+    virtualized,
     statusInfo,
     showCategoryBadge,
     isAdmin,
@@ -44,33 +87,57 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
         ? getThresholdVisuals(statusInfo.matchedThreshold.color)
         : null;
 
-    const rowStyle: React.CSSProperties | undefined =
-      statusInfo.status === "expired"
-        ? { boxShadow: "inset 2.5px 0 0 0 rgb(244, 63, 94)" }
-        : tierVisuals
-          ? {
-              ...tierVisuals.cssVars,
-              boxShadow: tierVisuals.rowAccentShadow,
-            }
-          : undefined;
+    const handlePhotoClick = useCallback(() => {
+      onOpenPhoto(inst);
+    }, [onOpenPhoto, inst]);
+
+    const rowStyle: React.CSSProperties = useMemo(() => {
+      const base: React.CSSProperties = {
+        height: ROW_HEIGHT,
+        contain: "layout style paint",
+      };
+
+      if (virtualized) {
+        base.position = "absolute";
+        base.top = 0;
+        base.left = 0;
+        base.right = 0;
+        base.transform = `translate3d(0, ${rowIndex * ROW_HEIGHT}px, 0)`;
+      }
+
+      if (statusInfo.status === "expired") {
+        base.boxShadow = "inset 2.5px 0 0 0 rgb(244, 63, 94)";
+      } else if (tierVisuals) {
+        Object.assign(base, tierVisuals.cssVars);
+        base.boxShadow = tierVisuals.rowAccentShadow;
+      }
+
+      return base;
+    }, [virtualized, rowIndex, statusInfo.status, tierVisuals]);
 
     return (
-      <tr
+      <div
+        role="row"
         onClick={() => onView(inst)}
         style={rowStyle}
         className={cn(
-          "group h-[66px] cursor-pointer transition-colors duration-150",
+          "group grid items-center border-b border-zinc-100 dark:border-white/[0.05] text-sm cursor-pointer transition-colors duration-150",
+          TABLE_GRID_COLS,
           isActive
             ? "bg-indigo-50/70 dark:bg-indigo-500/[0.08]"
             : "hover:bg-zinc-50/90 dark:hover:bg-white/[0.025]"
         )}
       >
-        <td className="py-2.5 pl-6 pr-2 font-mono tabular-nums text-[11.5px] text-zinc-400 dark:text-zinc-600">
+        {/* Sequence Number */}
+        <div
+          role="cell"
+          className="py-2.5 pl-6 pr-2 font-mono tabular-nums text-[11.5px] text-zinc-400 dark:text-zinc-600 whitespace-nowrap"
+        >
           {String(rowNumber).padStart(2, "0")}
-        </td>
+        </div>
 
         {/* Name & Department */}
-        <td className="py-2.5 px-3 overflow-hidden">
+        <div role="cell" className="py-2.5 px-3 min-w-0 overflow-hidden">
           <div className="flex items-center gap-1.5 min-w-0">
             <span
               className="font-medium text-zinc-900 dark:text-zinc-100 text-[13px] tracking-tight truncate"
@@ -99,10 +166,10 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
               </span>
             )}
           </div>
-        </td>
+        </div>
 
         {/* Serial No & Spec */}
-        <td className="py-2.5 px-3 overflow-hidden">
+        <div role="cell" className="py-2.5 px-3 min-w-0 overflow-hidden">
           <div
             className="font-mono tabular-nums text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate"
             title={inst.serialNo}
@@ -115,15 +182,15 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
           >
             {inst.modelSpec || "—"}
           </div>
-        </td>
+        </div>
 
         {/* Location + Photo Thumbnail */}
-        <td className="py-2.5 px-3 overflow-hidden">
+        <div role="cell" className="py-2.5 px-3 min-w-0 overflow-hidden">
           <div className="flex items-center gap-2.5 min-w-0">
             <LocationThumb
               photoPath={inst.photoPath}
               alt={`${inst.name} 位置图`}
-              onClick={() => onOpenPhoto(inst)}
+              onClick={handlePhotoClick}
             />
             <div className="min-w-0 flex-1">
               <div
@@ -146,10 +213,10 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
               )}
             </div>
           </div>
-        </td>
+        </div>
 
         {/* Last Cal Date + Method + Cycle */}
-        <td className="py-2.5 px-3 whitespace-nowrap">
+        <div role="cell" className="py-2.5 px-3 whitespace-nowrap">
           <div className="font-mono tabular-nums text-xs text-zinc-700 dark:text-zinc-300">
             {inst.lastCalDate || "—"}
           </div>
@@ -163,10 +230,13 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
               </span>
             )}
           </div>
-        </td>
+        </div>
 
         {/* Next Cal Date */}
-        <td className="py-2.5 px-3 font-mono tabular-nums text-xs whitespace-nowrap">
+        <div
+          role="cell"
+          className="py-2.5 px-3 font-mono tabular-nums text-xs whitespace-nowrap"
+        >
           {inst.exemptCalibration ? (
             <span className="text-zinc-400 dark:text-zinc-600">—</span>
           ) : (
@@ -183,15 +253,19 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
               {inst.nextCalDate || "—"}
             </span>
           )}
-        </td>
+        </div>
 
         {/* Precision Status Badge */}
-        <td className="py-2.5 px-3">
+        <div role="cell" className="py-2.5 px-3">
           <StatusBadge info={statusInfo} />
-        </td>
+        </div>
 
         {/* Report Attachments */}
-        <td className="py-2.5 px-3" onClick={(e) => e.stopPropagation()}>
+        <div
+          role="cell"
+          className="py-2.5 px-3"
+          onClick={(e) => e.stopPropagation()}
+        >
           {inst.reportCount > 0 ? (
             <button
               type="button"
@@ -218,10 +292,11 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
               —
             </span>
           )}
-        </td>
+        </div>
 
         {/* Row Actions */}
-        <td
+        <div
+          role="cell"
           className="py-2.5 pl-3 pr-6 text-right whitespace-nowrap"
           onClick={(e) => e.stopPropagation()}
         >
@@ -255,8 +330,8 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
               </>
             )}
           </div>
-        </td>
-      </tr>
+        </div>
+      </div>
     );
   }
 );
@@ -268,6 +343,11 @@ interface VirtualInstrumentTableProps {
   isAdmin: boolean;
   activeInstrumentId: number | null;
   resetScrollKey: string;
+  /** Starting 0-based index offset used for display row numbering across pages */
+  rowOffset?: number;
+  /** Enable virtualized rendering when item count exceeds virtualizeThreshold */
+  virtualize?: boolean;
+  virtualizeThreshold?: number;
   onView: (inst: Instrument) => void;
   onEdit: (inst: Instrument) => void;
   onDelete: (inst: Instrument) => void;
@@ -291,6 +371,9 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
   isAdmin,
   activeInstrumentId,
   resetScrollKey,
+  rowOffset = 0,
+  virtualize = true,
+  virtualizeThreshold = DEFAULT_VIRTUALIZE_THRESHOLD,
   onView,
   onEdit,
   onDelete,
@@ -298,74 +381,153 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
   onOpenPhoto,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const [scrollTop, setScrollTop] = useState(0);
-  const [viewportHeight, setViewportHeight] = useState(720);
+  const viewportHeightRef = useRef(720);
+  const lastScrollTopRef = useRef(0);
+  const scrollDirRef = useRef<1 | -1>(1);
+  const ignoreScrollRef = useRef(false);
 
-  // Measure scroll viewport height
+  const total = items.length;
+  const totalRef = useRef(total);
+  totalRef.current = total;
+  const shouldVirtualize = virtualize && total > virtualizeThreshold;
+
+  const [range, setRange] = useState<WindowRange>(() =>
+    computeWindowRange(0, 720, total, 1)
+  );
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
+
+  const syncWindowFromContainer = useCallback(
+    (force = false) => {
+      if (!shouldVirtualize) return;
+      const el = containerRef.current;
+      const scrollTop = el ? el.scrollTop : 0;
+      const vh = viewportHeightRef.current;
+      const next = computeWindowRange(scrollTop, vh, total, scrollDirRef.current);
+      const cur = rangeRef.current;
+      if (force || cur.start !== next.start || cur.end !== next.end) {
+        rangeRef.current = next;
+        setRange(next);
+      }
+    },
+    [shouldVirtualize, total]
+  );
+
+  // Measure scroll viewport height via ResizeObserver
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const update = () => {
-      if (el.clientHeight > 0) setViewportHeight(el.clientHeight);
+      if (el.clientHeight > 0 && el.clientHeight !== viewportHeightRef.current) {
+        viewportHeightRef.current = el.clientHeight;
+        syncWindowFromContainer();
+      }
     };
-    update();
+    if (el.clientHeight > 0) {
+      viewportHeightRef.current = el.clientHeight;
+      syncWindowFromContainer();
+    }
     const ro = new ResizeObserver(update);
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [syncWindowFromContainer]);
 
-  // Reset scroll to top cleanly when switching category or major filter
-  useEffect(() => {
+  // Reset scroll cleanly when switching category, page, sort, or major filter
+  useLayoutEffect(() => {
     const el = containerRef.current;
+    lastScrollTopRef.current = 0;
+    scrollDirRef.current = 1;
     if (el && el.scrollTop !== 0) {
+      ignoreScrollRef.current = true;
       el.scrollTop = 0;
+      ignoreScrollRef.current = false;
     }
-    setScrollTop(0);
-  }, [resetScrollKey]);
+    if (shouldVirtualize) {
+      const next = computeWindowRange(
+        0,
+        viewportHeightRef.current,
+        totalRef.current,
+        1
+      );
+      rangeRef.current = next;
+      setRange(next);
+    }
+  }, [resetScrollKey, shouldVirtualize]);
 
-  const handleScroll = () => {
-    if (rafRef.current !== null) return;
-    rafRef.current = window.requestAnimationFrame(() => {
-      rafRef.current = null;
-      const el = containerRef.current;
-      if (el) setScrollTop(el.scrollTop);
-    });
-  };
-
+  // Keep rendered window clamped when items shrink dynamically (e.g. search or delete)
   useEffect(() => {
-    return () => {
-      if (rafRef.current !== null) {
-        window.cancelAnimationFrame(rafRef.current);
-      }
-    };
-  }, []);
-
-  const total = items.length;
-  const shouldVirtualize = total > VIRTUALIZE_THRESHOLD;
-
-  const { startIdx, endIdx, topSpacer, bottomSpacer } = useMemo(() => {
-    if (!shouldVirtualize) {
-      return {
-        startIdx: 0,
-        endIdx: total,
-        topSpacer: 0,
-        bottomSpacer: 0,
-      };
+    if (!shouldVirtualize) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const maxScroll = Math.max(
+      0,
+      HEADER_HEIGHT + total * ROW_HEIGHT - viewportHeightRef.current
+    );
+    if (el.scrollTop > maxScroll) {
+      ignoreScrollRef.current = true;
+      el.scrollTop = maxScroll;
+      ignoreScrollRef.current = false;
+      lastScrollTopRef.current = maxScroll;
     }
-    const headerOffset = 38;
-    const effectiveTop = Math.max(0, scrollTop - headerOffset);
-    const visibleCount = Math.ceil(viewportHeight / ROW_HEIGHT);
-    const rawStart = Math.floor(effectiveTop / ROW_HEIGHT) - OVERSCAN;
-    const start = Math.max(0, rawStart);
-    const end = Math.min(total, start + visibleCount + OVERSCAN * 2);
-    return {
-      startIdx: start,
-      endIdx: end,
-      topSpacer: start * ROW_HEIGHT,
-      bottomSpacer: Math.max(0, (total - end) * ROW_HEIGHT),
-    };
-  }, [shouldVirtualize, total, scrollTop, viewportHeight]);
+    syncWindowFromContainer();
+  }, [shouldVirtualize, total, syncWindowFromContainer]);
+
+  const handleScroll = useCallback(() => {
+    if (!shouldVirtualize || ignoreScrollRef.current) return;
+    const el = containerRef.current;
+    if (!el) return;
+
+    const scrollTop = el.scrollTop;
+    const delta = scrollTop - lastScrollTopRef.current;
+    if (delta === 0) return;
+
+    const dir: 1 | -1 = delta > 0 ? 1 : -1;
+    scrollDirRef.current = dir;
+    lastScrollTopRef.current = scrollTop;
+
+    const vh = viewportHeightRef.current;
+    const effectiveTop = Math.max(0, scrollTop - HEADER_HEIGHT);
+    const visibleCount = Math.max(1, Math.ceil(vh / ROW_HEIGHT));
+    const visibleStart = Math.floor(effectiveTop / ROW_HEIGHT);
+    const visibleEnd = visibleStart + visibleCount;
+
+    const cur = rangeRef.current;
+    const topMargin = visibleStart - cur.start;
+    const bottomMargin = cur.end - visibleEnd;
+
+    const minTopMargin =
+      dir === -1 ? OVERSCAN_LEAD - REFILL_STEP : OVERSCAN_TRAIL - REFILL_STEP;
+    const minBottomMargin =
+      dir === 1 ? OVERSCAN_LEAD - REFILL_STEP : OVERSCAN_TRAIL - REFILL_STEP;
+
+    const needsTopRefill = topMargin < minTopMargin && cur.start > 0;
+    const needsBottomRefill = bottomMargin < minBottomMargin && cur.end < total;
+
+    if (!needsTopRefill && !needsBottomRefill) {
+      return;
+    }
+
+    const next = computeWindowRange(scrollTop, vh, total, dir);
+    if (next.start === cur.start && next.end === cur.end) {
+      return;
+    }
+
+    rangeRef.current = next;
+
+    // On rapid scrollbar jumps that escape the rendered buffer completely,
+    // commit synchronously so rows paint in the immediate frame without blank flash.
+    const escapedBuffer = visibleStart < cur.start || visibleEnd > cur.end;
+    if (escapedBuffer) {
+      flushSync(() => {
+        setRange(next);
+      });
+    } else {
+      setRange(next);
+    }
+  }, [shouldVirtualize, total]);
+
+  const startIdx = shouldVirtualize ? Math.min(range.start, total) : 0;
+  const endIdx = shouldVirtualize ? Math.min(range.end, total) : total;
 
   const visibleSlice = useMemo(
     () => items.slice(startIdx, endIdx),
@@ -373,52 +535,72 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
   );
 
   const showCategoryBadge = activeTab === "all";
+  const totalHeight = total * ROW_HEIGHT;
 
   return (
     <div
       ref={containerRef}
-      onScroll={handleScroll}
-      className="flex-1 overflow-auto will-change-scroll"
+      onScroll={shouldVirtualize ? handleScroll : undefined}
+      className="flex-1 overflow-auto overscroll-y-contain"
     >
-      <table className="w-full min-w-[1040px] table-fixed text-left border-collapse">
-        <colgroup>
-          <col className="w-12" />
-          <col className="w-[22%]" />
-          <col className="w-[16%]" />
-          <col className="w-[18%]" />
-          <col className="w-[126px]" />
-          <col className="w-[108px]" />
-          <col className="w-[122px]" />
-          <col className="w-[132px]" />
-          <col className="w-[108px]" />
-        </colgroup>
-        <thead className="sticky top-0 z-10 bg-white/95 dark:bg-[#09090b]/95 backdrop-blur-md">
-          <tr className="border-b border-zinc-200/80 dark:border-white/[0.07] text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
-            <th className="py-2.5 pl-6 pr-2 font-mono">#</th>
-            <th className="py-2.5 px-3">设备与使用部门</th>
-            <th className="py-2.5 px-3">编号 / 型号规格</th>
-            <th className="py-2.5 px-3">存放位置</th>
-            <th className="py-2.5 px-3">上次校验 / 周期</th>
-            <th className="py-2.5 px-3">下次校验</th>
-            <th className="py-2.5 px-3">效期状态</th>
-            <th className="py-2.5 px-3">校验报告</th>
-            <th className="py-2.5 pl-3 pr-6 text-right">操作</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-zinc-100 dark:divide-white/[0.05] text-sm">
-          {topSpacer > 0 && (
-            <tr aria-hidden="true" className="border-0 pointer-events-none">
-              <td colSpan={9} style={{ height: topSpacer, padding: 0, border: 0 }} />
-            </tr>
-          )}
+      <div role="table" aria-rowcount={total} className="w-full min-w-[1040px] text-left">
+        {/* Solid opaque sticky header — eliminates per-frame WKWebView backdrop-filter readback */}
+        <div
+          role="rowgroup"
+          className="sticky top-0 z-10 bg-white dark:bg-[#09090b]"
+        >
+          <div
+            role="row"
+            className={cn(
+              "grid items-center border-b border-zinc-200/80 dark:border-white/[0.07] text-[11px] font-medium text-zinc-400 dark:text-zinc-500 select-none",
+              TABLE_GRID_COLS
+            )}
+          >
+            <div role="columnheader" className="py-2.5 pl-6 pr-2 font-mono">
+              #
+            </div>
+            <div role="columnheader" className="py-2.5 px-3">
+              设备与使用部门
+            </div>
+            <div role="columnheader" className="py-2.5 px-3">
+              编号 / 型号规格
+            </div>
+            <div role="columnheader" className="py-2.5 px-3">
+              存放位置
+            </div>
+            <div role="columnheader" className="py-2.5 px-3">
+              上次校验 / 周期
+            </div>
+            <div role="columnheader" className="py-2.5 px-3">
+              下次校验
+            </div>
+            <div role="columnheader" className="py-2.5 px-3">
+              效期状态
+            </div>
+            <div role="columnheader" className="py-2.5 px-3">
+              校验报告
+            </div>
+            <div role="columnheader" className="py-2.5 pl-3 pr-6 text-right">
+              操作
+            </div>
+          </div>
+        </div>
 
+        {/* Body: GPU translate3d positioning in virtual mode, zero-overhead native flow in paged mode */}
+        <div
+          role="rowgroup"
+          className={shouldVirtualize ? "relative" : undefined}
+          style={shouldVirtualize ? { height: totalHeight } : undefined}
+        >
           {visibleSlice.map((inst, offset) => {
             const idx = startIdx + offset;
             return (
               <InstrumentRow
                 key={inst.id}
                 inst={inst}
-                rowNumber={idx + 1}
+                rowIndex={idx}
+                rowNumber={rowOffset + idx + 1}
+                virtualized={shouldVirtualize}
                 statusInfo={statusById.get(inst.id) ?? FALLBACK_STATUS}
                 showCategoryBadge={showCategoryBadge}
                 isAdmin={isAdmin}
@@ -431,17 +613,8 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
               />
             );
           })}
-
-          {bottomSpacer > 0 && (
-            <tr aria-hidden="true" className="border-0 pointer-events-none">
-              <td
-                colSpan={9}
-                style={{ height: bottomSpacer, padding: 0, border: 0 }}
-              />
-            </tr>
-          )}
-        </tbody>
-      </table>
+        </div>
+      </div>
     </div>
   );
 };

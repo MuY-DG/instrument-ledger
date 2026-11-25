@@ -47,6 +47,12 @@ import {
 import { cn } from "@/lib/utils";
 import { OnboardingSetup } from "@/components/OnboardingSetup";
 import { VirtualInstrumentTable } from "@/components/VirtualInstrumentTable";
+import {
+  DEFAULT_PAGE_SIZE,
+  TablePagination,
+  parseStoredPageSize,
+  type PageSizeOption,
+} from "@/components/TablePagination";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { ReportModal } from "@/components/ReportModal";
 import { InstrumentDrawer } from "@/components/InstrumentDrawer";
@@ -119,6 +125,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const THEME_KEY = "instrument_ledger_theme";
+const PAGE_SIZE_KEY = "instrument_ledger_page_size";
 const ALERT_MUTED_DATE_KEY = "instrument_ledger_alert_muted_date";
 const ALERT_LAST_SHOWN_DATE_KEY = "instrument_ledger_alert_last_shown_date";
 const ALERT_LAST_SHOWN_TS_KEY = "instrument_ledger_alert_last_shown_ts";
@@ -192,6 +199,10 @@ export default function App() {
   const [calTypeFilter, setCalTypeFilter] = useState("all");
   const [sortMode, setSortMode] = useState<SortMode>("seq");
   const [searchQuery, setSearchQuery] = useState("");
+  const [pageSize, setPageSize] = useState<PageSizeOption>(() =>
+    parseStoredPageSize(readStorage(PAGE_SIZE_KEY))
+  );
+  const [currentPage, setCurrentPage] = useState(1);
 
   // Modals / Drawers / Overlays
   const [commandOpen, setCommandOpen] = useState(false);
@@ -840,6 +851,65 @@ export default function App() {
 
   const deferredFilteredInstruments = useDeferredValue(filteredInstruments);
 
+  // Reset to page 1 when category, filter, sort, or search query changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [
+    activeTab,
+    statusFilter,
+    expiryFilter,
+    deptFilter,
+    calTypeFilter,
+    sortMode,
+    deferredSearchQuery,
+  ]);
+
+  const isShowAll = pageSize === "all";
+  const totalFilteredCount = deferredFilteredInstruments.length;
+  const totalPages = isShowAll
+    ? 1
+    : Math.max(1, Math.ceil(totalFilteredCount / pageSize));
+  const safePage = isShowAll ? 1 : Math.min(currentPage, totalPages);
+  const pageStartIndex = isShowAll ? 0 : (safePage - 1) * pageSize;
+
+  useEffect(() => {
+    if (!isShowAll && currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [isShowAll, currentPage, totalPages]);
+
+  const pagedInstruments = useMemo(() => {
+    if (isShowAll) return deferredFilteredInstruments;
+    return deferredFilteredInstruments.slice(
+      pageStartIndex,
+      pageStartIndex + pageSize
+    );
+  }, [deferredFilteredInstruments, isShowAll, pageStartIndex, pageSize]);
+
+  // "全部" mode activates the refactored virtual engine (> 50 rows);
+  // numeric pages (30/50/100) render natively with zero flash, while 200/page
+  // automatically engages virtualization if > 120 rows are present.
+  const virtualizeThreshold = isShowAll ? 50 : 120;
+  const isVirtualActive = pagedInstruments.length > virtualizeThreshold;
+  const pageRangeStart = totalFilteredCount > 0 ? pageStartIndex + 1 : 0;
+  const pageRangeEnd = isShowAll
+    ? totalFilteredCount
+    : Math.min(totalFilteredCount, pageStartIndex + pagedInstruments.length);
+
+  const handlePageSizeChange = useCallback(
+    (nextSize: PageSizeOption) => {
+      if (pageSize !== "all" && nextSize !== "all") {
+        const anchorIndex = (safePage - 1) * pageSize;
+        setCurrentPage(Math.floor(anchorIndex / nextSize) + 1);
+      } else {
+        setCurrentPage(1);
+      }
+      writeStorage(PAGE_SIZE_KEY, String(nextSize));
+      setPageSize(nextSize);
+    },
+    [pageSize, safePage]
+  );
+
   const handleAppReset = useCallback((res: ResetAppResult) => {
     clearMediaCache();
     setSettingsModalOpen(false);
@@ -865,6 +935,9 @@ export default function App() {
     setCalTypeFilter("all");
     setSearchQuery("");
     setSortMode("seq");
+    setPageSize(DEFAULT_PAGE_SIZE);
+    setCurrentPage(1);
+    writeStorage(PAGE_SIZE_KEY, "");
     writeStorage(ALERT_MUTED_DATE_KEY, "");
     writeStorage(ALERT_LAST_SHOWN_DATE_KEY, "");
     writeStorage(ALERT_LAST_SHOWN_TS_KEY, "");
@@ -2099,14 +2172,17 @@ export default function App() {
               </div>
             ) : (
               <VirtualInstrumentTable
-                items={deferredFilteredInstruments}
+                items={pagedInstruments}
                 statusById={statusById}
                 activeTab={activeTab}
                 isAdmin={auth.isAdmin}
                 activeInstrumentId={
                   drawerOpen ? (editingInstrument?.id ?? null) : null
                 }
-                resetScrollKey={`${activeTab}|${statusFilter}|${expiryFilter}|${deptFilter}|${calTypeFilter}|${sortMode}`}
+                rowOffset={pageStartIndex}
+                virtualize={isShowAll || pagedInstruments.length > 120}
+                virtualizeThreshold={virtualizeThreshold}
+                resetScrollKey={`${activeTab}|${statusFilter}|${expiryFilter}|${deptFilter}|${calTypeFilter}|${sortMode}|${pageSize}|${safePage}`}
                 onView={openViewDrawer}
                 onEdit={openEditDrawer}
                 onDelete={handleDelete}
@@ -2115,21 +2191,36 @@ export default function App() {
               />
             )}
 
-            {/* Minimalist Desktop Status Bar */}
-            <footer className="h-8 px-6 border-t border-zinc-200/80 dark:border-white/[0.07] bg-zinc-50/70 dark:bg-[#0c0c0f] flex items-center justify-between text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0 select-none">
-              <div className="flex items-center gap-2 font-mono tabular-nums">
-                <span>
-                  共 {filteredInstruments.length} / {categoryScoped.length} 项
+            {/* Minimalist Desktop Status Bar & Pagination */}
+            <footer className="h-11 px-6 border-t border-zinc-200/80 dark:border-white/[0.07] bg-zinc-50/75 dark:bg-[#0c0c0f] flex items-center justify-between gap-4 text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0 select-none">
+              <div className="flex items-center gap-2 font-mono tabular-nums min-w-0">
+                <span className="truncate">
+                  {!isShowAll && totalFilteredCount > 0
+                    ? `第 ${pageRangeStart}–${pageRangeEnd} 项 · 共 ${totalFilteredCount} / ${categoryScoped.length} 项`
+                    : `共 ${totalFilteredCount} / ${categoryScoped.length} 项`}
                 </span>
                 <InfoTip
                   placement="top"
                   content="下次校验日期自动按「上次校验 + 周期(月) - 1天」计算"
                 />
               </div>
-              <div className="hidden md:flex items-center gap-3">
-                <span>⌘K 检索</span>
-                <span className="text-zinc-300 dark:text-zinc-700">·</span>
-                <span>⌘L 锁屏</span>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <TablePagination
+                  currentPage={safePage}
+                  totalPages={totalPages}
+                  totalItems={totalFilteredCount}
+                  pageSize={pageSize}
+                  isVirtualActive={isVirtualActive}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={handlePageSizeChange}
+                />
+
+                <div className="hidden xl:flex items-center gap-2.5 pl-2.5 border-l border-zinc-200/80 dark:border-white/[0.07]">
+                  <span>⌘K 检索</span>
+                  <span className="text-zinc-300 dark:text-zinc-700">·</span>
+                  <span>⌘L 锁屏</span>
+                </div>
               </div>
             </footer>
           </div>

@@ -17,12 +17,31 @@ import type {
   UpdateCheckResult,
 } from "@/types";
 
+const MAX_MEDIA_CACHE_ENTRIES = 120;
 const mediaDataUrlCache = new Map<string, string>();
 const mediaInFlight = new Map<string, Promise<string>>();
 
+function setCachedMediaDataUrl(relPath: string, url: string) {
+  if (mediaDataUrlCache.has(relPath)) {
+    mediaDataUrlCache.delete(relPath);
+  }
+  mediaDataUrlCache.set(relPath, url);
+  if (mediaDataUrlCache.size > MAX_MEDIA_CACHE_ENTRIES) {
+    const oldestKey = mediaDataUrlCache.keys().next().value;
+    if (oldestKey !== undefined) {
+      mediaDataUrlCache.delete(oldestKey);
+    }
+  }
+}
+
 export function getCachedImageDataUrl(relPath: string): string {
   if (!relPath) return "";
-  return mediaDataUrlCache.get(relPath) || "";
+  const hit = mediaDataUrlCache.get(relPath);
+  if (!hit) return "";
+  // Refresh LRU recency
+  mediaDataUrlCache.delete(relPath);
+  mediaDataUrlCache.set(relPath, hit);
+  return hit;
 }
 
 export function clearMediaCache() {
@@ -135,7 +154,7 @@ export const api = {
 
   async getStoredImageDataUrl(relPath: string): Promise<string> {
     if (!relPath) return "";
-    const cached = mediaDataUrlCache.get(relPath);
+    const cached = getCachedImageDataUrl(relPath);
     if (cached) return cached;
     const inflight = mediaInFlight.get(relPath);
     if (inflight) return inflight;
@@ -145,7 +164,7 @@ export const api = {
     })
       .then((payload) => {
         const url = `data:${payload.mime};base64,${payload.base64}`;
-        mediaDataUrlCache.set(relPath, url);
+        setCachedMediaDataUrl(relPath, url);
         mediaInFlight.delete(relPath);
         return url;
       })
