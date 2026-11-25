@@ -924,7 +924,7 @@ export default function App() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 6 }}
                     onClick={() => setUpdatePopupOpen(true)}
-                    className="w-full px-2.5 py-2 rounded-xl bg-indigo-500/[0.08] hover:bg-indigo-500/[0.14] dark:bg-indigo-500/[0.14] dark:hover:bg-indigo-500/[0.2] border border-indigo-500/25 flex items-center justify-between gap-2 text-left transition"
+                    className="w-full px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-zinc-200/90 dark:border-white/[0.1] shadow-hairline flex items-center justify-between gap-2 text-left transition"
                     title="点击查看并一键安装新版本"
                   >
                     <span className="flex items-center gap-2 min-w-0">
@@ -932,14 +932,14 @@ export default function App() {
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
                       </span>
-                      <span className="text-[11.5px] font-medium text-indigo-700 dark:text-indigo-200 truncate">
+                      <span className="text-[11.5px] font-medium text-zinc-800 dark:text-zinc-100 truncate">
                         新版本{" "}
-                        <span className="font-mono font-semibold">
+                        <span className="font-mono font-semibold text-zinc-950 dark:text-white">
                           v{availableUpdate.latestVersion}
                         </span>
                       </span>
                     </span>
-                    <span className="inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-indigo-600 dark:text-indigo-300 shrink-0">
+                    <span className="inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-sky-600 dark:text-sky-400 shrink-0">
                       <span>{updatingApp ? "更新中" : "更新"}</span>
                       <ChevronRight className="h-3 w-3" />
                     </span>

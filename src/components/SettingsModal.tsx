@@ -3,24 +3,31 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  AlertCircle,
   Archive,
+  ArrowRight,
   CheckCircle2,
+  ChevronDown,
   CloudDownload,
   ExternalLink,
+  FileText,
   FolderOpen,
   HardDrive,
   Image as ImageIcon,
   KeyRound,
+  Loader2,
   RefreshCw,
   RotateCcw,
   Save,
   Settings,
   Shield,
+  ShieldCheck,
   Trash2,
   X,
 } from "lucide-react";
 import { api, clearMediaCache } from "@/lib/api";
 import { formatFileSize, getTodayStr } from "@/lib/status";
+import { MarkdownNotes } from "@/components/MarkdownNotes";
 import type {
   AppSettings,
   DataDirInfo,
@@ -48,6 +55,11 @@ interface SettingsModalProps {
 
 const INPUT_CLS =
   "w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition";
+
+function formatPublishDate(raw: string): string {
+  const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : "";
+}
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   openModal,
@@ -95,6 +107,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(availableUpdate);
   const [updateError, setUpdateError] = useState("");
+  const [showSourceConfig, setShowSourceConfig] = useState(!availableUpdate?.hasUpdate);
 
   useEffect(() => {
     if (!openModal) return;
@@ -115,6 +128,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setUpdateError("");
     if (availableUpdate) {
       setUpdateResult(availableUpdate);
+      setShowSourceConfig(!availableUpdate.hasUpdate);
+    } else {
+      setShowSourceConfig(true);
     }
 
     api.getDataDirInfo().then(setDirInfo).catch(() => {});
@@ -269,7 +285,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       const res = await api.checkForUpdates(githubRepo, updateProxyUrl);
       setUpdateResult(res);
       onUpdateDetected?.(res);
-      if (!res.hasUpdate) {
+      if (res.hasUpdate) {
+        setShowSourceConfig(false);
+      } else {
         onNotify(`当前已是最新版本 v${res.currentVersion}`, "success");
       }
     } catch (err) {
@@ -357,7 +375,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       }`}
                     >
                       {t.icon}
-                      <span>{t.label}</span>
+                      <span className="flex-1 text-left">{t.label}</span>
+                      {t.id === "update" && (availableUpdate?.hasUpdate || updateResult?.hasUpdate) && (
+                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+                      )}
                     </button>
                   ))}
               </div>
@@ -692,21 +713,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
 
                 {tab === "update" && (
-                  <div className="space-y-5">
-                    <div className="p-4 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
-                      <div>
-                        <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                          当前安装版本
+                  <div className="space-y-4">
+                    {/* Installed Version Hero Bar */}
+                    <div className="p-4 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3.5 min-w-0">
+                        <div className="h-10 w-10 rounded-xl bg-white dark:bg-white/[0.06] border border-zinc-200/80 dark:border-white/[0.09] shadow-hairline flex items-center justify-center text-zinc-700 dark:text-zinc-200 shrink-0">
+                          <CloudDownload className="h-4 w-4" />
                         </div>
-                        <div className="text-lg font-semibold font-mono tabular-nums text-zinc-950 dark:text-white mt-0.5">
-                          v{dirInfo?.appVersion || "1.2.0"}
+                        <div className="min-w-0">
+                          <div className="text-[11.5px] text-zinc-500 dark:text-zinc-400">
+                            当前安装版本
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                            <span className="text-lg font-semibold font-mono tabular-nums text-zinc-950 dark:text-white leading-none">
+                              v{dirInfo?.appVersion || "1.2.1"}
+                            </span>
+                            {updateResult?.hasUpdate ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-[11px] font-medium text-sky-700 dark:text-sky-300">
+                                <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+                                可更新至 v{updateResult.latestVersion}
+                              </span>
+                            ) : updateResult && !updateResult.hasUpdate ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                已是最新
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                       <button
                         type="button"
-                        disabled={checkingUpdate}
+                        disabled={checkingUpdate || updatingApp}
                         onClick={handleCheckUpdate}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition shrink-0"
                       >
                         <RefreshCw
                           className={`h-3.5 w-3.5 ${checkingUpdate ? "animate-spin" : ""}`}
@@ -715,147 +755,136 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </button>
                     </div>
 
-                    {isAdmin && (
-                      <div className="p-4 rounded-xl border border-zinc-200/80 dark:border-white/[0.08] space-y-3">
-                        <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                          GitHub Releases 更新源配置
-                        </div>
-                        <div className="grid grid-cols-1 gap-3">
-                          <div>
-                            <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                              GitHub 仓库（格式：用户名/仓库名）
-                            </label>
-                            <input
-                              type="text"
-                              value={githubRepo}
-                              onChange={(e) => setGithubRepo(e.target.value)}
-                              placeholder="例如：MuY-DG/instrument-ledger"
-                              className={`${INPUT_CLS} font-mono text-xs`}
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                              下载加速代理前缀（选填，国内网络直连较慢时填写）
-                            </label>
-                            <input
-                              type="text"
-                              value={updateProxyUrl}
-                              onChange={(e) => setUpdateProxyUrl(e.target.value)}
-                              placeholder="例如：https://gh-proxy.com/（留空则直连 GitHub）"
-                              className={`${INPUT_CLS} font-mono text-xs`}
-                            />
-                            <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                              默认使用 <span className="font-mono">https://gh-proxy.com/</span>，可按需修改（如{" "}
-                              <span className="font-mono">https://ghfast.top/</span>、{" "}
-                              <span className="font-mono">https://gh-proxy.org/</span>）或清空以直连 GitHub；若代理不可用将自动回退直连。
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex justify-end">
-                          <button
-                            type="button"
-                            onClick={() => handleSaveGeneral()}
-                            className="px-3.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] hover:bg-zinc-50 dark:hover:bg-white/[0.06] text-zinc-800 dark:text-zinc-200 text-xs font-medium transition"
-                          >
-                            保存更新源
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
+                    {/* Error Notice */}
                     {updateError && (
-                      <div className="p-3.5 rounded-xl bg-rose-500/[0.08] border border-rose-500/20 text-xs text-rose-600 dark:text-rose-400">
-                        {updateError}
+                      <div className="px-4 py-3 rounded-xl bg-rose-500/[0.06] border border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 flex items-start gap-2.5 leading-relaxed">
+                        <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                        <span>{updateError}</span>
                       </div>
                     )}
 
-                    {updateResult && (
-                      <div
-                        className={`p-5 rounded-xl border space-y-3 ${
-                          updateResult.hasUpdate
-                            ? "bg-indigo-500/[0.05] border-indigo-500/25"
-                            : "bg-emerald-500/[0.05] border-emerald-500/25"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            {updateResult.hasUpdate ? (
-                              <CloudDownload className="h-4.5 w-4.5 text-indigo-500" />
-                            ) : (
-                              <CheckCircle2 className="h-4.5 w-4.5 text-emerald-500" />
-                            )}
-                            <span className="text-sm font-semibold text-zinc-900 dark:text-white">
-                              {updateResult.hasUpdate
-                                ? `发现新版本 v${updateResult.latestVersion}`
-                                : `已是最新版本 v${updateResult.currentVersion}`}
-                            </span>
+                    {/* Update Available / Up-to-date Result Card */}
+                    {updateResult && updateResult.hasUpdate && (
+                      <div className="rounded-2xl border border-zinc-200/90 dark:border-white/[0.1] bg-white dark:bg-[#16161a] shadow-surface overflow-hidden">
+                        {/* Release Header */}
+                        <div className="px-5 py-4 border-b border-zinc-200/75 dark:border-white/[0.07] bg-zinc-50/70 dark:bg-white/[0.02] flex items-start justify-between gap-3">
+                          <div className="min-w-0 space-y-1">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
+                                发现新版本
+                              </span>
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-white/[0.07] border border-zinc-200/80 dark:border-white/[0.08] font-mono text-[11px] text-zinc-600 dark:text-zinc-300 tabular-nums">
+                                <span>v{updateResult.currentVersion}</span>
+                                <ArrowRight className="h-3 w-3 text-zinc-400" />
+                                <span className="font-semibold text-sky-700 dark:text-sky-300">
+                                  v{updateResult.latestVersion}
+                                </span>
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 flex-wrap">
+                              {formatPublishDate(updateResult.publishedAt) && (
+                                <span className="font-mono tabular-nums">
+                                  发布于 {formatPublishDate(updateResult.publishedAt)}
+                                </span>
+                              )}
+                              {formatPublishDate(updateResult.publishedAt) &&
+                                updateResult.assetName && (
+                                  <span className="text-zinc-300 dark:text-zinc-700">·</span>
+                                )}
+                              {updateResult.assetName && (
+                                <span className="font-mono truncate max-w-[300px]" title={updateResult.assetName}>
+                                  {updateResult.assetName}
+                                </span>
+                              )}
+                            </div>
                           </div>
+
                           {updateResult.htmlUrl && (
                             <button
                               type="button"
                               onClick={() => openUrl(updateResult.htmlUrl)}
-                              className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/90 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] text-[11.5px] font-medium text-zinc-600 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white transition shrink-0"
                             >
                               <span>查看 Release</span>
-                              <ExternalLink className="h-3.5 w-3.5" />
+                              <ExternalLink className="h-3 w-3" />
                             </button>
                           )}
                         </div>
 
-                        {updateResult.releaseNotes && (
-                          <pre className="text-xs text-zinc-700 dark:text-zinc-300 bg-white/80 dark:bg-black/30 p-3 rounded-lg border border-zinc-200/80 dark:border-white/[0.08] whitespace-pre-wrap font-sans max-h-36 overflow-y-auto">
-                            {updateResult.releaseNotes}
-                          </pre>
-                        )}
+                        {/* Rendered Markdown Release Notes */}
+                        <div className="px-5 py-4 space-y-2.5">
+                          <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
+                            <FileText className="h-3.5 w-3.5" />
+                            <span>更新内容</span>
+                          </div>
+                          {updateResult.releaseNotes.trim() ? (
+                            <div className="rounded-xl bg-zinc-50/75 dark:bg-white/[0.025] border border-zinc-200/70 dark:border-white/[0.06] px-4 py-3.5 max-h-60 overflow-y-auto">
+                              <MarkdownNotes content={updateResult.releaseNotes} />
+                            </div>
+                          ) : (
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 rounded-xl bg-zinc-50/75 dark:bg-white/[0.025] border border-zinc-200/70 dark:border-white/[0.06] px-4 py-3">
+                              包含功能改进与稳定性优化，升级过程会自动保留本地台账数据与附件。
+                            </p>
+                          )}
+                        </div>
 
-                        {updateResult.hasUpdate && (
-                          <div className="space-y-2.5 pt-1">
-                            {updatingApp && updateProgress && (
-                              <div className="space-y-1.5">
-                                <div className="flex justify-between gap-2 text-[11px] text-zinc-500 font-mono tabular-nums">
-                                  <span className="truncate font-sans text-indigo-700 dark:text-indigo-300 font-medium">
-                                    {updateProgress.message || `正在下载 ${updateResult.assetName}...`}
-                                  </span>
-                                  <span className="shrink-0">
-                                    {updateProgress.phase === "installing" ||
-                                    updateProgress.phase === "restarting"
-                                      ? "100%"
-                                      : updateProgress.total > 0
-                                        ? `${formatFileSize(updateProgress.downloaded)} / ${formatFileSize(updateProgress.total)} (${Math.round(updateProgress.percent)}%)`
-                                        : updateProgress.downloaded > 0
-                                          ? formatFileSize(updateProgress.downloaded)
-                                          : "..."}
-                                  </span>
-                                </div>
-                                <div className="h-1.5 rounded-full bg-zinc-200 dark:bg-white/10 overflow-hidden">
-                                  {updateProgress.total > 0 ||
-                                  updateProgress.phase === "installing" ||
-                                  updateProgress.phase === "restarting" ? (
-                                    <div
-                                      className="h-full bg-indigo-500 transition-all duration-150"
-                                      style={{
-                                        width: `${
-                                          updateProgress.phase === "installing" ||
-                                          updateProgress.phase === "restarting"
-                                            ? 100
-                                            : updateProgress.percent
-                                        }%`,
-                                      }}
-                                    />
-                                  ) : (
-                                    <div className="h-full w-1/3 bg-indigo-500 rounded-full animate-pulse" />
-                                  )}
-                                </div>
+                        {/* Download Progress & Action Footer */}
+                        <div className="px-5 py-3.5 border-t border-zinc-200/75 dark:border-white/[0.07] bg-zinc-50/50 dark:bg-white/[0.015] space-y-3">
+                          {updatingApp && updateProgress && (
+                            <div className="space-y-1.5">
+                              <div className="flex justify-between gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 font-mono tabular-nums">
+                                <span className="truncate font-sans text-zinc-700 dark:text-zinc-200 font-medium">
+                                  {updateProgress.message || `正在下载 ${updateResult.assetName}...`}
+                                </span>
+                                <span className="shrink-0">
+                                  {updateProgress.phase === "installing" ||
+                                  updateProgress.phase === "restarting"
+                                    ? "100%"
+                                    : updateProgress.total > 0
+                                      ? `${formatFileSize(updateProgress.downloaded)} / ${formatFileSize(updateProgress.total)} (${Math.round(updateProgress.percent)}%)`
+                                      : updateProgress.downloaded > 0
+                                        ? formatFileSize(updateProgress.downloaded)
+                                        : "..."}
+                                </span>
                               </div>
-                            )}
+                              <div className="h-1.5 rounded-full bg-zinc-200/90 dark:bg-white/10 overflow-hidden">
+                                {updateProgress.total > 0 ||
+                                updateProgress.phase === "installing" ||
+                                updateProgress.phase === "restarting" ? (
+                                  <div
+                                    className="h-full rounded-full bg-sky-500 transition-all duration-150"
+                                    style={{
+                                      width: `${
+                                        updateProgress.phase === "installing" ||
+                                        updateProgress.phase === "restarting"
+                                          ? 100
+                                          : updateProgress.percent
+                                      }%`,
+                                    }}
+                                  />
+                                ) : (
+                                  <div className="h-full w-1/3 bg-sky-500 rounded-full animate-pulse" />
+                                )}
+                              </div>
+                            </div>
+                          )}
 
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <span className="inline-flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400">
+                              <ShieldCheck className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                              <span>自动校验 Ed25519 签名 · 保留本地台账与附件</span>
+                            </span>
                             <button
                               type="button"
                               disabled={updatingApp}
                               onClick={handleDownloadUpdate}
-                              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold transition"
+                              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
                             >
-                              <CloudDownload className="h-3.5 w-3.5" />
+                              {updatingApp ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <CloudDownload className="h-3.5 w-3.5" />
+                              )}
                               <span>
                                 {updateProgress?.phase === "restarting"
                                   ? "安装完成，正在重启..."
@@ -863,9 +892,105 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                     ? "正在校验签名并安装..."
                                     : updatingApp
                                       ? "正在下载更新包..."
-                                      : `立即下载并重启更新 (${updateResult.assetName || "新版"})`}
+                                      : "立即更新并重启"}
                               </span>
                             </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {updateResult && !updateResult.hasUpdate && (
+                      <div className="px-4 py-3.5 rounded-xl bg-emerald-500/[0.04] dark:bg-emerald-500/[0.06] border border-emerald-500/20 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                          <div className="text-xs text-zinc-700 dark:text-zinc-200">
+                            当前已是最新版本{" "}
+                            <span className="font-mono font-semibold text-zinc-950 dark:text-white">
+                              v{updateResult.currentVersion}
+                            </span>
+                            ，无需更新。
+                          </div>
+                        </div>
+                        {updateResult.htmlUrl && (
+                          <button
+                            type="button"
+                            onClick={() => openUrl(updateResult.htmlUrl)}
+                            className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition shrink-0"
+                          >
+                            <span>查看 Release</span>
+                            <ExternalLink className="h-3 w-3" />
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Collapsible Admin Update Source Config */}
+                    {isAdmin && (
+                      <div className="rounded-xl border border-zinc-200/80 dark:border-white/[0.08] bg-white dark:bg-white/[0.015] overflow-hidden">
+                        <button
+                          type="button"
+                          onClick={() => setShowSourceConfig((prev) => !prev)}
+                          className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-zinc-50/80 dark:hover:bg-white/[0.03] transition"
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 shrink-0">
+                              更新源与加速代理配置
+                            </span>
+                            <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500 truncate">
+                              {githubRepo || "未配置仓库"}
+                              {updateProxyUrl.trim() ? " · 代理加速" : " · 直连"}
+                            </span>
+                          </div>
+                          <ChevronDown
+                            className={`h-4 w-4 text-zinc-400 shrink-0 transition-transform duration-200 ${
+                              showSourceConfig ? "rotate-180" : ""
+                            }`}
+                          />
+                        </button>
+
+                        {showSourceConfig && (
+                          <div className="px-4 pb-4 pt-3 border-t border-zinc-200/70 dark:border-white/[0.07] space-y-3">
+                            <div className="grid grid-cols-1 gap-3">
+                              <div>
+                                <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                                  GitHub 仓库（格式：用户名/仓库名）
+                                </label>
+                                <input
+                                  type="text"
+                                  value={githubRepo}
+                                  onChange={(e) => setGithubRepo(e.target.value)}
+                                  placeholder="例如：MuY-DG/instrument-ledger"
+                                  className={`${INPUT_CLS} font-mono text-xs`}
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                                  下载加速代理前缀（选填，国内网络直连较慢时填写）
+                                </label>
+                                <input
+                                  type="text"
+                                  value={updateProxyUrl}
+                                  onChange={(e) => setUpdateProxyUrl(e.target.value)}
+                                  placeholder="例如：https://gh-proxy.com/（留空则直连 GitHub）"
+                                  className={`${INPUT_CLS} font-mono text-xs`}
+                                />
+                                <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                                  默认使用 <span className="font-mono">https://gh-proxy.com/</span>，可按需修改（如{" "}
+                                  <span className="font-mono">https://ghfast.top/</span>、{" "}
+                                  <span className="font-mono">https://gh-proxy.org/</span>）或清空以直连 GitHub；若代理不可用将自动回退直连。
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex justify-end">
+                              <button
+                                type="button"
+                                onClick={() => handleSaveGeneral()}
+                                className="px-3.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] hover:bg-zinc-50 dark:hover:bg-white/[0.06] text-zinc-800 dark:text-zinc-200 text-xs font-medium transition"
+                              >
+                                保存更新源
+                              </button>
+                            </div>
                           </div>
                         )}
                       </div>

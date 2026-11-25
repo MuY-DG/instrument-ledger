@@ -49,6 +49,7 @@ jobs:
         run: |
           pnpm build
           pnpm test:excel
+          pnpm test:markdown
 
       - name: Rust unit tests
         shell: bash

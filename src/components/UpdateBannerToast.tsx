@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { formatFileSize } from "@/lib/status";
+import { MarkdownNotes } from "@/components/MarkdownNotes";
 import type { UpdateCheckResult, UpdateDownloadProgress } from "@/types";
 
 interface UpdateBannerToastProps {
@@ -51,13 +52,13 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
           aria-live="polite"
         >
           {/* Subtle top accent hairline */}
-          <div className="h-[2px] w-full bg-gradient-to-r from-indigo-500 via-sky-500 to-emerald-400" />
+          <div className="h-[2px] w-full bg-gradient-to-r from-sky-500/80 via-cyan-400/70 to-emerald-400/70" />
 
           <div className="p-4 space-y-3">
             {/* Header */}
             <div className="flex items-start justify-between gap-2.5">
               <div className="flex items-start gap-2.5 min-w-0">
-                <div className="mt-0.5 h-8 w-8 rounded-xl bg-indigo-500/10 dark:bg-indigo-400/15 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                <div className="mt-0.5 h-8 w-8 rounded-xl bg-zinc-100 dark:bg-white/[0.07] border border-zinc-200/80 dark:border-white/[0.1] text-zinc-900 dark:text-white flex items-center justify-center shrink-0">
                   {updating ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : (
@@ -69,7 +70,7 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
                     <span className="text-[13px] font-semibold text-zinc-950 dark:text-white tracking-tight">
                       发现新版本
                     </span>
-                    <span className="px-1.5 py-0.5 rounded-md bg-indigo-500/12 text-indigo-600 dark:text-indigo-300 font-mono text-[11px] font-semibold">
+                    <span className="px-1.5 py-0.5 rounded-md bg-sky-500/10 border border-sky-500/20 text-sky-700 dark:text-sky-300 font-mono text-[11px] font-semibold">
                       v{update.latestVersion}
                     </span>
                   </div>
@@ -91,18 +92,18 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
               )}
             </div>
 
-            {/* Release Notes Preview */}
+            {/* Rendered Markdown Release Notes Preview */}
             {update.releaseNotes.trim() && !updating && (
-              <div className="rounded-xl bg-zinc-50 dark:bg-white/[0.04] border border-zinc-200/75 dark:border-white/[0.07] px-3 py-2 text-[11.5px] leading-relaxed text-zinc-600 dark:text-zinc-300 max-h-24 overflow-y-auto whitespace-pre-wrap">
-                {update.releaseNotes.trim()}
+              <div className="rounded-xl bg-zinc-50/90 dark:bg-white/[0.035] border border-zinc-200/75 dark:border-white/[0.07] px-3 py-2.5 max-h-32 overflow-y-auto">
+                <MarkdownNotes content={update.releaseNotes} compact />
               </div>
             )}
 
             {/* Live Progress Bar when Updating */}
             {updating && (
-              <div className="space-y-1.5 rounded-xl bg-indigo-500/[0.05] dark:bg-indigo-500/[0.08] border border-indigo-500/20 px-3 py-2.5">
+              <div className="space-y-1.5 rounded-xl bg-zinc-50 dark:bg-white/[0.04] border border-zinc-200/80 dark:border-white/[0.08] px-3 py-2.5">
                 <div className="flex items-center justify-between gap-2 text-[11px]">
-                  <span className="text-indigo-700 dark:text-indigo-300 font-medium truncate">
+                  <span className="text-zinc-700 dark:text-zinc-200 font-medium truncate">
                     {progress?.message || "正在连接更新源..."}
                   </span>
                   <span className="font-mono tabular-nums text-zinc-500 dark:text-zinc-400 shrink-0">
@@ -121,10 +122,10 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
                       initial={false}
                       animate={{ width: `${isInstallingOrRestarting ? 100 : pct}%` }}
                       transition={{ duration: 0.2, ease: "easeOut" }}
-                      className="h-full rounded-full bg-indigo-500"
+                      className="h-full rounded-full bg-sky-500"
                     />
                   ) : (
-                    <div className="h-full w-1/3 rounded-full bg-indigo-500 animate-pulse" />
+                    <div className="h-full w-1/3 rounded-full bg-sky-500 animate-pulse" />
                   )}
                 </div>
                 {hasKnownTotal && !isInstallingOrRestarting && progress && (
