@@ -97,7 +97,7 @@ pnpm tauri build --target universal-apple-darwin --bundles dmg  # macOS 通用 .
    - `src-tauri/Cargo.toml` → `version`
 2. 创建带分类更新说明的附注标签（按 `### 新功能` / `### 改进` / `### 修复` 编写）并推送，Release 页面与软件内更新弹窗将直接展示该更新日志（若使用轻量标签，流水线会自动按提交记录分类生成）：
    ```bash
-   git tag -a v1.3.0 -m $'### 新功能\n\n- ...\n\n### 改进\n\n- ...\n\n### 修复\n\n- ...'
+   git tag -a --cleanup=verbatim v1.3.0 -m $'### 新功能\n\n- ...\n\n### 改进\n\n- ...\n\n### 修复\n\n- ...'
    git push origin v1.3.0
    ```
 3. 前往仓库的 **Actions** 页面等待构建完成（约 8~14 分钟），构建完成后即可在 **Releases** 页面同时下载：
