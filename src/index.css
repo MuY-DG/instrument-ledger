@@ -48,6 +48,13 @@
   background-size: 48px 48px;
 }
 
+.bg-precision-grid-light {
+  background-image:
+    linear-gradient(to right, rgba(24, 24, 27, 0.04) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(24, 24, 27, 0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
 .bg-precision-grid-fine {
   background-image:
     linear-gradient(to right, rgba(255, 255, 255, 0.018) 1px, transparent 1px),

@@ -47,7 +47,7 @@ interface CommandPaletteProps {
   onExportAll: () => void;
   onPrint: () => void;
   onLock: () => void;
-  onOpenSettings: (tab: "general" | "alerts" | "security" | "backup" | "update") => void;
+  onOpenSettings: (tab: "general" | "window" | "alerts" | "security" | "backup" | "update") => void;
   onToggleTheme: () => void;
   onLoginOrLogout: () => void;
 }

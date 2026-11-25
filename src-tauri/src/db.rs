@@ -101,6 +101,7 @@ pub fn init_db(db_path: &Path) -> Result<Connection, String> {
 pub const DEFAULT_GITHUB_REPO: &str = "MuY-DG/instrument-ledger";
 pub const DEFAULT_UPDATE_PROXY_URL: &str = "https://gh-proxy.com/";
 pub const DEFAULT_ALERT_POPUP_FREQUENCY: &str = "every_open";
+pub const DEFAULT_CLOSE_BEHAVIOR: &str = "ask";
 
 pub fn default_warning_thresholds() -> Vec<WarningThreshold> {
     vec![
@@ -185,6 +186,24 @@ pub fn sanitize_popup_frequency(raw: &str) -> String {
     }
 }
 
+pub fn sanitize_close_behavior(raw: &str) -> String {
+    match raw.trim() {
+        "ask" | "minimize_to_tray" | "exit" => raw.trim().to_string(),
+        _ => DEFAULT_CLOSE_BEHAVIOR.to_string(),
+    }
+}
+
+pub fn is_app_lock_configured(conn: &Connection) -> Result<(bool, usize), String> {
+    let enabled = get_setting(conn, "app_lock_enabled")?.as_deref() == Some("1");
+    let pin_hash = get_setting(conn, "app_lock_pin_hash")?.unwrap_or_default();
+    let pin_len = get_setting(conn, "app_lock_pin_length")?
+        .and_then(|s| s.parse::<usize>().ok())
+        .filter(|n| (4..=6).contains(n))
+        .unwrap_or(0);
+    let ready = enabled && !pin_hash.trim().is_empty() && pin_len >= 4;
+    Ok((ready, if ready { pin_len } else { 0 }))
+}
+
 fn seed_default_settings(conn: &Connection) -> Result<(), String> {
     let default_thresholds_json = serde_json::to_string(&default_warning_thresholds())
         .map_err(|e| format!("序列化默认预警阈值失败: {}", e))?;
@@ -195,6 +214,15 @@ fn seed_default_settings(conn: &Connection) -> Result<(), String> {
         ("alert_popup_frequency", DEFAULT_ALERT_POPUP_FREQUENCY),
         ("alert_popup_interval_hours", "4"),
         ("auto_lock_minutes", "0"),
+        ("close_behavior", DEFAULT_CLOSE_BEHAVIOR),
+        ("keep_admin_session", "1"),
+        ("admin_session_active", "0"),
+        ("app_lock_enabled", "0"),
+        ("app_lock_pin_hash", ""),
+        ("app_lock_pin_length", "0"),
+        ("app_lock_active", "0"),
+        ("lock_on_hide", "0"),
+        ("lock_on_startup", "0"),
         ("doc_code", "JSSK-MPR-170"),
         ("doc_version", "A"),
         ("doc_title", "监视与测量管理台账"),
@@ -308,6 +336,11 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         .parse::<i64>()
         .unwrap_or(4)
         .clamp(1, 168);
+    let close_behavior = sanitize_close_behavior(&get_or("close_behavior", DEFAULT_CLOSE_BEHAVIOR));
+    let keep_admin_session = get_or("keep_admin_session", "1") != "0";
+    let (app_lock_enabled, app_lock_pin_length) = is_app_lock_configured(conn)?;
+    let lock_on_hide = get_or("lock_on_hide", "0") == "1";
+    let lock_on_startup = get_or("lock_on_startup", "0") == "1";
 
     Ok(AppSettings {
         admin_username: get_or("admin_username", ""),
@@ -317,6 +350,12 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         alert_popup_frequency,
         alert_popup_interval_hours,
         auto_lock_minutes: get_or("auto_lock_minutes", "0").parse().unwrap_or(0),
+        close_behavior,
+        keep_admin_session,
+        app_lock_enabled,
+        app_lock_pin_length,
+        lock_on_hide,
+        lock_on_startup,
         doc_code: get_or("doc_code", "JSSK-MPR-170"),
         doc_version: get_or("doc_version", "A"),
         doc_title: get_or("doc_title", "监视与测量管理台账"),
@@ -600,6 +639,41 @@ mod tests {
         assert_eq!(custom[0].label, "季度提醒");
         assert_eq!(custom[1].days, 7);
         assert_eq!(custom[1].label, "7天预警");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_window_tray_and_independent_app_lock_defaults() {
+        use crate::auth::hash_password;
+        let root = std::env::temp_dir().join(format!("inst_lock_test_{}", uuid::Uuid::new_v4()));
+        let db_path = root.join("ledger.db");
+
+        let conn = init_db(&db_path).expect("init_db failed");
+        let s1 = load_app_settings(&conn).unwrap();
+        assert_eq!(s1.close_behavior, "ask");
+        assert!(s1.keep_admin_session);
+        assert!(!s1.app_lock_enabled);
+        assert_eq!(s1.app_lock_pin_length, 0);
+        assert!(!s1.lock_on_hide);
+        assert!(!s1.lock_on_startup);
+
+        assert_eq!(sanitize_close_behavior("minimize_to_tray"), "minimize_to_tray");
+        assert_eq!(sanitize_close_behavior("exit"), "exit");
+        assert_eq!(sanitize_close_behavior("bogus"), "ask");
+
+        // Enabling app lock without hash must still report not configured
+        set_setting(&conn, "app_lock_enabled", "1").unwrap();
+        assert_eq!(is_app_lock_configured(&conn).unwrap(), (false, 0));
+
+        // Setting a valid PIN hash + length activates app lock
+        let pin_hash = hash_password("2580").unwrap();
+        set_setting(&conn, "app_lock_pin_hash", &pin_hash).unwrap();
+        set_setting(&conn, "app_lock_pin_length", "4").unwrap();
+        assert_eq!(is_app_lock_configured(&conn).unwrap(), (true, 4));
+        let s2 = load_app_settings(&conn).unwrap();
+        assert!(s2.app_lock_enabled);
+        assert_eq!(s2.app_lock_pin_length, 4);
 
         let _ = std::fs::remove_dir_all(&root);
     }

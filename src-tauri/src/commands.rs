@@ -1,19 +1,21 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use base64::Engine;
 use rusqlite::{params, Connection};
 use serde::Serialize;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
-use crate::auth::{hash_password, verify_password, SessionState};
+use crate::auth::{hash_password, validate_pin, verify_password, SessionState};
 use crate::backup::{create_backup, restore_backup};
 use crate::db::{
-    calc_next_cal_date, get_setting, is_account_initialized, load_app_settings, now_iso,
-    query_instrument_by_id, query_instruments, query_reports_for_instrument,
-    sanitize_popup_frequency, sanitize_warning_thresholds, set_setting,
+    calc_next_cal_date, get_setting, is_account_initialized, is_app_lock_configured,
+    load_app_settings, now_iso, query_instrument_by_id, query_instruments,
+    query_reports_for_instrument, sanitize_close_behavior, sanitize_popup_frequency,
+    sanitize_warning_thresholds, set_setting,
 };
 use crate::models::{
     AddReportInput, AppSettings, AuthStatus, BackupResult, CalibrationReport, DataDirInfo,
@@ -30,6 +32,7 @@ pub struct AppState {
     pub db: Mutex<Connection>,
     pub session: Mutex<SessionState>,
     pub pending_update: Mutex<Option<PendingUpdate>>,
+    pub allow_exit: AtomicBool,
     pub data_dir: PathBuf,
     pub db_path: PathBuf,
 }
@@ -56,25 +59,106 @@ fn check_admin(state: &State<'_, AppState>) -> Result<(), String> {
     session.require_admin()
 }
 
-// ---------------- Auth & Lock ----------------
-
-#[tauri::command]
-pub fn get_auth_status(state: State<'_, AppState>) -> Result<AuthStatus, String> {
-    let session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
-    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-    let initialized = is_account_initialized(&conn)?;
+pub fn build_auth_status(conn: &Connection, session: &SessionState) -> Result<AuthStatus, String> {
+    let initialized = is_account_initialized(conn)?;
     let username = if initialized {
-        get_setting(&conn, "admin_username")?.unwrap_or_default()
+        get_setting(conn, "admin_username")?.unwrap_or_default()
     } else {
         String::new()
+    };
+    let (app_lock_enabled, app_lock_pin_length) = if initialized {
+        is_app_lock_configured(conn)?
+    } else {
+        (false, 0)
     };
 
     Ok(AuthStatus {
         is_initialized: initialized,
         is_admin: initialized && session.is_admin,
         username,
-        is_locked: initialized && session.is_locked,
+        is_locked: initialized && app_lock_enabled && session.is_locked,
+        app_lock_enabled,
+        app_lock_pin_length,
     })
+}
+
+fn emit_auth_status(app: &AppHandle, status: &AuthStatus) {
+    let _ = app.emit("auth-status-changed", status);
+}
+
+pub fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        let _ = window.emit("window-shown", ());
+    }
+}
+
+pub fn hide_main_window_and_maybe_lock(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let maybe_locked_status = (|| -> Option<AuthStatus> {
+        let conn = state.db.lock().ok()?;
+        let initialized = is_account_initialized(&conn).ok()?;
+        if !initialized {
+            return None;
+        }
+        let (app_lock_enabled, _) = is_app_lock_configured(&conn).ok()?;
+        let lock_on_hide = get_setting(&conn, "lock_on_hide").ok()?.as_deref() == Some("1");
+        if app_lock_enabled && lock_on_hide {
+            let mut session = state.session.lock().ok()?;
+            session.is_locked = true;
+            let _ = set_setting(&conn, "app_lock_active", "1");
+            return build_auth_status(&conn, &session).ok();
+        }
+        None
+    })();
+
+    if let Some(status) = maybe_locked_status {
+        emit_auth_status(app, &status);
+    }
+
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.hide();
+    }
+}
+
+pub fn lock_app_from_tray(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let result = (|| -> Result<Option<AuthStatus>, String> {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        if !is_account_initialized(&conn)? {
+            return Ok(None);
+        }
+        let (app_lock_enabled, _) = is_app_lock_configured(&conn)?;
+        if !app_lock_enabled {
+            return Ok(None);
+        }
+        let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+        session.is_locked = true;
+        set_setting(&conn, "app_lock_active", "1")?;
+        let status = build_auth_status(&conn, &session)?;
+        Ok(Some(status))
+    })();
+
+    match result {
+        Ok(Some(status)) => {
+            emit_auth_status(app, &status);
+        }
+        _ => {
+            show_main_window(app);
+            let _ = app.emit("open-app-lock-setup", ());
+        }
+    }
+}
+
+// ---------------- Auth & Lock ----------------
+
+#[tauri::command]
+pub fn get_auth_status(state: State<'_, AppState>) -> Result<AuthStatus, String> {
+    let session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    build_auth_status(&conn, &session)
 }
 
 #[tauri::command]
@@ -104,6 +188,8 @@ pub fn setup_initial_admin(
     set_setting(&conn, "admin_password_hash", &pwd_hash)?;
     set_setting(&conn, "account_initialized", "1")?;
     set_setting(&conn, "must_change_password", "0")?;
+    set_setting(&conn, "keep_admin_session", "1")?;
+    set_setting(&conn, "admin_session_active", "1")?;
 
     if let Some(title) = doc_title {
         let t = title.trim();
@@ -122,12 +208,7 @@ pub fn setup_initial_admin(
     session.is_admin = true;
     session.is_locked = false;
 
-    Ok(AuthStatus {
-        is_initialized: true,
-        is_admin: true,
-        username: clean_user,
-        is_locked: false,
-    })
+    build_auth_status(&conn, &session)
 }
 
 #[tauri::command]
@@ -135,6 +216,7 @@ pub fn admin_login(
     state: State<'_, AppState>,
     username: String,
     password: String,
+    remember: Option<bool>,
 ) -> Result<AuthStatus, String> {
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
     if !is_account_initialized(&conn)? {
@@ -148,79 +230,202 @@ pub fn admin_login(
         return Err("账号或密码错误".to_string());
     }
 
+    let keep = match remember {
+        Some(flag) => {
+            set_setting(&conn, "keep_admin_session", if flag { "1" } else { "0" })?;
+            flag
+        }
+        None => get_setting(&conn, "keep_admin_session")?.as_deref() != Some("0"),
+    };
+    set_setting(&conn, "admin_session_active", if keep { "1" } else { "0" })?;
+
     let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
     session.is_admin = true;
-    session.is_locked = false;
 
-    Ok(AuthStatus {
-        is_initialized: true,
-        is_admin: true,
-        username: stored_user,
-        is_locked: false,
-    })
+    build_auth_status(&conn, &session)
 }
 
 #[tauri::command]
 pub fn admin_logout(state: State<'_, AppState>) -> Result<AuthStatus, String> {
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    set_setting(&conn, "admin_session_active", "0")?;
+
     let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
     session.is_admin = false;
-    session.is_locked = false;
-    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-    let initialized = is_account_initialized(&conn)?;
-    let username = if initialized {
-        get_setting(&conn, "admin_username")?.unwrap_or_default()
-    } else {
-        String::new()
-    };
 
-    Ok(AuthStatus {
-        is_initialized: initialized,
-        is_admin: false,
-        username,
-        is_locked: false,
-    })
+    build_auth_status(&conn, &session)
 }
 
 #[tauri::command]
-pub fn lock_app(state: State<'_, AppState>) -> Result<AuthStatus, String> {
+pub fn configure_app_lock(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pin: String,
+    auto_lock_minutes: Option<i64>,
+    lock_on_hide: Option<bool>,
+    lock_on_startup: Option<bool>,
+) -> Result<AuthStatus, String> {
+    check_admin(&state)?;
+    let pin_len = validate_pin(&pin)?;
+    let pin_hash = hash_password(&pin)?;
+
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    set_setting(&conn, "app_lock_pin_hash", &pin_hash)?;
+    set_setting(&conn, "app_lock_pin_length", &pin_len.to_string())?;
+    set_setting(&conn, "app_lock_enabled", "1")?;
+
+    if let Some(m) = auto_lock_minutes {
+        set_setting(&conn, "auto_lock_minutes", &m.clamp(0, 240).to_string())?;
+    }
+    if let Some(v) = lock_on_hide {
+        set_setting(&conn, "lock_on_hide", if v { "1" } else { "0" })?;
+    }
+    if let Some(v) = lock_on_startup {
+        set_setting(&conn, "lock_on_startup", if v { "1" } else { "0" })?;
+    }
+
+    let session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    let status = build_auth_status(&conn, &session)?;
+    emit_auth_status(&app, &status);
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn disable_app_lock(app: AppHandle, state: State<'_, AppState>) -> Result<AuthStatus, String> {
+    check_admin(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    set_setting(&conn, "app_lock_enabled", "0")?;
+    set_setting(&conn, "app_lock_pin_hash", "")?;
+    set_setting(&conn, "app_lock_pin_length", "0")?;
+    set_setting(&conn, "app_lock_active", "0")?;
+
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.is_locked = false;
+    let status = build_auth_status(&conn, &session)?;
+    emit_auth_status(&app, &status);
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn lock_app(app: AppHandle, state: State<'_, AppState>) -> Result<AuthStatus, String> {
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
     if !is_account_initialized(&conn)? {
-        return Err("请先完成管理员账号初始化后再启用锁屏".to_string());
+        return Err("请先完成管理员账号初始化后再启用应用锁".to_string());
     }
-    let username = get_setting(&conn, "admin_username")?.unwrap_or_default();
+    let (app_lock_enabled, _) = is_app_lock_configured(&conn)?;
+    if !app_lock_enabled {
+        return Err("应用锁尚未开启，请先设置 4~6 位独立 PIN 码".to_string());
+    }
     let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
     session.is_locked = true;
+    set_setting(&conn, "app_lock_active", "1")?;
 
-    Ok(AuthStatus {
-        is_initialized: true,
-        is_admin: session.is_admin,
-        username,
-        is_locked: true,
-    })
+    let status = build_auth_status(&conn, &session)?;
+    emit_auth_status(&app, &status);
+    Ok(status)
 }
 
 #[tauri::command]
-pub fn unlock_app(state: State<'_, AppState>, password: String) -> Result<AuthStatus, String> {
+pub fn unlock_app(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pin: String,
+) -> Result<AuthStatus, String> {
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if !is_account_initialized(&conn)? {
+        return Err("管理员账号尚未初始化".to_string());
+    }
+    let stored_hash = get_setting(&conn, "app_lock_pin_hash")?.unwrap_or_default();
+    if stored_hash.trim().is_empty() {
+        return Err("应用锁未配置 PIN 码，请使用管理员密码解锁".to_string());
+    }
+    if !verify_password(&pin, &stored_hash) {
+        return Err("PIN 码错误，请重试".to_string());
+    }
+
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.is_locked = false;
+    set_setting(&conn, "app_lock_active", "0")?;
+
+    let status = build_auth_status(&conn, &session)?;
+    emit_auth_status(&app, &status);
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn unlock_app_with_admin(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    admin_password: String,
+    new_pin: Option<String>,
+    disable_lock: Option<bool>,
+) -> Result<AuthStatus, String> {
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
     if !is_account_initialized(&conn)? {
         return Err("管理员账号尚未初始化".to_string());
     }
     let stored_hash = get_setting(&conn, "admin_password_hash")?
         .ok_or_else(|| "管理员密码未初始化".to_string())?;
-    if !verify_password(&password, &stored_hash) {
-        return Err("解锁密码错误".to_string());
+    if !verify_password(&admin_password, &stored_hash) {
+        return Err("管理员密码错误".to_string());
     }
-    let username = get_setting(&conn, "admin_username")?.unwrap_or_default();
+
+    if disable_lock == Some(true) {
+        set_setting(&conn, "app_lock_enabled", "0")?;
+        set_setting(&conn, "app_lock_pin_hash", "")?;
+        set_setting(&conn, "app_lock_pin_length", "0")?;
+    } else if let Some(pin) = new_pin {
+        if !pin.is_empty() {
+            let pin_len = validate_pin(&pin)?;
+            let pin_hash = hash_password(&pin)?;
+            set_setting(&conn, "app_lock_pin_hash", &pin_hash)?;
+            set_setting(&conn, "app_lock_pin_length", &pin_len.to_string())?;
+            set_setting(&conn, "app_lock_enabled", "1")?;
+        }
+    }
 
     let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
     session.is_locked = false;
+    set_setting(&conn, "app_lock_active", "0")?;
 
-    Ok(AuthStatus {
-        is_initialized: true,
-        is_admin: session.is_admin,
-        username,
-        is_locked: false,
-    })
+    let status = build_auth_status(&conn, &session)?;
+    emit_auth_status(&app, &status);
+    Ok(status)
+}
+
+#[tauri::command]
+pub fn perform_close_action(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    action: String,
+    remember: bool,
+) -> Result<(), String> {
+    let normalized = match action.trim() {
+        "exit" => "exit",
+        _ => "minimize_to_tray",
+    };
+    if remember {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        set_setting(&conn, "close_behavior", normalized)?;
+    }
+    if normalized == "exit" {
+        state.allow_exit.store(true, Ordering::SeqCst);
+        app.exit(0);
+    } else {
+        hide_main_window_and_maybe_lock(&app);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn set_close_behavior(
+    state: State<'_, AppState>,
+    close_behavior: String,
+) -> Result<AppSettings, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    set_setting(&conn, "close_behavior", &sanitize_close_behavior(&close_behavior))?;
+    load_app_settings(&conn)
 }
 
 #[tauri::command]
@@ -879,6 +1084,28 @@ pub fn update_settings(
     if let Some(m) = input.auto_lock_minutes {
         set_setting(&conn, "auto_lock_minutes", &m.clamp(0, 240).to_string())?;
     }
+    if let Some(behavior) = input.close_behavior {
+        set_setting(&conn, "close_behavior", &sanitize_close_behavior(&behavior))?;
+    }
+    if let Some(keep) = input.keep_admin_session {
+        set_setting(&conn, "keep_admin_session", if keep { "1" } else { "0" })?;
+        let is_currently_admin = state
+            .session
+            .lock()
+            .map(|s| s.is_admin)
+            .unwrap_or(false);
+        set_setting(
+            &conn,
+            "admin_session_active",
+            if keep && is_currently_admin { "1" } else { "0" },
+        )?;
+    }
+    if let Some(v) = input.lock_on_hide {
+        set_setting(&conn, "lock_on_hide", if v { "1" } else { "0" })?;
+    }
+    if let Some(v) = input.lock_on_startup {
+        set_setting(&conn, "lock_on_startup", if v { "1" } else { "0" })?;
+    }
     if let Some(v) = input.doc_code {
         set_setting(&conn, "doc_code", v.trim())?;
     }
@@ -1025,5 +1252,10 @@ pub async fn download_and_launch_update(
         .ok()
         .and_then(|guard| guard.clone());
 
-    download_and_install_update(&app, pending, &repo, &proxy).await
+    state.allow_exit.store(true, Ordering::SeqCst);
+    let res = download_and_install_update(&app, pending, &repo, &proxy).await;
+    if res.is_err() {
+        state.allow_exit.store(false, Ordering::SeqCst);
+    }
+    res
 }

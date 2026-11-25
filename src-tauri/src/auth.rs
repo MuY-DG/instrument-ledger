@@ -39,6 +39,13 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
         .is_ok()
 }
 
+pub fn validate_pin(pin: &str) -> Result<usize, String> {
+    if !(4..=6).contains(&pin.len()) || !pin.chars().all(|c| c.is_ascii_digit()) {
+        return Err("应用锁 PIN 码必须为 4 到 6 位纯数字".to_string());
+    }
+    Ok(pin.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -48,6 +55,17 @@ mod tests {
         let hash = hash_password("admin123").expect("hash failed");
         assert!(verify_password("admin123", &hash));
         assert!(!verify_password("wrong", &hash));
+    }
+
+    #[test]
+    fn test_validate_pin() {
+        assert_eq!(validate_pin("1234").unwrap(), 4);
+        assert_eq!(validate_pin("01234").unwrap(), 5);
+        assert_eq!(validate_pin("987654").unwrap(), 6);
+        assert!(validate_pin("123").is_err());
+        assert!(validate_pin("1234567").is_err());
+        assert!(validate_pin("12a4").is_err());
+        assert!(validate_pin(" 1234").is_err());
     }
 
     #[test]

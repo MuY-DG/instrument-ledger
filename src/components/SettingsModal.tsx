@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "motion/react";
 import {
   AlertCircle,
+  AppWindow,
   Archive,
   ArrowRight,
   BellRing,
@@ -17,6 +18,9 @@ import {
   Image as ImageIcon,
   KeyRound,
   Loader2,
+  Lock,
+  MonitorDown,
+  Power,
   RefreshCw,
   RotateCcw,
   Save,
@@ -28,16 +32,25 @@ import {
 } from "lucide-react";
 import { api, clearMediaCache } from "@/lib/api";
 import { formatFileSize, getTodayStr } from "@/lib/status";
+import { cn } from "@/lib/utils";
+import { isMacPlatform } from "@/components/AuthLockModals";
 import { MarkdownNotes } from "@/components/MarkdownNotes";
 import { ThresholdSettingsEditor } from "@/components/ThresholdSettingsEditor";
 import type {
   AppSettings,
+  CloseBehavior,
   DataDirInfo,
   UpdateCheckResult,
   UpdateDownloadProgress,
 } from "@/types";
 
-type SettingsTab = "general" | "alerts" | "security" | "backup" | "update";
+export type SettingsTab =
+  | "general"
+  | "window"
+  | "alerts"
+  | "security"
+  | "backup"
+  | "update";
 
 interface SettingsModalProps {
   openModal: boolean;
@@ -54,6 +67,9 @@ interface SettingsModalProps {
   onDataRestored: () => void;
   onNotify: (msg: string, type?: "success" | "error") => void;
   onRequestLogin?: () => void;
+  onOpenAppLockSetup?: (mode: "enable" | "change") => void;
+  onLockNow?: () => void;
+  onDisableAppLock?: () => Promise<void>;
 }
 
 const INPUT_CLS =
@@ -79,8 +95,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onDataRestored,
   onNotify,
   onRequestLogin,
+  onOpenAppLockSetup,
+  onLockNow,
+  onDisableAppLock,
 }) => {
+  const mac = isMacPlatform();
   const [tab, setTab] = useState<SettingsTab>(initialTab);
+  const [savingWindowPref, setSavingWindowPref] = useState(false);
+  const [savingSecurityPref, setSavingSecurityPref] = useState(false);
+  const [disablingLock, setDisablingLock] = useState(false);
 
   // General form
   const [autoLockMinutes, setAutoLockMinutes] = useState(settings.autoLockMinutes);
@@ -115,9 +138,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (!openModal) return;
     setTab(
-      isAdmin || initialTab === "alerts" || initialTab === "update"
+      isAdmin ||
+        initialTab === "window" ||
+        initialTab === "alerts" ||
+        initialTab === "update"
         ? initialTab
-        : "update"
+        : "window"
     );
     setAutoLockMinutes(settings.autoLockMinutes);
     setDocCode(settings.docCode);
@@ -155,7 +181,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setSavingGeneral(true);
     try {
       const updated = await api.updateSettings({
-        autoLockMinutes: Number(autoLockMinutes) || 0,
         docCode,
         docVersion,
         docTitle,
@@ -315,6 +340,64 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleUpdateCloseBehavior = async (next: CloseBehavior) => {
+    if (savingWindowPref || settings.closeBehavior === next) return;
+    setSavingWindowPref(true);
+    try {
+      const updated = await api.setCloseBehavior(next);
+      onSettingsChanged(updated);
+      const label =
+        next === "minimize_to_tray"
+          ? mac
+            ? "最小化到顶部菜单栏"
+            : "最小化到系统托盘"
+          : next === "exit"
+            ? "直接退出程序"
+            : "每次关闭时询问";
+      onNotify(`关闭按钮行为已设为「${label}」`, "success");
+    } catch (err) {
+      onNotify(String(err), "error");
+    } finally {
+      setSavingWindowPref(false);
+    }
+  };
+
+  const handlePatchSecuritySetting = async (
+    patch: {
+      keepAdminSession?: boolean;
+      autoLockMinutes?: number;
+      lockOnHide?: boolean;
+      lockOnStartup?: boolean;
+    },
+    successMsg: string
+  ) => {
+    if (savingSecurityPref) return;
+    setSavingSecurityPref(true);
+    try {
+      const updated = await api.updateSettings(patch);
+      onSettingsChanged(updated);
+      onNotify(successMsg, "success");
+    } catch (err) {
+      onNotify(String(err), "error");
+    } finally {
+      setSavingSecurityPref(false);
+    }
+  };
+
+  const handleConfirmDisableAppLock = async () => {
+    if (!onDisableAppLock || disablingLock) return;
+    const ok = window.confirm(
+      "确定关闭独立应用锁吗？关闭后将清除当前锁屏 PIN 码，之后可随时重新开启并设置新 PIN 码。"
+    );
+    if (!ok) return;
+    setDisablingLock(true);
+    try {
+      await onDisableAppLock();
+    } finally {
+      setDisablingLock(false);
+    }
+  };
+
   const tabs: Array<{
     id: SettingsTab;
     label: string;
@@ -322,6 +405,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     adminOnly?: boolean;
   }> = [
     { id: "general", label: "台账与表头", icon: <Settings className="h-3.5 w-3.5" />, adminOnly: true },
+    { id: "window", label: "窗口与托盘", icon: <AppWindow className="h-3.5 w-3.5" /> },
     { id: "alerts", label: "到期预警设置", icon: <BellRing className="h-3.5 w-3.5" /> },
     { id: "security", label: "账号与锁屏", icon: <Shield className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "backup", label: "本地备份还原", icon: <HardDrive className="h-3.5 w-3.5" />, adminOnly: true },
@@ -505,6 +589,109 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </form>
                 )}
 
+                {tab === "window" && (
+                  <div className="space-y-5">
+                    <div className="p-4 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] space-y-1.5">
+                      <div className="text-xs font-semibold text-zinc-900 dark:text-white">
+                        点击窗口关闭按钮时
+                      </div>
+                      <p className="text-[11.5px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                        {mac
+                          ? "应用在 macOS 屏幕顶部菜单栏提供常驻图标。选择后台运行时，关闭主窗口不会结束进程，点击顶部菜单栏图标或 Dock 图标可随时重新打开。"
+                          : "应用在 Windows 任务栏右下角系统托盘提供常驻图标。选择后台运行时，关闭主窗口不会结束进程，单击托盘图标即可快速唤出，右键菜单可锁定或退出。"}
+                      </p>
+                    </div>
+
+                    <div className="space-y-2.5">
+                      {(
+                        [
+                          {
+                            id: "minimize_to_tray" as CloseBehavior,
+                            title: mac
+                              ? "最小化到顶部菜单栏（后台运行）"
+                              : "最小化到右下角系统托盘（后台运行）",
+                            badge: "推荐",
+                            desc: mac
+                              ? "仅隐藏主窗口并在后台保活，保留登录状态与周期性到期提醒，随时点击顶部图标或 Dock 图标秒开。"
+                              : "仅隐藏主窗口并在右下角托盘保活，保留登录状态与周期性到期提醒，单击托盘图标秒开。",
+                            icon: <MonitorDown className="h-4 w-4" />,
+                          },
+                          {
+                            id: "exit" as CloseBehavior,
+                            title: "直接退出程序",
+                            badge: "",
+                            desc: "点击关闭按钮时直接关闭窗口并完全结束程序进程，不留在系统托盘。",
+                            icon: <Power className="h-4 w-4" />,
+                          },
+                          {
+                            id: "ask" as CloseBehavior,
+                            title: "每次关闭时弹窗询问",
+                            badge: "",
+                            desc: "每次点击关闭按钮时提示选择「隐藏到后台」或「直接退出」。",
+                            icon: <AppWindow className="h-4 w-4" />,
+                          },
+                        ] as const
+                      ).map((opt) => {
+                        const active = settings.closeBehavior === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            disabled={savingWindowPref}
+                            onClick={() => handleUpdateCloseBehavior(opt.id)}
+                            className={cn(
+                              "w-full text-left p-4 rounded-xl border transition flex items-start gap-3.5",
+                              active
+                                ? "border-zinc-900 dark:border-white/75 bg-zinc-50/90 dark:bg-white/[0.05] ring-1 ring-zinc-900/10 dark:ring-white/15"
+                                : "border-zinc-200/90 dark:border-white/[0.08] bg-white dark:bg-white/[0.015] hover:bg-zinc-50/60 dark:hover:bg-white/[0.035]"
+                            )}
+                          >
+                            <div
+                              className={cn(
+                                "h-9 w-9 rounded-xl flex items-center justify-center shrink-0 mt-0.5",
+                                active
+                                  ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950"
+                                  : "bg-zinc-100 dark:bg-white/[0.06] text-zinc-500 dark:text-zinc-400"
+                              )}
+                            >
+                              {opt.icon}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                                  {opt.title}
+                                </span>
+                                {opt.badge && (
+                                  <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-[10px] font-semibold">
+                                    {opt.badge}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11.5px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+                                {opt.desc}
+                              </p>
+                            </div>
+                            <div className="pt-1 shrink-0">
+                              <span
+                                className={cn(
+                                  "h-4 w-4 rounded-full border flex items-center justify-center",
+                                  active
+                                    ? "border-zinc-900 dark:border-white"
+                                    : "border-zinc-300 dark:border-zinc-600"
+                                )}
+                              >
+                                {active && (
+                                  <span className="h-2 w-2 rounded-full bg-zinc-900 dark:bg-white" />
+                                )}
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
                 {tab === "alerts" && (
                   <ThresholdSettingsEditor
                     settings={settings}
@@ -523,34 +710,227 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
 
                 {tab === "security" && isAdmin && (
-                  <div className="space-y-6">
-                    <div className="p-4 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] space-y-3">
-                      <div className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                        全屏应用锁自动锁定策略
+                  <div className="space-y-5">
+                    {/* 1. Admin Session Persistence */}
+                    <div className="p-4 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] flex items-start justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                            保持管理员登录状态
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-[10px] font-semibold">
+                            个人电脑推荐
+                          </span>
+                        </div>
+                        <p className="text-[11.5px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                          开启后，即使完全退出软件再重新打开，也会自动保持管理员权限，无需反复输入密码；如需在公共电脑上防止他人编辑，关闭此项后将在下次启动时默认进入只读模式。
+                        </p>
                       </div>
-                      <div className="flex items-center gap-3">
-                        <select
-                          value={autoLockMinutes}
-                          onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
-                          className={`${INPUT_CLS} max-w-xs dark:bg-[#141418]`}
-                        >
-                          <option value={0}>仅手动锁屏（快捷键 ⌘/Ctrl + L）</option>
-                          <option value={5}>无操作 5 分钟自动锁屏</option>
-                          <option value={10}>无操作 10 分钟自动锁屏</option>
-                          <option value={15}>无操作 15 分钟自动锁屏</option>
-                          <option value={30}>无操作 30 分钟自动锁屏</option>
-                        </select>
-                        <button
-                          type="button"
-                          onClick={() => handleSaveGeneral()}
-                          className="px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold transition"
-                        >
-                          应用
-                        </button>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={settings.keepAdminSession}
+                        disabled={savingSecurityPref}
+                        onClick={() =>
+                          handlePatchSecuritySetting(
+                            { keepAdminSession: !settings.keepAdminSession },
+                            !settings.keepAdminSession
+                              ? "已开启管理员登录状态保持"
+                              : "已关闭登录保持，下次退出重开后需重新登录管理员"
+                          )
+                        }
+                        className={cn(
+                          "relative inline-flex h-6 w-10 shrink-0 rounded-full border-2 border-transparent transition-colors mt-0.5 cursor-pointer",
+                          settings.keepAdminSession
+                            ? "bg-zinc-900 dark:bg-white"
+                            : "bg-zinc-300 dark:bg-zinc-700"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "pointer-events-none inline-block h-5 w-5 rounded-full bg-white dark:bg-zinc-950 shadow transform transition",
+                            settings.keepAdminSession ? "translate-x-4" : "translate-x-0"
+                          )}
+                        />
+                      </button>
+                    </div>
+
+                    {/* 2. Independent App Lock (4-6 Digit PIN) */}
+                    <div className="p-5 rounded-xl border border-zinc-200/85 dark:border-white/[0.09] bg-white dark:bg-white/[0.02] space-y-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <Lock className="h-4 w-4 text-indigo-500" />
+                            <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                              独立应用锁（快捷 PIN 码防窥）
+                            </span>
+                            {settings.appLockEnabled ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/12 border border-emerald-500/20 text-[10.5px] font-medium text-emerald-700 dark:text-emerald-300">
+                                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                                已开启 · {settings.appLockPinLength} 位 PIN 码
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-white/[0.06] text-[10.5px] font-medium text-zinc-500 dark:text-zinc-400">
+                                未开启
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[11.5px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                            与管理员密码完全分离，专为临时离开工位防窥设计。解锁时输完 PIN 码自动秒开；忘记 PIN 码可通过管理员密码验证解除或重设。
+                          </p>
+                        </div>
                       </div>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                        管理员登录状态下超过设定时间无鼠标/键盘活动时，自动遮罩锁屏保护数据安全
-                      </p>
+
+                      {!settings.appLockEnabled ? (
+                        <div className="flex items-center justify-between gap-3 pt-1">
+                          <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
+                            默认关闭，开启时自定义 4~6 位纯数字 PIN 码
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => onOpenAppLockSetup?.("enable")}
+                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition shrink-0"
+                          >
+                            <Lock className="h-3.5 w-3.5" />
+                            <span>开启应用锁并设置 PIN 码</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          {/* PIN Actions */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={() => onOpenAppLockSetup?.("change")}
+                              className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] bg-zinc-50/70 dark:bg-white/[0.04] hover:bg-zinc-100 dark:hover:bg-white/[0.08] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
+                            >
+                              修改 PIN 码
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onClose();
+                                onLockNow?.();
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold transition"
+                            >
+                              <Lock className="h-3.5 w-3.5" />
+                              <span>立即锁定</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={disablingLock}
+                              onClick={handleConfirmDisableAppLock}
+                              className="px-3 py-1.5 rounded-lg text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition ml-auto"
+                            >
+                              {disablingLock ? "关闭中..." : "关闭应用锁"}
+                            </button>
+                          </div>
+
+                          {/* Independent Trigger Timings */}
+                          <div className="pt-3 border-t border-zinc-200/75 dark:border-white/[0.07] space-y-3">
+                            <div className="text-[11.5px] font-semibold text-zinc-700 dark:text-zinc-200">
+                              锁定触发时机（独立勾选）
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3 py-1">
+                              <div>
+                                <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                                  手动锁定
+                                </div>
+                                <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  侧边栏锁图标、快捷键 ⌘/Ctrl + L 或{mac ? "顶部菜单栏" : "托盘右键菜单"}
+                                </div>
+                              </div>
+                              <span className="px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-white/[0.06] text-[10.5px] font-medium text-zinc-500 dark:text-zinc-400">
+                                常驻可用
+                              </span>
+                            </div>
+
+                            <div className="flex items-center justify-between gap-3 py-1">
+                              <div>
+                                <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                                  无操作自动锁定
+                                </div>
+                                <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  超过设定时长无鼠标/键盘活动时自动锁屏保护
+                                </div>
+                              </div>
+                              <select
+                                value={autoLockMinutes}
+                                disabled={savingSecurityPref}
+                                onChange={(e) => {
+                                  const next = Number(e.target.value);
+                                  setAutoLockMinutes(next);
+                                  handlePatchSecuritySetting(
+                                    { autoLockMinutes: next },
+                                    next > 0
+                                      ? `已设置无操作 ${next} 分钟自动锁定`
+                                      : "已关闭无操作自动锁定"
+                                  );
+                                }}
+                                className="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-[#141418] text-zinc-800 dark:text-zinc-200 focus:outline-none"
+                              >
+                                <option value={0}>关闭</option>
+                                <option value={5}>5 分钟</option>
+                                <option value={10}>10 分钟</option>
+                                <option value={15}>15 分钟</option>
+                                <option value={30}>30 分钟</option>
+                              </select>
+                            </div>
+
+                            <label className="flex items-center justify-between gap-3 py-1 cursor-pointer select-none">
+                              <div>
+                                <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                                  隐藏到{mac ? "顶部菜单栏" : "系统托盘"}时自动锁定
+                                </div>
+                                <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  点击关闭按钮最小化到后台时自动上锁，下次唤出需输入 PIN 码
+                                </div>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={settings.lockOnHide}
+                                disabled={savingSecurityPref}
+                                onChange={(e) =>
+                                  handlePatchSecuritySetting(
+                                    { lockOnHide: e.target.checked },
+                                    e.target.checked
+                                      ? "已开启最小化到后台自动锁定"
+                                      : "已关闭最小化到后台自动锁定"
+                                  )
+                                }
+                                className="h-4 w-4 accent-zinc-900 dark:accent-white"
+                              />
+                            </label>
+
+                            <label className="flex items-center justify-between gap-3 py-1 cursor-pointer select-none">
+                              <div>
+                                <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                                  启动程序时自动锁定
+                                </div>
+                                <div className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                                  默认关闭；仅在希望每次打开软件都需输入 PIN 码时勾选（若锁屏状态下强制关闭，重开会自动保持锁定）
+                                </div>
+                              </div>
+                              <input
+                                type="checkbox"
+                                checked={settings.lockOnStartup}
+                                disabled={savingSecurityPref}
+                                onChange={(e) =>
+                                  handlePatchSecuritySetting(
+                                    { lockOnStartup: e.target.checked },
+                                    e.target.checked
+                                      ? "已开启启动程序时自动锁定"
+                                      : "已关闭启动程序时自动锁定"
+                                  )
+                                }
+                                className="h-4 w-4 accent-zinc-900 dark:accent-white"
+                              />
+                            </label>
+                          </div>
+                        </>
+                      )}
                     </div>
 
                     <form

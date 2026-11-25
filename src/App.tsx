@@ -54,8 +54,13 @@ import { LocationThumb } from "@/components/LocationThumb";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { ReportModal } from "@/components/ReportModal";
 import { InstrumentDrawer } from "@/components/InstrumentDrawer";
-import { AdminLoginModal, AppLockOverlay } from "@/components/AuthLockModals";
-import { SettingsModal } from "@/components/SettingsModal";
+import {
+  AdminLoginModal,
+  AppLockOverlay,
+  AppLockSetupModal,
+  CloseActionPromptModal,
+} from "@/components/AuthLockModals";
+import { SettingsModal, type SettingsTab } from "@/components/SettingsModal";
 import { ImportModal } from "@/components/ImportModal";
 import { PrintLedgerView } from "@/components/PrintLedgerView";
 import { CommandPalette } from "@/components/CommandPalette";
@@ -81,6 +86,12 @@ const DEFAULT_SETTINGS: AppSettings = {
   alertPopupFrequency: "every_open",
   alertPopupIntervalHours: 4,
   autoLockMinutes: 0,
+  closeBehavior: "ask",
+  keepAdminSession: true,
+  appLockEnabled: false,
+  appLockPinLength: 0,
+  lockOnHide: false,
+  lockOnStartup: false,
   docCode: "JSSK-MPR-170",
   docVersion: "A",
   docTitle: "监视与测量管理台账",
@@ -136,7 +147,11 @@ export default function App() {
     isAdmin: false,
     username: "",
     isLocked: false,
+    appLockEnabled: false,
+    appLockPinLength: 0,
   });
+  const authRef = useRef(auth);
+  authRef.current = auth;
 
   // Theme (Precision Light / Obsidian Dark)
   const [theme, setTheme] = useState<"light" | "dark">(loadInitialTheme);
@@ -171,9 +186,14 @@ export default function App() {
   const [reportInstrument, setReportInstrument] = useState<Instrument | null>(null);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<
-    "general" | "alerts" | "security" | "backup" | "update"
-  >("general");
+  const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("general");
+  const [appLockSetupState, setAppLockSetupState] = useState<{
+    open: boolean;
+    mode: "enable" | "change";
+    lockAfterSave: boolean;
+  }>({ open: false, mode: "enable", lockAfterSave: false });
+  const [closePromptOpen, setClosePromptOpen] = useState(false);
+  const [windowFocusNonce, setWindowFocusNonce] = useState(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
 
@@ -252,13 +272,33 @@ export default function App() {
     }
   }, [settings.companyLogoPath]);
 
+  const handleLock = useCallback(async () => {
+    const current = authRef.current;
+    if (!current.isInitialized || current.isLocked) return;
+    if (!current.appLockEnabled) {
+      if (current.isAdmin) {
+        setAppLockSetupState({ open: true, mode: "enable", lockAfterSave: true });
+      } else {
+        notify("请先登录管理员账号以开启并设置应用锁 PIN 码", "error");
+        setLoginModalOpen(true);
+      }
+      return;
+    }
+    try {
+      const st = await api.lockApp();
+      setAuth(st);
+    } catch (err) {
+      notify(String(err), "error");
+    }
+  }, [notify]);
+
   // Global keyboard shortcuts: Cmd/Ctrl + L (Lock), Cmd/Ctrl + K (Command Palette)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!auth.isInitialized || auth.isLocked) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "l") {
         e.preventDefault();
-        api.lockApp().then(setAuth).catch((err) => notify(String(err), "error"));
+        handleLock();
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setCommandOpen((prev) => !prev);
@@ -266,13 +306,13 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [auth.isInitialized, auth.isLocked, notify]);
+  }, [auth.isInitialized, auth.isLocked, handleLock]);
 
-  // Optional auto-lock idle timer when admin is logged in
+  // Independent auto-lock idle timer whenever App Lock is enabled
   useEffect(() => {
     if (
       !auth.isInitialized ||
-      !auth.isAdmin ||
+      !auth.appLockEnabled ||
       auth.isLocked ||
       settings.autoLockMinutes <= 0
     ) {
@@ -296,7 +336,38 @@ export default function App() {
       if (timer) window.clearTimeout(timer);
       events.forEach((ev) => window.removeEventListener(ev, resetTimer));
     };
-  }, [auth.isInitialized, auth.isAdmin, auth.isLocked, settings.autoLockMinutes]);
+  }, [auth.isInitialized, auth.appLockEnabled, auth.isLocked, settings.autoLockMinutes]);
+
+  // Listen for native backend tray / window lifecycle events
+  useEffect(() => {
+    const unlisteners = [
+      listen<AuthStatus>("auth-status-changed", (event) => {
+        setAuth(event.payload);
+        if (!event.payload.isLocked) {
+          api.getSettings().then(setSettings).catch(() => {});
+        }
+      }),
+      listen("close-requested-prompt", () => {
+        setClosePromptOpen(true);
+      }),
+      listen("open-app-lock-setup", () => {
+        const current = authRef.current;
+        if (!current.isInitialized || current.isLocked) return;
+        if (current.isAdmin) {
+          setAppLockSetupState({ open: true, mode: "enable", lockAfterSave: true });
+        } else {
+          notify("请先登录管理员账号以开启并设置应用锁 PIN 码", "error");
+          setLoginModalOpen(true);
+        }
+      }),
+      listen("window-shown", () => {
+        setWindowFocusNonce((n) => n + 1);
+      }),
+    ];
+    return () => {
+      unlisteners.forEach((p) => p.then((fn) => fn()));
+    };
+  }, [notify]);
 
   // Close export dropdown on outside click
   useEffect(() => {
@@ -701,10 +772,13 @@ export default function App() {
     }
   };
 
-  const handleLock = async () => {
+  const handleDisableAppLock = async () => {
     try {
-      const st = await api.lockApp();
+      const st = await api.disableAppLock();
       setAuth(st);
+      const updated = await api.getSettings();
+      setSettings(updated);
+      notify("已关闭独立应用锁", "success");
     } catch (err) {
       notify(String(err), "error");
     }
@@ -780,9 +854,7 @@ export default function App() {
     setDrawerOpen(true);
   };
 
-  const openSettingsTab = (
-    tab: "general" | "alerts" | "security" | "backup" | "update"
-  ) => {
+  const openSettingsTab = (tab: SettingsTab) => {
     setSettingsInitialTab(tab);
     setSettingsModalOpen(true);
   };
@@ -1253,16 +1325,23 @@ export default function App() {
                 <button
                   type="button"
                   onClick={handleLock}
-                  className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
-                  title="全屏锁屏 (⌘L)"
+                  className="relative py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
+                  title={
+                    auth.appLockEnabled
+                      ? "立即锁定应用 (⌘L)"
+                      : "开启并设置独立应用锁 (⌘L)"
+                  }
                 >
                   <Lock className="h-3.5 w-3.5" />
+                  {auth.appLockEnabled && (
+                    <span className="absolute top-1.5 right-3 h-1.5 w-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400" />
+                  )}
                 </button>
                 <button
                   type="button"
-                  onClick={() => openSettingsTab(auth.isAdmin ? "general" : "update")}
+                  onClick={() => openSettingsTab(auth.isAdmin ? "general" : "window")}
                   className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
-                  title={auth.isAdmin ? "系统设置与备份" : "版本信息"}
+                  title={auth.isAdmin ? "系统设置与安全配置" : "窗口托盘与软件设置"}
                 >
                   <Settings className="h-3.5 w-3.5" />
                 </button>
@@ -2126,10 +2205,17 @@ export default function App() {
       <AdminLoginModal
         open={loginModalOpen}
         defaultUsername={auth.username}
+        defaultKeepSession={settings.keepAdminSession}
         onClose={() => setLoginModalOpen(false)}
-        onSuccess={(st) => {
+        onSuccess={(st, keepSession) => {
           setAuth(st);
-          notify("管理员登录成功，已解锁全部管理操作", "success");
+          setSettings((prev) => ({ ...prev, keepAdminSession: keepSession }));
+          notify(
+            keepSession
+              ? "管理员登录成功，已为您保持登录状态"
+              : "管理员登录成功（仅本次运行有效）",
+            "success"
+          );
         }}
       />
 
@@ -2151,11 +2237,58 @@ export default function App() {
           setAuth((prev) => ({
             ...prev,
             username: next.adminUsername || prev.username,
+            appLockEnabled: next.appLockEnabled,
+            appLockPinLength: next.appLockPinLength,
           }));
         }}
         onDataRestored={() => refreshAll()}
         onNotify={notify}
         onRequestLogin={() => setLoginModalOpen(true)}
+        onOpenAppLockSetup={(mode) =>
+          setAppLockSetupState({ open: true, mode, lockAfterSave: false })
+        }
+        onLockNow={handleLock}
+        onDisableAppLock={handleDisableAppLock}
+      />
+
+      <AppLockSetupModal
+        open={appLockSetupState.open}
+        mode={appLockSetupState.mode}
+        lockAfterSave={appLockSetupState.lockAfterSave}
+        initialPinLength={settings.appLockPinLength || 4}
+        initialAutoLockMinutes={settings.autoLockMinutes}
+        initialLockOnHide={settings.lockOnHide}
+        initialLockOnStartup={settings.lockOnStartup}
+        onClose={() =>
+          setAppLockSetupState((prev) => ({ ...prev, open: false }))
+        }
+        onConfigured={(st, lockedNow) => {
+          setAuth(st);
+          api.getSettings().then(setSettings).catch(() => {});
+          if (appLockSetupState.mode === "change") {
+            notify("应用锁 PIN 码已更新", "success");
+          } else if (lockedNow) {
+            notify("已开启独立应用锁并锁定当前画面", "success");
+          } else {
+            notify("独立应用锁已开启，可随时按 ⌘/Ctrl + L 快捷锁定", "success");
+          }
+        }}
+      />
+
+      <CloseActionPromptModal
+        open={closePromptOpen}
+        onCancel={() => setClosePromptOpen(false)}
+        onConfirm={async (action, remember) => {
+          setClosePromptOpen(false);
+          try {
+            await api.performCloseAction(action, remember);
+            if (remember) {
+              api.getSettings().then(setSettings).catch(() => {});
+            }
+          } catch (err) {
+            notify(String(err), "error");
+          }
+        }}
       />
 
       {/* Right-to-Left Sliding Auto-Update Notification Popup */}
@@ -2180,14 +2313,24 @@ export default function App() {
         onNotify={notify}
       />
 
-      {/* Full-Screen Frosted Blur App Lock Overlay */}
+      {/* Full-Screen Adaptive Light & Dark App Lock Overlay */}
       <AppLockOverlay
         locked={auth.isInitialized && auth.isLocked}
         username={auth.username}
         docTitle={settings.docTitle}
-        onUnlocked={(st) => {
+        pinLength={auth.appLockPinLength}
+        focusNonce={windowFocusNonce}
+        onUnlocked={(st, resetApplied) => {
           setAuth(st);
           refreshAll();
+          if (resetApplied) {
+            notify(
+              st.appLockEnabled
+                ? "已通过管理员验证解锁并更新应用锁 PIN 码"
+                : "已通过管理员验证解锁并关闭应用锁",
+              "success"
+            );
+          }
         }}
       />
 

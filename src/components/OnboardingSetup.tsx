@@ -569,7 +569,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                           初始化本地管理员账号
                         </h2>
                         <p className="text-xs text-zinc-400 leading-relaxed">
-                          系统不预设默认账号或初始密码。请为您本机创建专属管理员凭据，用于台账录入、报告归档、锁屏解锁及数据备份。
+                          系统不预设默认账号或初始密码。请为您本机创建专属管理员凭据，用于台账录入、报告归档、数据备份及系统安全配置。
                         </p>
                       </motion.div>
 

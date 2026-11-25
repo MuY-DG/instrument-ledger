@@ -6,6 +6,7 @@ import type {
   BackupResult,
   Base64FilePayload,
   CalibrationReport,
+  CloseBehavior,
   DataDirInfo,
   ImportResult,
   Instrument,
@@ -40,11 +41,43 @@ export const api = {
       docTitle: docTitle || null,
       docCode: docCode || null,
     }),
-  adminLogin: (username: string, password: string) =>
-    invoke<AuthStatus>("admin_login", { username, password }),
+  adminLogin: (username: string, password: string, remember?: boolean) =>
+    invoke<AuthStatus>("admin_login", {
+      username,
+      password,
+      remember: remember ?? null,
+    }),
   adminLogout: () => invoke<AuthStatus>("admin_logout"),
+  configureAppLock: (
+    pin: string,
+    opts?: {
+      autoLockMinutes?: number;
+      lockOnHide?: boolean;
+      lockOnStartup?: boolean;
+    }
+  ) =>
+    invoke<AuthStatus>("configure_app_lock", {
+      pin,
+      autoLockMinutes: opts?.autoLockMinutes ?? null,
+      lockOnHide: opts?.lockOnHide ?? null,
+      lockOnStartup: opts?.lockOnStartup ?? null,
+    }),
+  disableAppLock: () => invoke<AuthStatus>("disable_app_lock"),
   lockApp: () => invoke<AuthStatus>("lock_app"),
-  unlockApp: (password: string) => invoke<AuthStatus>("unlock_app", { password }),
+  unlockApp: (pin: string) => invoke<AuthStatus>("unlock_app", { pin }),
+  unlockAppWithAdmin: (
+    adminPassword: string,
+    opts?: { newPin?: string; disableLock?: boolean }
+  ) =>
+    invoke<AuthStatus>("unlock_app_with_admin", {
+      adminPassword,
+      newPin: opts?.newPin || null,
+      disableLock: opts?.disableLock ?? null,
+    }),
+  performCloseAction: (action: "minimize_to_tray" | "exit", remember: boolean) =>
+    invoke<void>("perform_close_action", { action, remember }),
+  setCloseBehavior: (closeBehavior: CloseBehavior) =>
+    invoke<AppSettings>("set_close_behavior", { closeBehavior }),
   changeAdminPassword: (
     oldPassword: string,
     newPassword: string,

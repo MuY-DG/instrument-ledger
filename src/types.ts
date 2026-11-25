@@ -6,6 +6,7 @@ export type StatusFilter = "all" | "valid" | "warning" | "expired" | "exempt";
 export type ExpiryFilter = "all" | "expired" | number;
 export type SortMode = "seq" | "expiry" | "name";
 export type AlertPopupFrequency = "every_open" | "daily" | "interval";
+export type CloseBehavior = "ask" | "minimize_to_tray" | "exit";
 
 export interface WarningThreshold {
   id: string;
@@ -109,6 +110,12 @@ export interface AppSettings {
   alertPopupFrequency: AlertPopupFrequency;
   alertPopupIntervalHours: number;
   autoLockMinutes: number;
+  closeBehavior: CloseBehavior;
+  keepAdminSession: boolean;
+  appLockEnabled: boolean;
+  appLockPinLength: number;
+  lockOnHide: boolean;
+  lockOnStartup: boolean;
   docCode: string;
   docVersion: string;
   docTitle: string;
@@ -126,6 +133,10 @@ export interface SettingsUpdateInput {
   alertPopupFrequency?: AlertPopupFrequency;
   alertPopupIntervalHours?: number;
   autoLockMinutes?: number;
+  closeBehavior?: CloseBehavior;
+  keepAdminSession?: boolean;
+  lockOnHide?: boolean;
+  lockOnStartup?: boolean;
   docCode?: string;
   docVersion?: string;
   docTitle?: string;
@@ -140,6 +151,8 @@ export interface AuthStatus {
   isAdmin: boolean;
   username: string;
   isLocked: boolean;
+  appLockEnabled: boolean;
+  appLockPinLength: number;
 }
 
 export interface Base64FilePayload {

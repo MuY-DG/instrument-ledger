@@ -116,6 +116,12 @@ pub struct AppSettings {
     pub alert_popup_frequency: String,
     pub alert_popup_interval_hours: i64,
     pub auto_lock_minutes: i64,
+    pub close_behavior: String,
+    pub keep_admin_session: bool,
+    pub app_lock_enabled: bool,
+    pub app_lock_pin_length: usize,
+    pub lock_on_hide: bool,
+    pub lock_on_startup: bool,
     pub doc_code: String,
     pub doc_version: String,
     pub doc_title: String,
@@ -135,6 +141,10 @@ pub struct SettingsUpdateInput {
     pub alert_popup_frequency: Option<String>,
     pub alert_popup_interval_hours: Option<i64>,
     pub auto_lock_minutes: Option<i64>,
+    pub close_behavior: Option<String>,
+    pub keep_admin_session: Option<bool>,
+    pub lock_on_hide: Option<bool>,
+    pub lock_on_startup: Option<bool>,
     pub doc_code: Option<String>,
     pub doc_version: Option<String>,
     pub doc_title: Option<String>,
@@ -151,6 +161,8 @@ pub struct AuthStatus {
     pub is_admin: bool,
     pub username: String,
     pub is_locked: bool,
+    pub app_lock_enabled: bool,
+    pub app_lock_pin_length: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
