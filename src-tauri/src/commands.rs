@@ -1,0 +1,993 @@
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use base64::Engine;
+use rusqlite::{params, Connection};
+use serde::Serialize;
+use tauri::{AppHandle, State};
+use tauri_plugin_opener::OpenerExt;
+
+use crate::auth::{hash_password, verify_password, SessionState};
+use crate::backup::{create_backup, restore_backup};
+use crate::db::{
+    calc_next_cal_date, get_setting, is_account_initialized, load_app_settings, now_iso,
+    query_instrument_by_id, query_instruments, query_reports_for_instrument, set_setting,
+};
+use crate::models::{
+    AddReportInput, AppSettings, AuthStatus, BackupResult, CalibrationReport, DataDirInfo,
+    ImportResult, Instrument, InstrumentInput, RestoreResult, SettingsUpdateInput,
+    UpdateCheckResult,
+};
+use crate::storage::{
+    dir_total_size, mime_from_ext, remove_stored_file, resolve_stored_path, save_image_from_base64,
+    save_image_from_path, save_report_from_base64, save_report_from_path,
+};
+use crate::updater::{check_github_release, download_and_launch_installer};
+
+pub struct AppState {
+    pub db: Mutex<Connection>,
+    pub session: Mutex<SessionState>,
+    pub data_dir: PathBuf,
+    pub db_path: PathBuf,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Base64FilePayload {
+    pub mime: String,
+    pub base64: String,
+    pub file_name: String,
+    pub size: usize,
+}
+
+fn check_unlocked(state: &State<'_, AppState>) -> Result<(), String> {
+    let session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    if session.is_locked {
+        return Err("应用当前处于锁屏保护状态".to_string());
+    }
+    Ok(())
+}
+
+fn check_admin(state: &State<'_, AppState>) -> Result<(), String> {
+    let session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.require_admin()
+}
+
+// ---------------- Auth & Lock ----------------
+
+#[tauri::command]
+pub fn get_auth_status(state: State<'_, AppState>) -> Result<AuthStatus, String> {
+    let session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let initialized = is_account_initialized(&conn)?;
+    let username = if initialized {
+        get_setting(&conn, "admin_username")?.unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    Ok(AuthStatus {
+        is_initialized: initialized,
+        is_admin: initialized && session.is_admin,
+        username,
+        is_locked: initialized && session.is_locked,
+    })
+}
+
+#[tauri::command]
+pub fn setup_initial_admin(
+    state: State<'_, AppState>,
+    username: String,
+    password: String,
+    doc_title: Option<String>,
+    doc_code: Option<String>,
+) -> Result<AuthStatus, String> {
+    let clean_user = username.trim().to_string();
+    let user_len = clean_user.chars().count();
+    if !(2..=32).contains(&user_len) {
+        return Err("管理员用户名长度需在 2 到 32 个字符之间".to_string());
+    }
+    if password.chars().count() < 6 {
+        return Err("管理员密码长度不能少于 6 位".to_string());
+    }
+
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if is_account_initialized(&conn)? {
+        return Err("管理员账号已完成初始化，请直接登录".to_string());
+    }
+
+    let pwd_hash = hash_password(&password)?;
+    set_setting(&conn, "admin_username", &clean_user)?;
+    set_setting(&conn, "admin_password_hash", &pwd_hash)?;
+    set_setting(&conn, "account_initialized", "1")?;
+    set_setting(&conn, "must_change_password", "0")?;
+
+    if let Some(title) = doc_title {
+        let t = title.trim();
+        if !t.is_empty() {
+            set_setting(&conn, "doc_title", t)?;
+        }
+    }
+    if let Some(code) = doc_code {
+        let c = code.trim();
+        if !c.is_empty() {
+            set_setting(&conn, "doc_code", c)?;
+        }
+    }
+
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.is_admin = true;
+    session.is_locked = false;
+
+    Ok(AuthStatus {
+        is_initialized: true,
+        is_admin: true,
+        username: clean_user,
+        is_locked: false,
+    })
+}
+
+#[tauri::command]
+pub fn admin_login(
+    state: State<'_, AppState>,
+    username: String,
+    password: String,
+) -> Result<AuthStatus, String> {
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if !is_account_initialized(&conn)? {
+        return Err("管理员账号尚未初始化，请先完成首次安装向导".to_string());
+    }
+    let stored_user = get_setting(&conn, "admin_username")?.unwrap_or_default();
+    let stored_hash = get_setting(&conn, "admin_password_hash")?
+        .ok_or_else(|| "管理员密码未初始化".to_string())?;
+
+    if username.trim() != stored_user || !verify_password(&password, &stored_hash) {
+        return Err("账号或密码错误".to_string());
+    }
+
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.is_admin = true;
+    session.is_locked = false;
+
+    Ok(AuthStatus {
+        is_initialized: true,
+        is_admin: true,
+        username: stored_user,
+        is_locked: false,
+    })
+}
+
+#[tauri::command]
+pub fn admin_logout(state: State<'_, AppState>) -> Result<AuthStatus, String> {
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.is_admin = false;
+    session.is_locked = false;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let initialized = is_account_initialized(&conn)?;
+    let username = if initialized {
+        get_setting(&conn, "admin_username")?.unwrap_or_default()
+    } else {
+        String::new()
+    };
+
+    Ok(AuthStatus {
+        is_initialized: initialized,
+        is_admin: false,
+        username,
+        is_locked: false,
+    })
+}
+
+#[tauri::command]
+pub fn lock_app(state: State<'_, AppState>) -> Result<AuthStatus, String> {
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if !is_account_initialized(&conn)? {
+        return Err("请先完成管理员账号初始化后再启用锁屏".to_string());
+    }
+    let username = get_setting(&conn, "admin_username")?.unwrap_or_default();
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.is_locked = true;
+
+    Ok(AuthStatus {
+        is_initialized: true,
+        is_admin: session.is_admin,
+        username,
+        is_locked: true,
+    })
+}
+
+#[tauri::command]
+pub fn unlock_app(state: State<'_, AppState>, password: String) -> Result<AuthStatus, String> {
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if !is_account_initialized(&conn)? {
+        return Err("管理员账号尚未初始化".to_string());
+    }
+    let stored_hash = get_setting(&conn, "admin_password_hash")?
+        .ok_or_else(|| "管理员密码未初始化".to_string())?;
+    if !verify_password(&password, &stored_hash) {
+        return Err("解锁密码错误".to_string());
+    }
+    let username = get_setting(&conn, "admin_username")?.unwrap_or_default();
+
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.is_locked = false;
+
+    Ok(AuthStatus {
+        is_initialized: true,
+        is_admin: session.is_admin,
+        username,
+        is_locked: false,
+    })
+}
+
+#[tauri::command]
+pub fn change_admin_password(
+    state: State<'_, AppState>,
+    old_password: String,
+    new_password: String,
+    new_username: Option<String>,
+) -> Result<(), String> {
+    check_admin(&state)?;
+    if new_password.chars().count() < 6 {
+        return Err("新密码长度不能少于 6 位".to_string());
+    }
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let stored_hash = get_setting(&conn, "admin_password_hash")?
+        .ok_or_else(|| "管理员密码未初始化".to_string())?;
+    if !verify_password(&old_password, &stored_hash) {
+        return Err("原密码不正确".to_string());
+    }
+    let new_hash = hash_password(&new_password)?;
+    set_setting(&conn, "admin_password_hash", &new_hash)?;
+    set_setting(&conn, "account_initialized", "1")?;
+    set_setting(&conn, "must_change_password", "0")?;
+    if let Some(u) = new_username {
+        let trimmed = u.trim();
+        let len = trimmed.chars().count();
+        if (2..=32).contains(&len) {
+            set_setting(&conn, "admin_username", trimmed)?;
+        }
+    }
+    Ok(())
+}
+
+// ---------------- Instruments CRUD ----------------
+
+#[tauri::command]
+pub fn list_instruments(state: State<'_, AppState>) -> Result<Vec<Instrument>, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    query_instruments(&conn)
+}
+
+#[tauri::command]
+pub fn create_instrument(
+    state: State<'_, AppState>,
+    input: InstrumentInput,
+) -> Result<Instrument, String> {
+    check_admin(&state)?;
+    if input.name.trim().is_empty() {
+        return Err("仪器/检具名称不能为空".to_string());
+    }
+
+    let photo_path = if let Some(ref src) = input.photo_source_path {
+        if !src.trim().is_empty() {
+            save_image_from_path(&state.data_dir, Path::new(src.trim()))?
+        } else {
+            String::new()
+        }
+    } else if let Some(ref b64) = input.photo_base64 {
+        if !b64.trim().is_empty() {
+            save_image_from_base64(&state.data_dir, b64, input.photo_filename.as_deref())?
+        } else {
+            String::new()
+        }
+    } else {
+        String::new()
+    };
+
+    let category = if input.category == "fixture" {
+        "fixture"
+    } else {
+        "gauge"
+    };
+
+    let next_cal = if input.exempt_calibration {
+        String::new()
+    } else {
+        let manual = input.next_cal_date.clone().unwrap_or_default();
+        if !manual.trim().is_empty() {
+            manual.trim().to_string()
+        } else {
+            calc_next_cal_date(&input.last_cal_date, input.cal_cycle_months)
+        }
+    };
+
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let next_seq: i64 = match input.seq_no {
+        Some(n) if n > 0 => n,
+        _ => conn
+            .query_row(
+                "SELECT COALESCE(MAX(seq_no), 0) + 1 FROM instruments WHERE category = ?1",
+                params![category],
+                |r| r.get(0),
+            )
+            .unwrap_or(1),
+    };
+
+    let now = now_iso();
+    conn.execute(
+        "INSERT INTO instruments (
+            category, seq_no, department, name, purchase_date, serial_no, model_spec,
+            location, calibration_type, record_type, last_cal_date, cal_cycle_months,
+            next_cal_date, exempt_calibration, remark, supplier, contact_person,
+            contact_phone, cal_agency, photo_path, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+        params![
+            category,
+            next_seq,
+            input.department.trim(),
+            input.name.trim(),
+            input.purchase_date.trim(),
+            input.serial_no.trim(),
+            input.model_spec.trim(),
+            input.location.trim(),
+            input.calibration_type.trim(),
+            input.record_type.trim(),
+            input.last_cal_date.trim(),
+            input.cal_cycle_months,
+            next_cal,
+            if input.exempt_calibration { 1 } else { 0 },
+            input.remark.trim(),
+            input.supplier.trim(),
+            input.contact_person.trim(),
+            input.contact_phone.trim(),
+            input.cal_agency.trim(),
+            photo_path,
+            now,
+            now,
+        ],
+    )
+    .map_err(|e| format!("新增仪器失败: {}", e))?;
+
+    let new_id = conn.last_insert_rowid();
+    query_instrument_by_id(&conn, new_id)
+}
+
+#[tauri::command]
+pub fn update_instrument(
+    state: State<'_, AppState>,
+    id: i64,
+    input: InstrumentInput,
+) -> Result<Instrument, String> {
+    check_admin(&state)?;
+    if input.name.trim().is_empty() {
+        return Err("仪器/检具名称不能为空".to_string());
+    }
+
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let existing = query_instrument_by_id(&conn, id)?;
+
+    // Preserve original photo unless explicitly removed or replaced
+    let mut final_photo_path = existing.photo_path.clone();
+    if input.remove_photo.unwrap_or(false) {
+        remove_stored_file(&state.data_dir, &existing.photo_path);
+        final_photo_path.clear();
+    } else if let Some(ref src) = input.photo_source_path {
+        if !src.trim().is_empty() {
+            let new_rel = save_image_from_path(&state.data_dir, Path::new(src.trim()))?;
+            remove_stored_file(&state.data_dir, &existing.photo_path);
+            final_photo_path = new_rel;
+        }
+    } else if let Some(ref b64) = input.photo_base64 {
+        if !b64.trim().is_empty() {
+            let new_rel =
+                save_image_from_base64(&state.data_dir, b64, input.photo_filename.as_deref())?;
+            remove_stored_file(&state.data_dir, &existing.photo_path);
+            final_photo_path = new_rel;
+        }
+    }
+
+    let category = if input.category == "fixture" {
+        "fixture"
+    } else {
+        "gauge"
+    };
+
+    let next_cal = if input.exempt_calibration {
+        String::new()
+    } else {
+        let manual = input.next_cal_date.clone().unwrap_or_default();
+        if !manual.trim().is_empty() {
+            manual.trim().to_string()
+        } else {
+            calc_next_cal_date(&input.last_cal_date, input.cal_cycle_months)
+        }
+    };
+
+    let seq_no = input.seq_no.unwrap_or(existing.seq_no);
+    let now = now_iso();
+
+    conn.execute(
+        "UPDATE instruments SET
+            category = ?1, seq_no = ?2, department = ?3, name = ?4, purchase_date = ?5,
+            serial_no = ?6, model_spec = ?7, location = ?8, calibration_type = ?9,
+            record_type = ?10, last_cal_date = ?11, cal_cycle_months = ?12,
+            next_cal_date = ?13, exempt_calibration = ?14, remark = ?15, supplier = ?16,
+            contact_person = ?17, contact_phone = ?18, cal_agency = ?19, photo_path = ?20,
+            updated_at = ?21
+         WHERE id = ?22",
+        params![
+            category,
+            seq_no,
+            input.department.trim(),
+            input.name.trim(),
+            input.purchase_date.trim(),
+            input.serial_no.trim(),
+            input.model_spec.trim(),
+            input.location.trim(),
+            input.calibration_type.trim(),
+            input.record_type.trim(),
+            input.last_cal_date.trim(),
+            input.cal_cycle_months,
+            next_cal,
+            if input.exempt_calibration { 1 } else { 0 },
+            input.remark.trim(),
+            input.supplier.trim(),
+            input.contact_person.trim(),
+            input.contact_phone.trim(),
+            input.cal_agency.trim(),
+            final_photo_path,
+            now,
+            id,
+        ],
+    )
+    .map_err(|e| format!("更新仪器记录失败: {}", e))?;
+
+    query_instrument_by_id(&conn, id)
+}
+
+#[tauri::command]
+pub fn delete_instrument(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    check_admin(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let existing = query_instrument_by_id(&conn, id)?;
+    let reports = query_reports_for_instrument(&conn, id)?;
+
+    conn.execute("DELETE FROM instruments WHERE id = ?1", params![id])
+        .map_err(|e| format!("删除仪器失败: {}", e))?;
+
+    remove_stored_file(&state.data_dir, &existing.photo_path);
+    for r in reports {
+        remove_stored_file(&state.data_dir, &r.stored_path);
+    }
+    let inst_report_dir = state.data_dir.join("reports").join(id.to_string());
+    let _ = fs::remove_dir_all(inst_report_dir);
+
+    Ok(())
+}
+
+#[tauri::command]
+pub fn batch_import_instruments(
+    state: State<'_, AppState>,
+    rows: Vec<InstrumentInput>,
+    replace_existing: bool,
+) -> Result<ImportResult, String> {
+    check_admin(&state)?;
+    let mut conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+
+    if replace_existing {
+        // Also clean up old report/photo files if replacing entire ledger
+        let old_instruments = query_instruments(&conn)?;
+        for inst in &old_instruments {
+            remove_stored_file(&state.data_dir, &inst.photo_path);
+            let _ = fs::remove_dir_all(state.data_dir.join("reports").join(inst.id.to_string()));
+        }
+    }
+
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("开启事务失败: {}", e))?;
+
+    if replace_existing {
+        tx.execute("DELETE FROM calibration_reports", [])
+            .map_err(|e| format!("清空旧报告记录失败: {}", e))?;
+        tx.execute("DELETE FROM instruments", [])
+            .map_err(|e| format!("清空旧台账失败: {}", e))?;
+    }
+
+    let now = now_iso();
+    let mut gauge_seq: i64 = tx
+        .query_row(
+            "SELECT COALESCE(MAX(seq_no), 0) FROM instruments WHERE category = 'gauge'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let mut fixture_seq: i64 = tx
+        .query_row(
+            "SELECT COALESCE(MAX(seq_no), 0) FROM instruments WHERE category = 'fixture'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let mut gauge_count = 0usize;
+    let mut fixture_count = 0usize;
+
+    {
+        let mut stmt = tx
+            .prepare(
+                "INSERT INTO instruments (
+                    category, seq_no, department, name, purchase_date, serial_no, model_spec,
+                    location, calibration_type, record_type, last_cal_date, cal_cycle_months,
+                    next_cal_date, exempt_calibration, remark, supplier, contact_person,
+                    contact_phone, cal_agency, photo_path, created_at, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, '', ?20, ?21)",
+            )
+            .map_err(|e| format!("准备导入语句失败: {}", e))?;
+
+        for row in rows {
+            if row.name.trim().is_empty() {
+                continue;
+            }
+            let is_fixture = row.category == "fixture";
+            let category = if is_fixture { "fixture" } else { "gauge" };
+            let seq = if is_fixture {
+                fixture_seq += 1;
+                fixture_count += 1;
+                if replace_existing {
+                    row.seq_no.filter(|&n| n > 0).unwrap_or(fixture_seq)
+                } else {
+                    fixture_seq
+                }
+            } else {
+                gauge_seq += 1;
+                gauge_count += 1;
+                if replace_existing {
+                    row.seq_no.filter(|&n| n > 0).unwrap_or(gauge_seq)
+                } else {
+                    gauge_seq
+                }
+            };
+
+            let next_cal = if row.exempt_calibration {
+                String::new()
+            } else {
+                let manual = row.next_cal_date.clone().unwrap_or_default();
+                if !manual.trim().is_empty() {
+                    manual.trim().to_string()
+                } else {
+                    calc_next_cal_date(&row.last_cal_date, row.cal_cycle_months)
+                }
+            };
+
+            stmt.execute(params![
+                category,
+                seq,
+                row.department.trim(),
+                row.name.trim(),
+                row.purchase_date.trim(),
+                row.serial_no.trim(),
+                row.model_spec.trim(),
+                row.location.trim(),
+                row.calibration_type.trim(),
+                row.record_type.trim(),
+                row.last_cal_date.trim(),
+                row.cal_cycle_months,
+                next_cal,
+                if row.exempt_calibration { 1 } else { 0 },
+                row.remark.trim(),
+                row.supplier.trim(),
+                row.contact_person.trim(),
+                row.contact_phone.trim(),
+                row.cal_agency.trim(),
+                now,
+                now,
+            ])
+            .map_err(|e| format!("导入行 [{}] 失败: {}", row.name, e))?;
+        }
+    }
+
+    tx.commit().map_err(|e| format!("提交导入事务失败: {}", e))?;
+
+    Ok(ImportResult {
+        imported_count: gauge_count + fixture_count,
+        gauge_count,
+        fixture_count,
+        mode: if replace_existing {
+            "replace".to_string()
+        } else {
+            "append".to_string()
+        },
+    })
+}
+
+// ---------------- Calibration Report Attachments ----------------
+
+#[tauri::command]
+pub fn list_reports(
+    state: State<'_, AppState>,
+    instrument_id: i64,
+) -> Result<Vec<CalibrationReport>, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    query_reports_for_instrument(&conn, instrument_id)
+}
+
+#[tauri::command]
+pub fn add_report(
+    state: State<'_, AppState>,
+    input: AddReportInput,
+) -> Result<CalibrationReport, String> {
+    check_admin(&state)?;
+
+    let (file_name, stored_path, file_ext, file_size) = if let Some(ref src) = input.source_path {
+        if !src.trim().is_empty() {
+            save_report_from_path(&state.data_dir, input.instrument_id, Path::new(src.trim()))?
+        } else {
+            return Err("请选择要上传的校验报告文件".to_string());
+        }
+    } else if let Some(ref b64) = input.file_base64 {
+        let orig = input
+            .file_name
+            .as_deref()
+            .unwrap_or("校准报告.pdf");
+        save_report_from_base64(&state.data_dir, input.instrument_id, b64, orig)?
+    } else {
+        return Err("请选择要上传的校验报告文件".to_string());
+    };
+
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let instrument = query_instrument_by_id(&conn, input.instrument_id)?;
+    let now = now_iso();
+
+    conn.execute(
+        "INSERT INTO calibration_reports (
+            instrument_id, file_name, stored_path, file_ext, file_size,
+            cal_date, cal_agency, remark, uploaded_at
+         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        params![
+            input.instrument_id,
+            file_name,
+            stored_path,
+            file_ext,
+            file_size,
+            input.cal_date.trim(),
+            input.cal_agency.trim(),
+            input.remark.trim(),
+            now,
+        ],
+    )
+    .map_err(|e| format!("保存报告记录失败: {}", e))?;
+
+    let report_id = conn.last_insert_rowid();
+
+    // Optionally sync instrument calibration date & recalculate next calibration date
+    if input.sync_instrument_cal_date && !input.cal_date.trim().is_empty() {
+        let cycle = if instrument.cal_cycle_months > 0 {
+            instrument.cal_cycle_months
+        } else {
+            12
+        };
+        let next_cal = calc_next_cal_date(input.cal_date.trim(), cycle);
+        let agency = if !input.cal_agency.trim().is_empty() {
+            input.cal_agency.trim().to_string()
+        } else {
+            instrument.cal_agency.clone()
+        };
+        conn.execute(
+            "UPDATE instruments
+             SET last_cal_date = ?1, next_cal_date = ?2, cal_agency = ?3,
+                 exempt_calibration = 0, updated_at = ?4
+             WHERE id = ?5",
+            params![input.cal_date.trim(), next_cal, agency, now, input.instrument_id],
+        )
+        .map_err(|e| format!("同步更新仪器校验日期失败: {}", e))?;
+    }
+
+    Ok(CalibrationReport {
+        id: report_id,
+        instrument_id: input.instrument_id,
+        file_name,
+        stored_path,
+        file_ext,
+        file_size,
+        cal_date: input.cal_date.trim().to_string(),
+        cal_agency: input.cal_agency.trim().to_string(),
+        remark: input.remark.trim().to_string(),
+        uploaded_at: now,
+    })
+}
+
+#[tauri::command]
+pub fn delete_report(state: State<'_, AppState>, report_id: i64) -> Result<(), String> {
+    check_admin(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let stored_path: String = conn
+        .query_row(
+            "SELECT stored_path FROM calibration_reports WHERE id = ?1",
+            params![report_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("未找到该校验报告: {}", e))?;
+
+    conn.execute("DELETE FROM calibration_reports WHERE id = ?1", params![report_id])
+        .map_err(|e| format!("删除校验报告失败: {}", e))?;
+
+    remove_stored_file(&state.data_dir, &stored_path);
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_report_external(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    report_id: i64,
+) -> Result<(), String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let stored_path: String = conn
+        .query_row(
+            "SELECT stored_path FROM calibration_reports WHERE id = ?1",
+            params![report_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("未找到报告记录: {}", e))?;
+
+    let full_path = resolve_stored_path(&state.data_dir, &stored_path)?;
+    if !full_path.exists() {
+        return Err("报告文件不存在，可能已被手动删除".to_string());
+    }
+    app.opener()
+        .open_path(full_path.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| format!("调用系统软件打开报告失败: {}", e))
+}
+
+#[tauri::command]
+pub fn export_report_to_path(
+    state: State<'_, AppState>,
+    report_id: i64,
+    dest_path: String,
+) -> Result<(), String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let stored_path: String = conn
+        .query_row(
+            "SELECT stored_path FROM calibration_reports WHERE id = ?1",
+            params![report_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| format!("未找到报告记录: {}", e))?;
+
+    let full_path = resolve_stored_path(&state.data_dir, &stored_path)?;
+    fs::copy(&full_path, Path::new(dest_path.trim()))
+        .map_err(|e| format!("另存为报告失败: {}", e))?;
+    Ok(())
+}
+
+// ---------------- Managed File & External File Helpers ----------------
+
+#[tauri::command]
+pub fn read_stored_file_base64(
+    state: State<'_, AppState>,
+    rel_path: String,
+) -> Result<Base64FilePayload, String> {
+    check_unlocked(&state)?;
+    let full = resolve_stored_path(&state.data_dir, &rel_path)?;
+    let bytes = fs::read(&full).map_err(|e| format!("读取本地文件失败: {}", e))?;
+    let ext = full
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    let file_name = full
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file")
+        .to_string();
+
+    Ok(Base64FilePayload {
+        mime: mime_from_ext(ext).to_string(),
+        size: bytes.len(),
+        base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        file_name,
+    })
+}
+
+#[tauri::command]
+pub fn read_external_file_base64(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Base64FilePayload, String> {
+    check_admin(&state)?;
+    let p = Path::new(path.trim());
+    let bytes = fs::read(p).map_err(|e| format!("读取文件失败: {}", e))?;
+    let ext = p.extension().and_then(|s| s.to_str()).unwrap_or("");
+    let file_name = p
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("file")
+        .to_string();
+
+    Ok(Base64FilePayload {
+        mime: mime_from_ext(ext).to_string(),
+        size: bytes.len(),
+        base64: base64::engine::general_purpose::STANDARD.encode(&bytes),
+        file_name,
+    })
+}
+
+#[tauri::command]
+pub fn write_external_file_base64(
+    state: State<'_, AppState>,
+    path: String,
+    base64_data: String,
+) -> Result<(), String> {
+    check_unlocked(&state)?;
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_data.trim())
+        .map_err(|e| format!("解码导出数据失败: {}", e))?;
+    let dest = Path::new(path.trim());
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {}", e))?;
+    }
+    fs::write(dest, bytes).map_err(|e| format!("保存导出文件失败: {}", e))
+}
+
+// ---------------- Settings, Logo, Data Dir, Backup & Restore ----------------
+
+#[tauri::command]
+pub fn get_settings(state: State<'_, AppState>) -> Result<AppSettings, String> {
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    load_app_settings(&conn)
+}
+
+#[tauri::command]
+pub fn update_settings(
+    state: State<'_, AppState>,
+    input: SettingsUpdateInput,
+) -> Result<AppSettings, String> {
+    check_admin(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if let Some(w) = input.warning_days {
+        set_setting(&conn, "warning_days", &w.clamp(1, 365).to_string())?;
+    }
+    if let Some(m) = input.auto_lock_minutes {
+        set_setting(&conn, "auto_lock_minutes", &m.clamp(0, 240).to_string())?;
+    }
+    if let Some(v) = input.doc_code {
+        set_setting(&conn, "doc_code", v.trim())?;
+    }
+    if let Some(v) = input.doc_version {
+        set_setting(&conn, "doc_version", v.trim())?;
+    }
+    if let Some(v) = input.doc_title {
+        set_setting(&conn, "doc_title", v.trim())?;
+    }
+    if let Some(v) = input.doc_subtitle {
+        set_setting(&conn, "doc_subtitle", v.trim())?;
+    }
+    if let Some(v) = input.weekly_notice {
+        set_setting(&conn, "weekly_notice", v.trim())?;
+    }
+    if let Some(v) = input.github_repo {
+        set_setting(&conn, "github_repo", v.trim())?;
+    }
+    if let Some(v) = input.update_proxy_url {
+        set_setting(&conn, "update_proxy_url", v.trim())?;
+    }
+    load_app_settings(&conn)
+}
+
+#[tauri::command]
+pub fn upload_company_logo(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> Result<String, String> {
+    check_admin(&state)?;
+    let new_rel = save_image_from_path(&state.data_dir, Path::new(source_path.trim()))?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if let Ok(Some(old)) = get_setting(&conn, "company_logo_path") {
+        remove_stored_file(&state.data_dir, &old);
+    }
+    set_setting(&conn, "company_logo_path", &new_rel)?;
+    Ok(new_rel)
+}
+
+#[tauri::command]
+pub fn remove_company_logo(state: State<'_, AppState>) -> Result<(), String> {
+    check_admin(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if let Ok(Some(old)) = get_setting(&conn, "company_logo_path") {
+        remove_stored_file(&state.data_dir, &old);
+    }
+    set_setting(&conn, "company_logo_path", "")?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_data_dir_info(state: State<'_, AppState>) -> Result<DataDirInfo, String> {
+    let db_size = fs::metadata(&state.db_path).map(|m| m.len()).unwrap_or(0);
+    let img_size = dir_total_size(&state.data_dir.join("images"));
+    let rep_size = dir_total_size(&state.data_dir.join("reports"));
+
+    Ok(DataDirInfo {
+        data_dir: state.data_dir.to_string_lossy().to_string(),
+        db_size_bytes: db_size,
+        attachments_size_bytes: img_size + rep_size,
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+    })
+}
+
+#[tauri::command]
+pub fn open_data_dir(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    check_admin(&state)?;
+    app.opener()
+        .open_path(state.data_dir.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| format!("打开数据目录失败: {}", e))
+}
+
+#[tauri::command]
+pub fn create_local_backup(
+    state: State<'_, AppState>,
+    dest_zip_path: String,
+) -> Result<BackupResult, String> {
+    check_admin(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    create_backup(&conn, &state.data_dir, Path::new(dest_zip_path.trim()))
+}
+
+#[tauri::command]
+pub fn restore_local_backup(
+    state: State<'_, AppState>,
+    src_zip_path: String,
+) -> Result<RestoreResult, String> {
+    check_admin(&state)?;
+    let mut conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    restore_backup(
+        &mut conn,
+        &state.db_path,
+        &state.data_dir,
+        Path::new(src_zip_path.trim()),
+    )
+}
+
+// ---------------- Updates ----------------
+
+#[tauri::command]
+pub async fn check_for_updates(
+    state: State<'_, AppState>,
+    github_repo_override: Option<String>,
+    proxy_override: Option<String>,
+) -> Result<UpdateCheckResult, String> {
+    let (repo, proxy) = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        let settings = load_app_settings(&conn)?;
+        (
+            github_repo_override
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(settings.github_repo),
+            proxy_override.unwrap_or(settings.update_proxy_url),
+        )
+    };
+    check_github_release(&repo, &proxy).await
+}
+
+#[tauri::command]
+pub async fn download_and_launch_update(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    download_url: String,
+    asset_name: String,
+    proxy_override: Option<String>,
+) -> Result<String, String> {
+    let proxy = match proxy_override {
+        Some(p) => p,
+        None => {
+            let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+            load_app_settings(&conn)?.update_proxy_url
+        }
+    };
+    download_and_launch_installer(&app, &download_url, &asset_name, &proxy).await
+}

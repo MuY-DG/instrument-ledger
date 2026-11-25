@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+dist-ssr/
+src-tauri/target/
+src-tauri/gen/
+
+# Sensitive local ledger spreadsheets & databases (DO NOT COMMIT)
+*.xlsx
+*.xls
+*.csv
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.zip
+
+# Signing keys & env
+.env
+.env.*
+*.key
+*.pem
+tauri.key
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log

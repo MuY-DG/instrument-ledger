@@ -1,0 +1,180 @@
+name: Build and Release Desktop Installers
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "发布标签版本号（例如 v1.1.0；留空则仅构建 macOS & Windows 安装包产物，不创建 Release）"
+        required: false
+        default: ""
+      draft:
+        description: "是否发布为草稿 Release（仅在填写版本号时生效）"
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-tauri:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macos-universal
+            platform: macos-latest
+            rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
+            args: "--target universal-apple-darwin --bundles dmg"
+            artifact_glob: "src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg"
+          - name: windows-x64
+            platform: windows-latest
+            rust_targets: "x86_64-pc-windows-msvc"
+            args: "--target x86_64-pc-windows-msvc --bundles nsis"
+            artifact_glob: "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe"
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 12
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Rust build cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        shell: bash
+        run: pnpm install --frozen-lockfile
+
+      - name: Run frontend typecheck & unit checks
+        shell: bash
+        run: |
+          pnpm build
+          pnpm test:excel
+
+      - name: Run Rust backend tests
+        shell: bash
+        run: cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Build Tauri desktop installer
+        shell: bash
+        env:
+          CI: true
+        run: pnpm tauri build ${{ matrix.args }}
+
+      - name: Stage installer artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          shopt -s nullglob
+          files=(${{ matrix.artifact_glob }})
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No installer files matched: ${{ matrix.artifact_glob }}"
+            find src-tauri/target -maxdepth 5 -type f \( -name "*.dmg" -o -name "*.exe" \) || true
+            exit 1
+          fi
+          cp -v "${files[@]}" release-artifacts/
+          ls -lh release-artifacts/
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: InstrumentLedger-${{ matrix.name }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build-tauri
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
+
+    steps:
+      - name: Download built installers
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Verify installers and publish Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          INPUT_TAG: ${{ inputs.tag_name }}
+          INPUT_DRAFT: ${{ inputs.draft }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF_NAME}"
+          else
+            TAG="${INPUT_TAG}"
+          fi
+
+          echo "Publishing Release for tag: ${TAG}"
+          ls -lh release-assets/
+
+          CHECKSUMS=$(cd release-assets && sha256sum *)
+
+          cat <<EOF > release-notes.md
+          ## 安装包下载说明
+
+          - **macOS（Apple Silicon M 系列 & Intel 通用）**：下载 \`*_universal.dmg\`，双击挂载后将应用拖入「应用程序」文件夹。
+            > 若首次打开提示「无法验证开发者」或「已损坏」（个人自构建未签名），可在终端执行一次 \`xattr -cr /Applications/InstrumentLedger.app\` 后正常启动。
+          - **Windows（64 位）**：下载 \`*_x64-setup.exe\` 安装包直接双击安装（覆盖升级不会清除本地 SQLite 数据库、位置照片与校验报告附件）。
+
+          ## 首次启动说明
+          - 软件无默认账号或初始密码，安装后首次打开将播放启动动画并引导初始化本机管理员账号。
+
+          ## SHA-256 校验值
+          \`\`\`
+          ${CHECKSUMS}
+          \`\`\`
+          EOF
+
+          DRAFT_FLAG=""
+          if [[ "${INPUT_DRAFT}" == "true" ]]; then
+            DRAFT_FLAG="--draft"
+          fi
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists; uploading assets with --clobber and updating notes..."
+            gh release upload "${TAG}" release-assets/* --clobber
+            gh release edit "${TAG}" \
+              --title "监视与测量设备管理台账 ${TAG}" \
+              --notes-file release-notes.md
+          else
+            gh release create "${TAG}" release-assets/* \
+              --target "${GITHUB_SHA}" \
+              --title "监视与测量设备管理台账 ${TAG}" \
+              --notes-file release-notes.md \
+              ${DRAFT_FLAG}
+          fi
