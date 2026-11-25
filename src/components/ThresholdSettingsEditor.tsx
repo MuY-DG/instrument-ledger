@@ -18,6 +18,7 @@ import {
   normalizeThresholds,
 } from "@/lib/thresholdColors";
 import { cn } from "@/lib/utils";
+import { InfoTip } from "@/components/InfoTip";
 import type {
   AlertPopupFrequency,
   AppSettings,
@@ -223,17 +224,17 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
     <div className="space-y-5">
       {!isAdmin && (
         <div className="px-4 py-3 rounded-xl bg-amber-500/[0.08] border border-amber-500/25 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5 text-xs text-amber-800 dark:text-amber-300">
+          <div className="flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
             <Lock className="h-4 w-4 shrink-0 text-amber-500" />
-            <span>当前为只读浏览模式，登录管理员账号后即可自定义预警天数、颜色与弹窗策略。</span>
+            <span>只读模式，登录后可编辑</span>
           </div>
           {onRequestLogin && (
             <button
               type="button"
               onClick={onRequestLogin}
-              className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium shrink-0 transition"
+              className="px-3.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium shrink-0 transition"
             >
-              管理员登录
+              登录
             </button>
           )}
         </div>
@@ -241,17 +242,13 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
 
       {/* Section 1: Multi-tier Thresholds */}
       <section className="space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <Palette className="h-4 w-4 text-indigo-500" />
-              <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                多级到期预警天数与颜色阈值
-              </h3>
-            </div>
-            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-              系统按剩余有效天数自动匹配最紧迫的预警档位（例如 15天内显示紧急色、30天内显示预警色、60天内显示提醒色）；已超期固定高亮为玫红色。
-            </p>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Palette className="h-4 w-4 text-indigo-500" />
+            <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+              预警阈值
+            </h3>
+            <InfoTip content="按剩余天数自动匹配最紧迫的预警档位（如 15天 / 30天 / 60天）；已超期固定高亮为玫红色。" />
           </div>
 
           {isAdmin && (
@@ -398,7 +395,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
           <div className="p-3.5 rounded-xl border border-dashed border-zinc-300 dark:border-white/[0.14] bg-white dark:bg-white/[0.015] space-y-2.5">
             <div className="text-[11px] font-medium text-zinc-600 dark:text-zinc-300 flex items-center gap-1.5">
               <Plus className="h-3.5 w-3.5 text-indigo-500" />
-              <span>自定义添加新阈值（如 90天、7天、3天等）</span>
+              <span>添加阈值</span>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="inline-flex items-center gap-1.5 text-xs text-zinc-500">
@@ -432,7 +429,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
                     handleAddThreshold();
                   }
                 }}
-                placeholder="标签名称（选填，默认如：7天预警）"
+                placeholder="标签名称（选填）"
                 className={`${INPUT_CLS} flex-1 min-w-[160px]`}
               />
 
@@ -490,14 +487,10 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Bell className="h-4 w-4 text-amber-500" />
-            <div>
-              <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                自动预警弹窗提示策略
-              </h3>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                仅当存在「已超期」或命中以上阈值的设备时自动弹窗提醒；随时可点击顶部铃铛按钮手动查看
-              </p>
-            </div>
+            <h3 className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+              自动弹窗提醒
+            </h3>
+            <InfoTip content="仅当存在已超期或命中以上阈值的设备时自动弹窗；也可随时点击顶部铃铛手动查看。" />
           </div>
 
           <button
@@ -534,18 +527,18 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
             [
               {
                 id: "every_open",
-                title: "每次打开时弹窗",
-                desc: "每次启动应用自动核查并弹窗提醒（默认）",
+                title: "每次打开",
+                tip: "每次启动应用时自动核查并弹窗提醒",
               },
               {
                 id: "daily",
-                title: "每天首次打开时",
-                desc: "同一天内仅首次打开弹出一次，减少重复打扰",
+                title: "每天一次",
+                tip: "同一天内仅首次打开时弹出一次",
               },
               {
                 id: "interval",
-                title: "打开 + 定时提醒",
-                desc: "启动提醒，且应用常驻时按间隔周期再次弹窗",
+                title: "定时提醒",
+                tip: "启动时提醒，且应用常驻期间按设定间隔再次弹出",
               },
             ] as const
           ).map((opt) => {
@@ -557,15 +550,16 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
                 disabled={!isAdmin || !popupEnabled}
                 onClick={() => setPopupFrequency(opt.id)}
                 className={cn(
-                  "p-3 rounded-xl border text-left transition",
+                  "px-3 py-2.5 rounded-xl border text-left transition",
                   active
                     ? "border-zinc-900 dark:border-white bg-white dark:bg-white/[0.06] shadow-hairline"
                     : "border-zinc-200/80 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.015] hover:border-zinc-300 dark:hover:border-white/[0.15]"
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-semibold text-zinc-900 dark:text-zinc-100">
-                    {opt.title}
+                  <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-zinc-900 dark:text-zinc-100">
+                    <span>{opt.title}</span>
+                    <InfoTip content={opt.tip} />
                   </span>
                   <span
                     className={cn(
@@ -580,9 +574,6 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
                     )}
                   </span>
                 </div>
-                <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                  {opt.desc}
-                </p>
               </button>
             );
           })}
@@ -591,7 +582,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
         {popupEnabled && popupFrequency === "interval" && (
           <div className="flex items-center gap-2 pt-1 text-xs text-zinc-600 dark:text-zinc-300">
             <Clock className="h-3.5 w-3.5 text-zinc-400" />
-            <span>定时提醒间隔：每</span>
+            <span>每</span>
             <input
               type="number"
               min={1}
@@ -605,7 +596,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
               }
               className={`${INPUT_CLS} w-16 font-mono text-center`}
             />
-            <span>小时自动核查并弹窗提醒（范围 1 ~ 168 小时）</span>
+            <span>小时提醒一次</span>
           </div>
         )}
       </section>
@@ -614,12 +605,10 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
       {isAdmin && (
         <div className="flex items-center justify-between gap-3 pt-1">
           <div className="text-[11px] text-zinc-400 dark:text-zinc-500">
-            {isDirty ? (
+            {isDirty && (
               <span className="text-amber-600 dark:text-amber-400 font-medium">
-                有未保存的更改，保存后列表筛选与颜色将立即生效
+                有未保存的更改
               </span>
-            ) : (
-              <span>所有预警阈值与弹窗规则均已持久化至本地 SQLite</span>
             )}
           </div>
           <div className="flex items-center gap-2 shrink-0">
@@ -629,7 +618,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
                 onClick={handleDiscardChanges}
                 className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/[0.06] transition"
               >
-                撤销修改
+                撤销
               </button>
             )}
             <button
@@ -639,7 +628,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
               className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
             >
               <Save className="h-3.5 w-3.5" />
-              <span>{saving ? "保存中..." : "保存预警设置"}</span>
+              <span>{saving ? "保存中..." : "保存"}</span>
             </button>
           </div>
         </div>

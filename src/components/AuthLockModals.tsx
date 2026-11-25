@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { InfoTip } from "@/components/InfoTip";
 import type { AuthStatus } from "@/types";
 
 const EASE_PRECISION: [number, number, number, number] = [0.16, 1, 0.3, 1];
@@ -225,19 +226,14 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             className="w-full max-w-md bg-white dark:bg-[#121216] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-6 py-5 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
+            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shrink-0">
-                  <ShieldCheck className="h-[18px] w-[18px]" />
+                <div className="h-8 w-8 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shrink-0">
+                  <ShieldCheck className="h-4 w-4" />
                 </div>
-                <div>
-                  <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                    管理员身份验证
-                  </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    解锁设备编辑、报告上传、备份还原与系统配置
-                  </p>
-                </div>
+                <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
+                  管理员身份验证
+                </h2>
               </div>
               <button
                 type="button"
@@ -258,7 +254,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="请输入初始化时设置的管理员用户名"
+                  placeholder="请输入管理员账号"
                   className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-200 dark:border-white/[0.1] bg-zinc-50/50 dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.05] focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
                 />
               </div>
@@ -274,7 +270,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="请输入管理员密码"
+                    placeholder="请输入密码"
                     className="w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-zinc-200 dark:border-white/[0.1] bg-zinc-50/50 dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.05] focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
                   />
                   <button
@@ -287,21 +283,17 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 </div>
               </div>
 
-              <label className="flex items-start gap-2.5 p-3 rounded-xl bg-zinc-50/80 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/[0.07] cursor-pointer select-none">
+              <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-zinc-50/80 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/[0.07] cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={remember}
                   onChange={(e) => setRemember(e.target.checked)}
-                  className="mt-0.5 h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-600 accent-zinc-900 dark:accent-white"
+                  className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-600 accent-zinc-900 dark:accent-white"
                 />
-                <div className="text-xs leading-relaxed">
-                  <div className="font-medium text-zinc-800 dark:text-zinc-200">
-                    保持管理员登录状态（个人电脑推荐）
-                  </div>
-                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    关闭或重启软件后自动保持登录，无需每次重输密码；可随时在侧边栏手动退出
-                  </div>
-                </div>
+                <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                  保持管理员登录状态
+                </span>
+                <InfoTip content="个人电脑推荐。关闭或重启软件后自动保持登录，无需每次重输密码；可随时在侧边栏退出。" />
               </label>
 
               {error && (
@@ -314,9 +306,9 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
+                  className="px-4 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
                 >
-                  保持只读浏览
+                  取消
                 </button>
                 <button
                   type="submit"
@@ -324,7 +316,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
                 >
                   <KeyRound className="h-3.5 w-3.5" />
-                  <span>{loading ? "验证中..." : "验证登录"}</span>
+                  <span>{loading ? "登录中..." : "登录"}</span>
                 </button>
               </div>
             </form>
@@ -466,18 +458,16 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
-            <div className="px-6 py-5 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
+            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="h-9 w-9 rounded-xl bg-indigo-500/12 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                  <Lock className="h-[18px] w-[18px]" />
+                <div className="h-8 w-8 rounded-xl bg-indigo-500/12 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                  <Lock className="h-4 w-4" />
                 </div>
-                <div>
+                <div className="flex items-center gap-1.5">
                   <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                    {mode === "change" ? "修改应用锁 PIN 码" : "开启独立应用锁"}
+                    {mode === "change" ? "修改 PIN 码" : "开启应用锁"}
                   </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                    独立于管理员密码 · 输完位数自动秒开，忘记可用管理员密码兜底
-                  </p>
+                  <InfoTip content="独立于管理员密码，输完位数自动解锁；忘记时可用管理员密码解锁或重设。" />
                 </div>
               </div>
               <button
@@ -493,7 +483,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
               {/* PIN Length Selector */}
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                  选择 PIN 码位数
+                  PIN 码位数
                 </span>
                 <div className="inline-flex items-center p-0.5 rounded-lg bg-zinc-100 dark:bg-white/[0.05] border border-zinc-200/80 dark:border-white/[0.08]">
                   {([4, 5, 6] as const).map((len) => (
@@ -508,7 +498,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                           : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
                       )}
                     >
-                      {len} 位{len === 4 ? "（推荐）" : ""}
+                      {len} 位
                     </button>
                   ))}
                 </div>
@@ -518,7 +508,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                    设置 {pinLength} 位数字 PIN 码
+                    输入 {pinLength} 位 PIN 码
                   </label>
                   <button
                     type="button"
@@ -526,7 +516,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                     className="inline-flex items-center gap-1 text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
                   >
                     {showDigits ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
-                    <span>{showDigits ? "隐藏数字" : "显示数字"}</span>
+                    <span>{showDigits ? "隐藏" : "显示"}</span>
                   </button>
                 </div>
                 <PinSlotInput
@@ -550,12 +540,12 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                    再次输入确认 PIN 码
+                    确认 PIN 码
                   </label>
                   {pinsMatch && (
                     <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
                       <Check className="h-3 w-3" />
-                      PIN 码一致
+                      一致
                     </span>
                   )}
                   {pinsMismatch && (
@@ -581,8 +571,9 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
               {/* Trigger Timings (shown when enabling) */}
               {mode === "enable" && (
                 <div className="p-3.5 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.07] space-y-3">
-                  <div className="text-[11.5px] font-semibold text-zinc-700 dark:text-zinc-200">
-                    触发时机（后续可随时在「设置 → 账号与锁屏」调整）
+                  <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-zinc-700 dark:text-zinc-200">
+                    <span>触发时机</span>
+                    <InfoTip content="后续可随时在「设置 → 账号与锁屏」调整" />
                   </div>
 
                   <div className="flex items-center justify-between gap-2">
@@ -594,17 +585,17 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                       onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
                       className="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-[#16161b] text-zinc-800 dark:text-zinc-200 focus:outline-none"
                     >
-                      <option value={0}>关闭（仅手动锁定）</option>
-                      <option value={5}>5 分钟无操作</option>
-                      <option value={10}>10 分钟无操作</option>
-                      <option value={15}>15 分钟无操作</option>
-                      <option value={30}>30 分钟无操作</option>
+                      <option value={0}>关闭</option>
+                      <option value={5}>5 分钟</option>
+                      <option value={10}>10 分钟</option>
+                      <option value={15}>15 分钟</option>
+                      <option value={30}>30 分钟</option>
                     </select>
                   </div>
 
                   <label className="flex items-center justify-between gap-2 cursor-pointer select-none">
                     <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                      隐藏到{mac ? "顶部菜单栏" : "系统托盘"}时自动锁定
+                      隐藏到{mac ? "菜单栏" : "托盘"}时锁定
                     </span>
                     <input
                       type="checkbox"
@@ -616,7 +607,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
 
                   <label className="flex items-center justify-between gap-2 cursor-pointer select-none">
                     <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                      每次启动程序时自动锁定
+                      启动程序时锁定
                     </span>
                     <input
                       type="checkbox"
@@ -638,7 +629,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
+                  className="px-4 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
                 >
                   取消
                 </button>
@@ -652,10 +643,10 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                     {saving
                       ? "保存中..."
                       : mode === "change"
-                        ? "更新 PIN 码"
+                        ? "确定"
                         : lockAfterSave
-                          ? "设置并立即锁定"
-                          : "保存并启用应用锁"}
+                          ? "确定并锁定"
+                          : "确定"}
                   </span>
                 </button>
               </div>
@@ -858,7 +849,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                 {docTitle || "监视与测量管理台账"}
               </span>
               <span className="text-zinc-300 dark:text-zinc-600">·</span>
-              <span>应用锁保护中</span>
+              <span>已锁定</span>
             </div>
           </motion.div>
 
@@ -913,11 +904,8 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                       )}
                     </div>
                     <h2 className="text-[15px] font-semibold text-zinc-950 dark:text-white tracking-tight">
-                      输入应用锁 PIN 码
+                      输入 {effectivePinLen} 位 PIN 码
                     </h2>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                      输入 {effectivePinLen} 位数字后自动解锁，无需按回车
-                    </p>
                   </div>
 
                   <div className="py-1">
@@ -939,23 +927,19 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                   </div>
 
                   {/* Reserved status slot to prevent layout shift */}
-                  <div className="h-7 mt-3 flex items-center justify-center">
+                  <div className="h-6 mt-2.5 flex items-center justify-center">
                     {verifying ? (
                       <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
-                        正在验证 PIN 码...
+                        验证中...
                       </span>
                     ) : error ? (
                       <span className="text-xs text-rose-600 dark:text-rose-400 font-medium">
                         {error}
                       </span>
-                    ) : (
-                      <span className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                        请直接通过数字键盘输入
-                      </span>
-                    )}
+                    ) : null}
                   </div>
 
-                  <div className="mt-4 pt-4 border-t border-zinc-200/80 dark:border-white/[0.08] flex justify-center">
+                  <div className="mt-3 pt-4 border-t border-zinc-200/80 dark:border-white/[0.08] flex justify-center">
                     <button
                       type="button"
                       onClick={() => {
@@ -965,7 +949,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                       className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition"
                     >
                       <KeyRound className="h-3.5 w-3.5" />
-                      <span>忘记 PIN 码？使用管理员密码解锁</span>
+                      <span>管理员密码解锁</span>
                     </button>
                   </div>
                 </motion.div>
@@ -988,16 +972,18 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                     className="inline-flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition"
                   >
                     <ArrowLeft className="h-3.5 w-3.5" />
-                    <span>返回 PIN 码解锁</span>
+                    <span>返回</span>
                   </button>
 
-                  <div>
+                  <div className="flex items-center justify-between gap-2">
                     <h2 className="text-[15px] font-semibold text-zinc-950 dark:text-white tracking-tight">
-                      管理员密码验证解锁
+                      管理员解锁
                     </h2>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                      验证管理员 <span className="font-medium text-zinc-700 dark:text-zinc-200">{username}</span> 密码以解除锁定，防止锁死
-                    </p>
+                    {username && (
+                      <span className="text-xs font-mono text-zinc-400 dark:text-zinc-500">
+                        {username}
+                      </span>
+                    )}
                   </div>
 
                   <div className="relative">
@@ -1010,7 +996,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                         setAdminPassword(e.target.value);
                         if (error) setError("");
                       }}
-                      placeholder="请输入管理员密码..."
+                      placeholder="请输入管理员密码"
                       className="w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-zinc-200 dark:border-white/[0.12] bg-zinc-50/70 dark:bg-white/[0.04] text-zinc-900 dark:text-white placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.06] focus:outline-none focus:border-zinc-400 dark:focus:border-indigo-400/70 transition"
                     />
                     <button
@@ -1030,8 +1016,8 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                     <div className="grid grid-cols-3 gap-1.5 p-1 rounded-xl bg-zinc-100/90 dark:bg-white/[0.04] border border-zinc-200/80 dark:border-white/[0.07]">
                       {(
                         [
-                          { id: "unlock_only", label: "仅本次解锁" },
-                          { id: "reset_pin", label: "重设 PIN 码" },
+                          { id: "unlock_only", label: "仅解锁" },
+                          { id: "reset_pin", label: "重设 PIN" },
                           { id: "disable_lock", label: "关闭应用锁" },
                         ] as const
                       ).map((opt) => (
@@ -1058,7 +1044,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                   {recoveryAction === "reset_pin" && (
                     <div>
                       <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1.5">
-                        输入新的 4~6 位数字 PIN 码
+                        新 PIN 码
                       </label>
                       <input
                         type="password"
@@ -1069,7 +1055,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                           setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6));
                           if (error) setError("");
                         }}
-                        placeholder="请输入 4 到 6 位数字"
+                        placeholder="4~6 位数字"
                         className="w-full px-3.5 py-2 text-sm font-mono tracking-widest rounded-xl border border-zinc-200 dark:border-white/[0.12] bg-zinc-50/70 dark:bg-white/[0.04] text-zinc-900 dark:text-white placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.06] focus:outline-none focus:border-zinc-400 dark:focus:border-indigo-400/70 transition"
                       />
                     </div>
@@ -1087,7 +1073,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                     className="w-full py-2.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold inline-flex items-center justify-center gap-2 shadow-hairline transition"
                   >
                     <Unlock className="h-3.5 w-3.5" />
-                    <span>{verifying ? "正在验证..." : "验证管理员密码并解锁"}</span>
+                    <span>{verifying ? "验证中..." : "解锁"}</span>
                   </button>
                 </motion.form>
               )}
@@ -1160,15 +1146,10 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
             className="w-full max-w-[420px] bg-white dark:bg-[#121216] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="px-6 py-5 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
-              <div>
-                <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                  关闭主窗口时
-                </h2>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  请选择点击关闭按钮后的默认行为
-                </p>
-              </div>
+            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
+                关闭窗口
+              </h2>
               <button
                 type="button"
                 onClick={onCancel}
@@ -1184,7 +1165,7 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                 type="button"
                 onClick={() => setSelected("minimize_to_tray")}
                 className={cn(
-                  "w-full text-left p-3.5 rounded-xl border transition flex items-start gap-3",
+                  "w-full text-left px-3.5 py-3 rounded-xl border transition flex items-center gap-3",
                   selected === "minimize_to_tray"
                     ? "border-zinc-900 dark:border-white/70 bg-zinc-50 dark:bg-white/[0.06] ring-1 ring-zinc-900/10 dark:ring-white/15"
                     : "border-zinc-200/90 dark:border-white/[0.08] hover:bg-zinc-50/70 dark:hover:bg-white/[0.03]"
@@ -1192,7 +1173,7 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
               >
                 <div
                   className={cn(
-                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
+                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0",
                     selected === "minimize_to_tray"
                       ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950"
                       : "bg-zinc-100 dark:bg-white/[0.06] text-zinc-500 dark:text-zinc-400"
@@ -1200,20 +1181,17 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                 >
                   <MonitorDown className="h-4 w-4" />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                      {mac ? "最小化到顶部菜单栏（后台运行）" : "最小化到右下角托盘（后台运行）"}
-                    </span>
-                    <span className="px-1.5 py-0.5 rounded-md bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 text-[10px] font-semibold">
-                      推荐
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                    {mac
-                      ? "仅隐藏主窗口并在顶部菜单栏常驻，保持登录与定时提醒；点击菜单栏或 Dock 图标随时秒开。"
-                      : "仅隐藏主窗口并在任务栏右下角常驻，保持登录与定时提醒；点击托盘图标即可秒开。"}
-                  </p>
+                <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                  <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                    {mac ? "最小化到菜单栏" : "最小化到托盘"}
+                  </span>
+                  <InfoTip
+                    content={
+                      mac
+                        ? "隐藏主窗口并在顶部菜单栏常驻，保持登录与定时提醒；点击菜单栏或 Dock 图标可随时打开。"
+                        : "隐藏主窗口并在任务栏右下角常驻，保持登录与定时提醒；点击托盘图标可随时打开。"
+                    }
+                  />
                 </div>
               </button>
 
@@ -1222,7 +1200,7 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                 type="button"
                 onClick={() => setSelected("exit")}
                 className={cn(
-                  "w-full text-left p-3.5 rounded-xl border transition flex items-start gap-3",
+                  "w-full text-left px-3.5 py-3 rounded-xl border transition flex items-center gap-3",
                   selected === "exit"
                     ? "border-zinc-900 dark:border-white/70 bg-zinc-50 dark:bg-white/[0.06] ring-1 ring-zinc-900/10 dark:ring-white/15"
                     : "border-zinc-200/90 dark:border-white/[0.08] hover:bg-zinc-50/70 dark:hover:bg-white/[0.03]"
@@ -1230,7 +1208,7 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
               >
                 <div
                   className={cn(
-                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0 mt-0.5",
+                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0",
                     selected === "exit"
                       ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950"
                       : "bg-zinc-100 dark:bg-white/[0.06] text-zinc-500 dark:text-zinc-400"
@@ -1240,11 +1218,8 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold text-zinc-900 dark:text-white">
-                    直接退出程序
+                    直接退出
                   </div>
-                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                    立即关闭窗口并完全结束程序进程，不保留后台托盘图标。
-                  </p>
                 </div>
               </button>
 
@@ -1257,8 +1232,9 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                   className="h-3.5 w-3.5 accent-zinc-900 dark:accent-white"
                 />
                 <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                  记住我的选择，下次不再询问（可在「设置 → 窗口与托盘」修改）
+                  记住选择
                 </span>
+                <InfoTip content="下次关闭不再询问，可随时在「设置 → 窗口与托盘」修改。" />
               </label>
 
               {/* Footer Actions */}
@@ -1266,7 +1242,7 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                 <button
                   type="button"
                   onClick={onCancel}
-                  className="px-3.5 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
+                  className="px-4 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
                 >
                   取消
                 </button>
@@ -1276,7 +1252,7 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                   onClick={handleConfirm}
                   className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
                 >
-                  {selected === "minimize_to_tray" ? "隐藏到后台" : "退出程序"}
+                  确定
                 </button>
               </div>
             </div>

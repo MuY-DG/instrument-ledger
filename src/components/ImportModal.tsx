@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { InfoTip } from "@/components/InfoTip";
 import {
   base64ToArrayBuffer,
   parseJsskExcel,
@@ -118,16 +119,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             onClick={(e) => e.stopPropagation()}
           >
             <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <FileSpreadsheet className="h-4.5 w-4.5 text-emerald-600 dark:text-emerald-400" />
-                <div>
-                  <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                    导入 Excel 台账（兼容 JSSK-MPR-170 双表）
-                  </h2>
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    自动识别「量具」与「检具」工作表，还原编号与免校状态
-                  </p>
-                </div>
+              <div className="flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
+                  导入 Excel
+                </h2>
+                <InfoTip content="兼容标准 JSSK-MPR-170 双工作表及常见表格，自动识别「量具」与「检具」并还原编号与免校状态。" />
               </div>
               <button
                 type="button"
@@ -143,19 +140,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 type="button"
                 disabled={parsing}
                 onClick={handleSelectExcel}
-                className="w-full py-7 px-4 rounded-xl border border-dashed border-zinc-300 dark:border-white/15 hover:border-zinc-400 dark:hover:border-white/30 bg-zinc-50/50 dark:bg-white/[0.02] hover:bg-zinc-50 dark:hover:bg-white/[0.04] transition text-center"
+                className="w-full py-6 px-4 rounded-xl border border-dashed border-zinc-300 dark:border-white/15 hover:border-zinc-400 dark:hover:border-white/30 bg-zinc-50/50 dark:bg-white/[0.02] hover:bg-zinc-50 dark:hover:bg-white/[0.04] transition text-center"
               >
-                <Upload className="h-7 w-7 text-zinc-400 dark:text-zinc-500 mx-auto mb-2" />
+                <Upload className="h-6 w-6 text-zinc-400 dark:text-zinc-500 mx-auto mb-2" />
                 <div className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
                   {parsing
-                    ? "正在解析工作簿..."
-                    : fileName
-                      ? `已选择：${fileName}（点击重新选择）`
-                      : "点击选择 .xlsx 台账文件"}
+                    ? "解析中..."
+                    : fileName || "选择 .xlsx 文件"}
                 </div>
-                <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1">
-                  支持标准《监视与测量管理台账》双 Sheet 文件及常见简化表格
-                </p>
               </button>
 
               {error && (
@@ -229,47 +221,39 @@ export const ImportModal: React.FC<ImportModalProps> = ({
 
                   <div className="grid grid-cols-2 gap-3">
                     <label
-                      className={`p-3 rounded-xl border cursor-pointer transition ${
+                      className={`p-3 rounded-xl border cursor-pointer transition flex items-center gap-2 ${
                         !replaceExisting
                           ? "border-zinc-900 dark:border-white bg-zinc-50 dark:bg-white/[0.05]"
                           : "border-zinc-200 dark:border-white/[0.08] hover:bg-zinc-50 dark:hover:bg-white/[0.03]"
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          checked={!replaceExisting}
-                          onChange={() => setReplaceExisting(false)}
-                        />
-                        <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                          追加导入（推荐）
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 pl-5">
-                        保留现有记录及已上传的照片和报告，追加新条目
-                      </p>
+                      <input
+                        type="radio"
+                        checked={!replaceExisting}
+                        onChange={() => setReplaceExisting(false)}
+                      />
+                      <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
+                        追加导入
+                      </span>
+                      <InfoTip content="保留现有记录及已上传的照片和报告，追加新条目。" />
                     </label>
 
                     <label
-                      className={`p-3 rounded-xl border cursor-pointer transition ${
+                      className={`p-3 rounded-xl border cursor-pointer transition flex items-center gap-2 ${
                         replaceExisting
                           ? "border-rose-500 bg-rose-500/[0.06]"
                           : "border-zinc-200 dark:border-white/[0.08] hover:bg-zinc-50 dark:hover:bg-white/[0.03]"
                       }`}
                     >
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          checked={replaceExisting}
-                          onChange={() => setReplaceExisting(true)}
-                        />
-                        <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                          清空并全量替换
-                        </span>
-                      </div>
-                      <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 pl-5">
-                        清空旧台账后完整导入当前 Excel 数据
-                      </p>
+                      <input
+                        type="radio"
+                        checked={replaceExisting}
+                        onChange={() => setReplaceExisting(true)}
+                      />
+                      <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
+                        覆盖替换
+                      </span>
+                      <InfoTip content="清空现有台账及关联附件后，完整导入当前 Excel 数据。" />
                     </label>
                   </div>
                 </div>
@@ -291,8 +275,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 className="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
               >
                 {importing
-                  ? "正在写入数据库..."
-                  : `确认导入 (${parsed?.rows.length || 0} 条)`}
+                  ? "导入中..."
+                  : parsed
+                    ? `导入 (${parsed.rows.length})`
+                    : "导入"}
               </button>
             </div>
           </motion.div>

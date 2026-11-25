@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatFileSize, formatShortDateTime, getTodayStr } from "@/lib/status";
+import { InfoTip } from "@/components/InfoTip";
 import type { CalibrationReport, Instrument } from "@/types";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -316,23 +317,18 @@ export const ReportModal: React.FC<ReportModalProps> = ({
           >
             {/* Header */}
             <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between bg-zinc-50/70 dark:bg-white/[0.02]">
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <FileText className="h-4 w-4 text-indigo-500 shrink-0" />
-                  <h2 className="text-sm font-semibold text-zinc-950 dark:text-white truncate">
-                    校验报告附件 · {instrument.name}
-                  </h2>
-                  {instrument.serialNo && (
-                    <span className="px-2 py-0.5 text-[11px] font-mono bg-zinc-200/70 dark:bg-white/[0.07] text-zinc-700 dark:text-zinc-300 rounded">
-                      {instrument.serialNo}
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  支持 PDF 与高清图片内嵌直览，支持历年复校报告归档追溯
-                </p>
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="h-4 w-4 text-indigo-500 shrink-0" />
+                <h2 className="text-sm font-semibold text-zinc-950 dark:text-white truncate">
+                  校验报告 · {instrument.name}
+                </h2>
+                {instrument.serialNo && (
+                  <span className="px-2 py-0.5 text-[11px] font-mono bg-zinc-200/70 dark:bg-white/[0.07] text-zinc-700 dark:text-zinc-300 rounded shrink-0">
+                    {instrument.serialNo}
+                  </span>
+                )}
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 {isAdmin && (
                   <button
                     type="button"
@@ -340,7 +336,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
                   >
                     <Plus className="h-3.5 w-3.5" />
-                    <span>{showUpload ? "取消上传" : "上传报告"}</span>
+                    <span>{showUpload ? "取消" : "上传报告"}</span>
                   </button>
                 )}
                 <button
@@ -363,7 +359,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     className="p-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-indigo-500/[0.04] space-y-3"
                   >
                     <div className="text-xs font-semibold text-zinc-900 dark:text-white">
-                      上传新的校准 / 校验报告
+                      上传报告
                     </div>
 
                     <button
@@ -373,14 +369,14 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     >
                       <Upload className="h-4 w-4 text-indigo-500 mx-auto mb-1" />
                       <div className="text-xs font-medium text-zinc-700 dark:text-zinc-200 truncate">
-                        {pickedName || "点击选择 PDF / 图片 / Office 文件"}
+                        {pickedName || "选择 PDF / 图片 / Office"}
                       </div>
                     </button>
 
                     <div className="grid grid-cols-2 gap-2">
                       <div>
                         <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                          本次校验日期
+                          校验日期
                         </label>
                         <input
                           type="date"
@@ -405,27 +401,28 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
                     <div>
                       <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                        报告备注（选填）
+                        备注
                       </label>
                       <input
                         type="text"
                         value={remark}
                         onChange={(e) => setRemark(e.target.value)}
-                        placeholder="如：2026年度外校合格报告"
+                        placeholder="选填"
                         className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-400"
                       />
                     </div>
 
-                    <label className="flex items-start gap-2 cursor-pointer">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
                       <input
                         type="checkbox"
                         checked={syncDate}
                         onChange={(e) => setSyncDate(e.target.checked)}
-                        className="mt-0.5 rounded border-zinc-300 dark:border-zinc-700"
+                        className="rounded border-zinc-300 dark:border-zinc-700"
                       />
-                      <span className="text-[11px] text-zinc-600 dark:text-zinc-400 leading-relaxed">
-                        同步更新设备「上次检验日期」并自动重算下次校验日期
+                      <span className="text-[11px] text-zinc-600 dark:text-zinc-400">
+                        同步更新设备校验日期
                       </span>
+                      <InfoTip content="将本次校验日期同步写入设备的「上次检验日期」，并自动重算下次校验日期。" />
                     </label>
 
                     <button
@@ -433,7 +430,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                       disabled={uploading || !pickedPath}
                       className="w-full py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold transition"
                     >
-                      {uploading ? "正在归档..." : "确认保存报告"}
+                      {uploading ? "上传中..." : "确定"}
                     </button>
                   </form>
                 )}
@@ -446,18 +443,13 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                 <div className="flex-1 overflow-y-auto p-3 space-y-2">
                   {loadingList ? (
                     <div className="text-center py-10 text-xs text-zinc-400">
-                      正在加载报告列表...
+                      加载中...
                     </div>
                   ) : reports.length === 0 ? (
                     <div className="text-center py-12 px-4">
                       <FileText className="h-9 w-9 text-zinc-300 dark:text-zinc-700 mx-auto mb-2" />
-                      <p className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
-                        暂无校验报告附件
-                      </p>
-                      <p className="text-[11px] text-zinc-400 mt-1">
-                        {isAdmin
-                          ? "点击右上角「上传报告」添加 PDF 或扫描件"
-                          : "管理员上传后可在此直接查阅与下载"}
+                      <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">
+                        暂无报告
                       </p>
                     </div>
                   ) : (
@@ -620,7 +612,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     <div className="flex-1 overflow-auto p-6 flex items-start justify-center">
                       {previewLoading ? (
                         <div className="self-center text-xs text-zinc-400">
-                          正在渲染校验报告预览...
+                          加载预览中...
                         </div>
                       ) : previewError ? (
                         <div className="self-center text-center max-w-md bg-white dark:bg-[#141418] p-6 rounded-xl border border-zinc-200 dark:border-white/[0.1]">
@@ -631,7 +623,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                             className="mt-4 inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 text-xs font-semibold"
                           >
                             <ExternalLink className="h-3.5 w-3.5" />
-                            用系统程序打开
+                            系统打开
                           </button>
                         </div>
                       ) : pdfDoc ? (
@@ -653,7 +645,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                             {selectedReport.fileName}
                           </h4>
                           <p className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1.5">
-                            该格式（.{selectedReport.fileExt}）暂不支持内嵌预览，可调用系统默认软件打开
+                            不支持内嵌预览（.{selectedReport.fileExt}）
                           </p>
                           <div className="flex items-center justify-center gap-2 mt-5">
                             <button

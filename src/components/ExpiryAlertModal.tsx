@@ -120,12 +120,12 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
 
   const jumpButtonLabel =
     selectedTier === "expired"
-      ? "在列表中筛选「已超期」"
+      ? "筛选超期"
       : activeThresholdObj
-        ? `在列表中筛选「≤${activeThresholdObj.days}天」`
+        ? `筛选 ≤${activeThresholdObj.days}天`
         : descThresholds.length > 0
-          ? `在列表中筛选「≤${descThresholds[0].days}天」`
-          : "返回列表查看";
+          ? `筛选 ≤${descThresholds[0].days}天`
+          : "列表查看";
 
   const accentColor = summary.highestSeverityColor || "#10b981";
   const accentVisuals = getThresholdVisuals(accentColor);
@@ -176,7 +176,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                      设备效期预警
+                      到期预警
                     </h2>
                     <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500">
                       {getTodayStr()}
@@ -184,8 +184,8 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                   </div>
                   <p className="text-[11.5px] text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
                     {summary.totalAlertCount > 0
-                      ? `共发现 ${summary.totalAlertCount} 台设备需要关注（已超期 ${summary.expired.length} 台，预警期内 ${summary.totalAlertCount - summary.expired.length} 台）`
-                      : `当前预警档位：${descThresholds.map((t) => `${t.days}天`).join(" / ")} · 全部设备均在有效期内`}
+                      ? `共 ${summary.totalAlertCount} 台 · 超期 ${summary.expired.length} / 预警 ${summary.totalAlertCount - summary.expired.length}`
+                      : "全部设备效期正常"}
                   </p>
                 </div>
               </div>
@@ -309,7 +309,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                       type="text"
                       value={searchText}
                       onChange={(e) => setSearchText(e.target.value)}
-                      placeholder="在预警清单中搜索名称、编号、部门..."
+                      placeholder="搜索名称、编号、部门..."
                       className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
                     />
                     {searchText && (
@@ -328,18 +328,13 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
               {/* Alert Instrument List */}
               <div className="flex-1 overflow-y-auto px-6 py-3">
                 {summary.totalAlertCount === 0 ? (
-                  <div className="py-12 text-center space-y-3">
+                  <div className="py-12 text-center space-y-2.5">
                     <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
                       <CheckCircle2 className="h-6 w-6" />
                     </div>
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-                        当前全部在控设备效期良好
-                      </h3>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400 max-w-sm mx-auto">
-                        没有已超期或命中当前阈值（{descThresholds.map((t) => `${t.days}天`).join(" / ")}）的设备。
-                      </p>
-                    </div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+                      暂无预警设备
+                    </h3>
                   </div>
                 ) : displayedItems.length === 0 ? (
                   <div className="py-12 text-center text-xs text-zinc-400">
@@ -450,7 +445,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                     onChange={(e) => onToggleMuteToday(e.target.checked)}
                     className="rounded border-zinc-300 dark:border-zinc-700 text-zinc-900 focus:ring-indigo-500"
                   />
-                  <span>今日不再自动弹出提示</span>
+                  <span>今日不再提醒</span>
                 </label>
 
                 <div className="flex items-center gap-2">
@@ -469,7 +464,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                     onClick={onClose}
                     className="px-4 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
                   >
-                    我知道了
+                    确定
                   </button>
                 </div>
               </div>

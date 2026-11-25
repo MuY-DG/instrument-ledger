@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api, invalidateMediaPath } from "@/lib/api";
 import { calcNextCalDate, getInstrumentStatus } from "@/lib/status";
+import { InfoTip } from "@/components/InfoTip";
 import { StatusBadge } from "@/components/StatusBadge";
 import type {
   CalibrationType,
@@ -300,22 +301,13 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
           >
             {/* Header */}
             <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between bg-zinc-50/70 dark:bg-white/[0.02]">
-              <div>
-                <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                  {mode === "create"
-                    ? "新增仪器 / 检具记录"
-                    : mode === "edit"
-                      ? "编辑设备记录"
-                      : "设备完整档案"}
-                </h2>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  {mode === "edit"
-                    ? "保存修改；若未更换存放位置图片将自动保留原图"
-                    : mode === "view"
-                      ? "只读档案视图 · 完整展示全部标准字段"
-                      : "录入上次校验日期与周期后自动推算下次校验日期（+N个月 - 1天）"}
-                </p>
-              </div>
+              <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
+                {mode === "create"
+                  ? "新增设备"
+                  : mode === "edit"
+                    ? "编辑设备"
+                    : "设备档案"}
+              </h2>
               <button
                 type="button"
                 onClick={onClose}
@@ -470,7 +462,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                     </h3>
                   </div>
 
-                  <label className="inline-flex items-center gap-2 cursor-pointer">
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
                     <input
                       type="checkbox"
                       disabled={readOnly}
@@ -479,8 +471,9 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                       className="rounded border-zinc-300 dark:border-zinc-700 text-zinc-900 focus:ring-indigo-500"
                     />
                     <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                      辅助工具无需校验 / 免校
+                      免校
                     </span>
+                    <InfoTip content="辅助工具无需周期校验时勾选" />
                   </label>
                 </div>
 
@@ -497,8 +490,8 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                       }
                       className={`${INPUT_CLS} dark:bg-[#141418]`}
                     >
-                      <option value="external">外校 (External)</option>
-                      <option value="internal">内校 (Internal)</option>
+                      <option value="external">外校</option>
+                      <option value="internal">内校</option>
                       <option value="exempt">免校</option>
                     </select>
                   </div>
@@ -562,8 +555,9 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                 <div className="grid grid-cols-2 gap-3 items-end">
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                        下次检验日期（自动推算）
+                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                        <span>下次检验日期</span>
+                        <InfoTip content="按「上次校验 + 周期(月) - 1天」自动推算，也可手动修改。" />
                       </label>
                       {manualNextOverride && !readOnly && !exemptCalibration && (
                         <button
@@ -574,7 +568,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                           }}
                           className="text-[11px] text-indigo-600 dark:text-indigo-400 hover:underline"
                         >
-                          恢复自动计算
+                          自动计算
                         </button>
                       )}
                     </div>
@@ -592,7 +586,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
 
                   <div className="p-2.5 rounded-lg bg-white dark:bg-[#111114] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
                     <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                      实时效期状态
+                      效期状态
                     </span>
                     <StatusBadge info={liveStatus} />
                   </div>
@@ -601,18 +595,11 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
 
               {/* Location Photo */}
               <section className="space-y-2.5">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
                   <h3 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                    存放位置现场照片
+                    位置照片
                   </h3>
-                  {mode === "edit" &&
-                    existingPhotoPath &&
-                    !newPhotoBase64 &&
-                    !removePhoto && (
-                      <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
-                        自动保留原图
-                      </span>
-                    )}
+                  <InfoTip content="支持 PNG / JPG / WebP 格式，未更换时自动保留原图。" />
                 </div>
 
                 <div className="flex items-center gap-4 p-3.5 rounded-xl border border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/50 dark:bg-white/[0.02]">
@@ -630,7 +617,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                   )}
 
                   {!readOnly ? (
-                    <div className="flex-1 space-y-2">
+                    <div className="flex-1">
                       <div className="flex flex-wrap gap-2">
                         <button
                           type="button"
@@ -638,7 +625,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-white/[0.05] border border-zinc-200 dark:border-white/[0.1] hover:bg-zinc-50 dark:hover:bg-white/[0.09] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
                         >
                           <Upload className="h-3.5 w-3.5" />
-                          <span>{currentDisplayPhoto ? "更换图片" : "选择本地图片"}</span>
+                          <span>{currentDisplayPhoto ? "更换" : "上传图片"}</span>
                         </button>
 
                         <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/[0.08] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-xs text-zinc-500 dark:text-zinc-400 cursor-pointer transition">
@@ -667,13 +654,10 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                           </button>
                         )}
                       </div>
-                      <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                        支持 PNG / JPG / WebP，独立保存于本地受管附件目录
-                      </p>
                     </div>
                   ) : (
                     <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                      {currentDisplayPhoto ? "已归档存放位置现场照片" : "未上传存放位置照片"}
+                      {currentDisplayPhoto ? "已上传位置照片" : "未上传"}
                     </div>
                   )}
                 </div>
@@ -686,7 +670,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                   onClick={() => setShowExtended((v) => !v)}
                   className="w-full px-4 py-3 bg-zinc-50/70 dark:bg-white/[0.02] hover:bg-zinc-100/70 dark:hover:bg-white/[0.04] flex items-center justify-between text-xs font-medium text-zinc-700 dark:text-zinc-300 transition"
                 >
-                  <span>扩展归档信息（供应商 / 检测机构 / 购买日期 / 备注）</span>
+                  <span>扩展信息</span>
                   {showExtended ? (
                     <ChevronUp className="h-4 w-4 text-zinc-400" />
                   ) : (
@@ -822,7 +806,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
                 >
                   <Save className="h-3.5 w-3.5" />
-                  <span>{saving ? "保存中..." : "保存记录"}</span>
+                  <span>{saving ? "保存中..." : "保存"}</span>
                 </button>
               )}
             </div>

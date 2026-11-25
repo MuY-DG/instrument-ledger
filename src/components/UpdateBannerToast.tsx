@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { formatFileSize } from "@/lib/status";
+import { InfoTip } from "@/components/InfoTip";
 import { MarkdownNotes } from "@/components/MarkdownNotes";
 import type { UpdateCheckResult, UpdateDownloadProgress } from "@/types";
 
@@ -74,8 +75,9 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
                       v{update.latestVersion}
                     </span>
                   </div>
-                  <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 font-mono">
-                    当前版本 v{update.currentVersion} · 自动校验签名并重启
+                  <div className="flex items-center gap-1.5 text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5 font-mono">
+                    <span>当前 v{update.currentVersion}</span>
+                    <InfoTip content="更新会自动校验签名并在安装后重启，保留本地数据与附件。" />
                   </div>
                 </div>
               </div>
@@ -186,12 +188,12 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
                   )}
                   <span>
                     {phase === "restarting"
-                      ? "正在重启..."
+                      ? "重启中..."
                       : phase === "installing"
-                        ? "正在安装..."
+                        ? "安装中..."
                         : updating
                           ? "下载中..."
-                          : "立即更新并重启"}
+                          : "立即更新"}
                   </span>
                 </button>
               </div>

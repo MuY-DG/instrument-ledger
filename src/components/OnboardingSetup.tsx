@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { InfoTip } from "@/components/InfoTip";
 import type { AuthStatus } from "@/types";
 
 interface OnboardingSetupProps {
@@ -442,7 +443,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                 transition={{ delay: 0.42, duration: 0.45 }}
                 className="text-xs text-zinc-400 mt-2 tracking-wide"
               >
-                本地安全库已就绪，正在进入监视与测量台账工作台...
+                正在进入...
               </motion.p>
             </motion.div>
           ) : (
@@ -526,7 +527,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
                             <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
                           </span>
-                          <span>安装验证完成，正在准备账号初始化...</span>
+                          <span>正在准备初始化...</span>
                         </motion.div>
                       </motion.div>
                     )}
@@ -563,14 +564,17 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                       >
                         <div className="inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-300">
                           <ShieldCheck className="h-3.5 w-3.5" />
-                          <span>首次启动安全向导</span>
+                          <span>首次启动</span>
                         </div>
-                        <h2 className="text-lg font-semibold text-white tracking-tight">
-                          初始化本地管理员账号
-                        </h2>
-                        <p className="text-xs text-zinc-400 leading-relaxed">
-                          系统不预设默认账号或初始密码。请为您本机创建专属管理员凭据，用于台账录入、报告归档、数据备份及系统安全配置。
-                        </p>
+                        <div className="flex items-center gap-2">
+                          <h2 className="text-lg font-semibold text-white tracking-tight">
+                            创建管理员账号
+                          </h2>
+                          <InfoTip
+                            tone="dark"
+                            content="系统不预设默认账号或密码，请创建本机专属管理员凭据用于台账管理、报告归档与系统配置。"
+                          />
+                        </div>
                       </motion.div>
 
                       {/* Field 1: Username */}
@@ -750,7 +754,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                               showAdvanced && "rotate-180"
                             )}
                           />
-                          <span>自定义台账标题与文件编号（可选）</span>
+                          <span>台账信息（可选）</span>
                         </button>
 
                         <AnimatePresence initial={false}>
@@ -820,7 +824,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                           className="group w-full py-2.5 px-4 rounded-xl bg-white hover:bg-zinc-100 disabled:bg-zinc-800 disabled:text-zinc-500 text-zinc-950 text-sm font-semibold inline-flex items-center justify-center gap-2 shadow-[0_8px_24px_-6px_rgba(255,255,255,0.28)] disabled:shadow-none transition"
                         >
                           <span>
-                            {submitting ? "正在安全加密并初始化..." : "完成初始化并进入工作台"}
+                            {submitting ? "初始化中..." : "完成并进入"}
                           </span>
                           {!submitting && (
                             <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />

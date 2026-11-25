@@ -66,6 +66,7 @@ import { PrintLedgerView } from "@/components/PrintLedgerView";
 import { CommandPalette } from "@/components/CommandPalette";
 import { UpdateBannerToast } from "@/components/UpdateBannerToast";
 import { ExpiryAlertModal } from "@/components/ExpiryAlertModal";
+import { InfoTip } from "@/components/InfoTip";
 import type {
   AppSettings,
   AuthStatus,
@@ -1263,7 +1264,7 @@ export default function App() {
                       </div>
                       <div className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                         <ShieldCheck className="h-2.5 w-2.5" />
-                        <span>管理员已解锁</span>
+                        <span>管理员</span>
                       </div>
                     </div>
                   </div>
@@ -1522,35 +1523,28 @@ export default function App() {
                         exit={{ opacity: 0, y: 4, scale: 0.97 }}
                         transition={{ duration: 0.14 }}
                         onClick={(e) => e.stopPropagation()}
-                        className="absolute right-0 mt-1.5 w-60 rounded-xl bg-white dark:bg-[#141418] border border-zinc-200/90 dark:border-white/[0.1] shadow-popover py-1.5 z-40"
+                        className="absolute right-0 mt-1.5 w-52 rounded-xl bg-white dark:bg-[#141418] border border-zinc-200/90 dark:border-white/[0.1] shadow-popover py-1.5 z-40"
                       >
                         <button
                           type="button"
                           onClick={() => handleExportExcel(false)}
-                          className="w-full px-3.5 py-2 text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.05] flex items-center gap-2.5 transition"
+                          className="w-full px-3.5 py-2 text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.05] flex items-center justify-between gap-2 transition"
                         >
-                          <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                          <div>
-                            <div className="font-medium">导出完整双台账 (.xlsx)</div>
-                            <div className="text-[10.5px] text-zinc-400 mt-0.5">
-                              按 {settings.docCode} 标准格式导出
-                            </div>
-                          </div>
+                          <span className="inline-flex items-center gap-2 font-medium">
+                            <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                            <span>导出全部 (.xlsx)</span>
+                          </span>
+                          <InfoTip content={`按 ${settings.docCode} 标准双台账格式导出`} />
                         </button>
                         <button
                           type="button"
                           onClick={() => handleExportExcel(true)}
-                          className="w-full px-3.5 py-2 text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.05] flex items-center gap-2.5 transition"
+                          className="w-full px-3.5 py-2 text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.05] flex items-center gap-2 transition"
                         >
                           <Download className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
-                          <div>
-                            <div className="font-medium">
-                              仅导出当前视图 ({filteredInstruments.length} 条)
-                            </div>
-                            <div className="text-[10.5px] text-zinc-400 mt-0.5">
-                              适合导出待检、超期或部门清单
-                            </div>
-                          </div>
+                          <span className="font-medium">
+                            导出当前视图 ({filteredInstruments.length})
+                          </span>
                         </button>
                       </motion.div>
                     )}
@@ -1783,10 +1777,10 @@ export default function App() {
                   type="button"
                   onClick={() => openSettingsTab("alerts")}
                   className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] transition shrink-0"
-                  title="前往设置中自定义预警天数阈值、颜色与弹窗提示规则"
+                  title="预警设置"
                 >
                   <SlidersHorizontal className="h-3 w-3" />
-                  <span>阈值与配色设置</span>
+                  <span>预警设置</span>
                 </button>
               </div>
             </div>
@@ -1796,7 +1790,7 @@ export default function App() {
               {loading ? (
                 <div className="h-full flex flex-col items-center justify-center gap-2 text-xs text-zinc-400">
                   <div className="h-5 w-5 rounded-full border-2 border-zinc-300 dark:border-zinc-700 border-t-zinc-900 dark:border-t-white animate-spin" />
-                  <span>正在加载本地 SQLite 台账...</span>
+                  <span>加载中...</span>
                 </div>
               ) : instruments.length === 0 ? (
                 <div className="h-full flex items-center justify-center p-8">
@@ -1804,16 +1798,9 @@ export default function App() {
                     <div className="h-12 w-12 rounded-2xl bg-zinc-100 dark:bg-white/[0.05] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-center mx-auto text-zinc-500 dark:text-zinc-400">
                       <FileSpreadsheet className="h-5 w-5" />
                     </div>
-                    <div className="space-y-1">
-                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-                        台账库尚无设备记录
-                      </h3>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed">
-                        {auth.isAdmin
-                          ? `可直接导入标准《${settings.docCode}》双 Sheet Excel 台账，或手动录入第一台监视与测量设备。`
-                          : "请先在左下角登录管理员账号，即可导入现有 Excel 台账或新增设备记录。"}
-                      </p>
-                    </div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+                      暂无设备记录
+                    </h3>
                     <div className="flex items-center justify-center gap-2.5 pt-1">
                       {auth.isAdmin ? (
                         <>
@@ -1841,7 +1828,7 @@ export default function App() {
                           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium transition"
                         >
                           <LogIn className="h-3.5 w-3.5" />
-                          <span>管理员登录</span>
+                          <span>登录</span>
                         </button>
                       )}
                     </div>
@@ -1850,14 +1837,14 @@ export default function App() {
               ) : filteredInstruments.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center gap-3 p-8 text-center">
                   <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    当前筛选条件下没有匹配的设备记录
+                    无匹配记录
                   </p>
                   <button
                     type="button"
                     onClick={resetAllFilters}
                     className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.06] transition"
                   >
-                    清除全部筛选条件
+                    重置筛选
                   </button>
                 </div>
               ) : (
@@ -2106,19 +2093,19 @@ export default function App() {
 
             {/* Minimalist Desktop Status Bar */}
             <footer className="h-8 px-6 border-t border-zinc-200/80 dark:border-white/[0.07] bg-zinc-50/70 dark:bg-[#0c0c0f] flex items-center justify-between text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0 select-none">
-              <div className="flex items-center gap-3 font-mono tabular-nums">
+              <div className="flex items-center gap-2 font-mono tabular-nums">
                 <span>
-                  显示 {filteredInstruments.length} / {categoryScoped.length} 项
+                  共 {filteredInstruments.length} / {categoryScoped.length} 项
                 </span>
-                <span className="text-zinc-300 dark:text-zinc-700">·</span>
-                <span>计算规则：上次校验 + 周期(月) - 1天</span>
+                <InfoTip
+                  placement="top"
+                  content="下次校验日期自动按「上次校验 + 周期(月) - 1天」计算"
+                />
               </div>
               <div className="hidden md:flex items-center gap-3">
                 <span>⌘K 检索</span>
                 <span className="text-zinc-300 dark:text-zinc-700">·</span>
                 <span>⌘L 锁屏</span>
-                <span className="text-zinc-300 dark:text-zinc-700">·</span>
-                <span>SQLite 本地持久化</span>
               </div>
             </footer>
           </div>

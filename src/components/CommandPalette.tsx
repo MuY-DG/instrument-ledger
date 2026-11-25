@@ -117,7 +117,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 <Search className="h-4 w-4 text-zinc-400 shrink-0" />
                 <Command.Input
                   autoFocus
-                  placeholder="搜索设备名称、出厂编号、存放位置，或输入快捷操作..."
+                  placeholder="搜索设备或命令..."
                   className="w-full py-3.5 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none"
                 />
                 <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-zinc-100 dark:bg-white/[0.07] text-zinc-500 dark:text-zinc-400 border border-zinc-200/80 dark:border-white/[0.08]">
@@ -142,7 +142,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     >
                       <span className="flex items-center gap-2.5">
                         <Plus className="h-3.5 w-3.5 text-indigo-500" />
-                        <span>新增仪器 / 检具记录</span>
+                        <span>新增设备</span>
                       </span>
                       <span className="text-[10px] text-zinc-400">管理员</span>
                     </Command.Item>
@@ -155,7 +155,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     >
                       <span className="flex items-center gap-2.5">
                         <Upload className="h-3.5 w-3.5 text-emerald-500" />
-                        <span>导入 Excel 台账 (.xlsx)</span>
+                        <span>导入 Excel</span>
                       </span>
                     </Command.Item>
                   )}
@@ -166,7 +166,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <BellRing className="h-3.5 w-3.5 text-amber-500" />
-                      <span>打开到期预警弹窗</span>
+                      <span>到期预警</span>
                     </span>
                   </Command.Item>
 
@@ -176,7 +176,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-500" />
-                      <span>配置预警天数、颜色与弹窗策略</span>
+                      <span>预警设置</span>
                     </span>
                   </Command.Item>
 
@@ -186,7 +186,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-500" />
-                      <span>导出完整双台账 Excel</span>
+                      <span>导出 Excel</span>
                     </span>
                   </Command.Item>
 
@@ -196,7 +196,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <Printer className="h-3.5 w-3.5 text-zinc-400" />
-                      <span>打印当前台账（横向 A4）</span>
+                      <span>打印台账</span>
                     </span>
                   </Command.Item>
 
@@ -211,7 +211,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         <Moon className="h-3.5 w-3.5 text-indigo-500" />
                       )}
                       <span>
-                        切换到{theme === "dark" ? "浅色精密模式" : "深色暗曜模式"}
+                        切换{theme === "dark" ? "浅色模式" : "深色模式"}
                       </span>
                     </span>
                   </Command.Item>
@@ -222,7 +222,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <Lock className="h-3.5 w-3.5 text-amber-500" />
-                      <span>立即全屏锁屏保护</span>
+                      <span>立即锁屏</span>
                     </span>
                     <kbd className="text-[10px] font-mono text-zinc-400">⌘L</kbd>
                   </Command.Item>
@@ -233,7 +233,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <CloudDownload className="h-3.5 w-3.5 text-sky-500" />
-                      <span>检查软件更新</span>
+                      <span>检查更新</span>
                     </span>
                   </Command.Item>
 
@@ -244,7 +244,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     >
                       <span className="flex items-center gap-2.5">
                         <Settings className="h-3.5 w-3.5 text-zinc-400" />
-                        <span>打开系统设置与备份中心</span>
+                        <span>系统设置</span>
                       </span>
                     </Command.Item>
                   )}
@@ -259,7 +259,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       ) : (
                         <LogIn className="h-3.5 w-3.5 text-indigo-500" />
                       )}
-                      <span>{isAdmin ? "退出管理员模式" : "管理员身份登录"}</span>
+                      <span>{isAdmin ? "退出登录" : "管理员登录"}</span>
                     </span>
                   </Command.Item>
                 </Command.Group>
