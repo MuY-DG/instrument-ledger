@@ -98,6 +98,9 @@ pub fn init_db(db_path: &Path) -> Result<Connection, String> {
     Ok(conn)
 }
 
+pub const DEFAULT_GITHUB_REPO: &str = "MuY-DG/instrument-ledger";
+pub const DEFAULT_UPDATE_PROXY_URL: &str = "https://gh-proxy.com/";
+
 fn seed_default_settings(conn: &Connection) -> Result<(), String> {
     let defaults = [
         ("warning_days", "30"),
@@ -113,8 +116,8 @@ fn seed_default_settings(conn: &Connection) -> Result<(), String> {
             "weekly_notice",
             "定期核查监视与测量设备校准有效期，确保量值溯源准确可靠",
         ),
-        ("github_repo", ""),
-        ("update_proxy_url", ""),
+        ("github_repo", DEFAULT_GITHUB_REPO),
+        ("update_proxy_url", DEFAULT_UPDATE_PROXY_URL),
         ("company_logo_path", ""),
     ];
 
@@ -209,8 +212,8 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
             "weekly_notice",
             "定期核查监视与测量设备校准有效期，确保量值溯源准确可靠",
         ),
-        github_repo: get_or("github_repo", ""),
-        update_proxy_url: get_or("update_proxy_url", ""),
+        github_repo: get_or("github_repo", DEFAULT_GITHUB_REPO),
+        update_proxy_url: get_or("update_proxy_url", DEFAULT_UPDATE_PROXY_URL),
         company_logo_path: get_or("company_logo_path", ""),
     })
 }
@@ -411,6 +414,30 @@ mod tests {
             get_setting(&conn3, "admin_username").unwrap().as_deref(),
             Some("qa_lead")
         );
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_default_update_settings_and_override() {
+        let root = std::env::temp_dir().join(format!("inst_upd_test_{}", uuid::Uuid::new_v4()));
+        let db_path = root.join("ledger.db");
+
+        // Fresh DB seeds default GitHub repo and download proxy
+        let conn = init_db(&db_path).expect("init_db failed");
+        let s1 = load_app_settings(&conn).unwrap();
+        assert_eq!(s1.github_repo, DEFAULT_GITHUB_REPO);
+        assert_eq!(s1.update_proxy_url, DEFAULT_UPDATE_PROXY_URL);
+
+        // Explicitly clearing proxy or changing repo must persist across reopen
+        set_setting(&conn, "github_repo", "other/repo").unwrap();
+        set_setting(&conn, "update_proxy_url", "").unwrap();
+        drop(conn);
+
+        let conn2 = init_db(&db_path).expect("reopen failed");
+        let s2 = load_app_settings(&conn2).unwrap();
+        assert_eq!(s2.github_repo, "other/repo");
+        assert_eq!(s2.update_proxy_url, "");
 
         let _ = std::fs::remove_dir_all(&root);
     }

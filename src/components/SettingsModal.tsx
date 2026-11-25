@@ -737,7 +737,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               type="text"
                               value={githubRepo}
                               onChange={(e) => setGithubRepo(e.target.value)}
-                              placeholder="例如：yourname/instrument-ledger"
+                              placeholder="例如：MuY-DG/instrument-ledger"
                               className={`${INPUT_CLS} font-mono text-xs`}
                             />
                           </div>
@@ -749,9 +749,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               type="text"
                               value={updateProxyUrl}
                               onChange={(e) => setUpdateProxyUrl(e.target.value)}
-                              placeholder="例如：https://gh-proxy.com/"
+                              placeholder="例如：https://gh-proxy.com/（留空则直连 GitHub）"
                               className={`${INPUT_CLS} font-mono text-xs`}
                             />
+                            <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400 leading-relaxed">
+                              默认使用 <span className="font-mono">https://gh-proxy.com/</span>，可按需修改（如{" "}
+                              <span className="font-mono">https://ghfast.top/</span>、{" "}
+                              <span className="font-mono">https://gh-proxy.org/</span>）或清空以直连 GitHub；若代理不可用将自动回退直连。
+                            </p>
                           </div>
                         </div>
                         <div className="flex justify-end">

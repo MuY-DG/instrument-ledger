@@ -76,7 +76,7 @@ pnpm tauri build --target universal-apple-darwin --bundles dmg  # macOS 通用 .
    git add .
    git commit -m "feat: precision desktop UI, onboarding setup & cross-platform build"
    git branch -M main
-   git remote add origin https://github.com/<你的用户名>/<仓库名>.git
+   git remote add origin https://github.com/MuY-DG/instrument-ledger.git
    git push -u origin main
    ```
 2. 每次发布新版本前，同步更新以下 3 处版本号（例如 `1.1.0`）：
@@ -107,4 +107,9 @@ xattr -cr /Applications/InstrumentLedger.app
 
 ### 软件内一键更新配置
 
-打开软件 → 登录管理员账号 → 点击侧边栏左下角 **设置** → **检查更新**，填入 `<你的用户名>/<仓库名>`（如需加速可填写代理前缀）并保存，后续发布新版本后即可在软件内一键检测、下载并启动对应系统安装包完成覆盖升级。
+软件默认已预填以下更新源配置（管理员可在侧边栏左下角 **设置 → 检查更新** 中随时修改或清空）：
+
+- **GitHub 仓库**：`MuY-DG/instrument-ledger`
+- **下载加速代理前缀**：`https://gh-proxy.com/`（适合国内网络加速下载安装包；若该节点异常，应用会自动回退为直连 GitHub，也可手动更换为 `https://ghfast.top/`、`https://gh-proxy.org/` 或留空直连）
+
+后续发布新版本后，点击 **立即检查更新** 即可自动匹配对应系统的安装包（macOS `_universal.dmg` / Windows `_x64-setup.exe`）并完成下载与覆盖升级。

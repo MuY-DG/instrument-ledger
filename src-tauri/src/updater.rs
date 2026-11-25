@@ -184,26 +184,47 @@ pub async fn download_and_launch_installer(
     asset_name: &str,
     proxy_url: &str,
 ) -> Result<String, String> {
-    if download_url.trim().is_empty() {
+    let raw_url = download_url.trim();
+    if raw_url.is_empty() {
         return Err("没有可下载的安装包链接".to_string());
     }
-    let final_url = apply_proxy(download_url.trim(), proxy_url);
+    let proxy_trimmed = proxy_url.trim();
 
     let client = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
         .timeout(Duration::from_secs(600))
         .user_agent(format!("InstrumentLedger/{}", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|e| format!("初始化下载客户端失败: {}", e))?;
 
-    let resp = client
-        .get(&final_url)
-        .send()
-        .await
-        .map_err(|e| format!("下载安装包失败: {}", e))?;
-
-    if !resp.status().is_success() {
-        return Err(format!("下载失败，服务器返回: {}", resp.status()));
-    }
+    let resp = if !proxy_trimmed.is_empty() {
+        let proxied_url = apply_proxy(raw_url, proxy_trimmed);
+        match client.get(&proxied_url).send().await {
+            Ok(r) if r.status().is_success() => r,
+            _ => {
+                // Fallback to direct GitHub download if configured proxy is unavailable
+                let direct = client
+                    .get(raw_url)
+                    .send()
+                    .await
+                    .map_err(|e| format!("代理与直连下载安装包均失败，请检查网络或更换代理前缀: {}", e))?;
+                if !direct.status().is_success() {
+                    return Err(format!("下载失败，服务器返回: {}", direct.status()));
+                }
+                direct
+            }
+        }
+    } else {
+        let direct = client
+            .get(raw_url)
+            .send()
+            .await
+            .map_err(|e| format!("下载安装包失败: {}", e))?;
+        if !direct.status().is_success() {
+            return Err(format!("下载失败，服务器返回: {}", direct.status()));
+        }
+        direct
+    };
 
     let total = resp.content_length().unwrap_or(0);
     let update_dir = std::env::temp_dir().join("InstrumentLedger-Updates");
