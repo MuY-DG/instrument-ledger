@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseJsskExcel, exportJsskExcel } from "../src/lib/excel";
 import { calcNextCalDate } from "../src/lib/status";
+import { DEFAULT_WARNING_THRESHOLDS } from "../src/lib/thresholdColors";
 import type { AppSettings, Instrument } from "../src/types";
 
 async function main() {
@@ -80,7 +81,11 @@ async function main() {
   // 3. Test round-trip export to Excel and re-parse!
   const fakeSettings: AppSettings = {
     adminUsername: "qa_admin",
-    warningDays: 30,
+    warningDays: 60,
+    warningThresholds: DEFAULT_WARNING_THRESHOLDS,
+    alertPopupEnabled: true,
+    alertPopupFrequency: "every_open",
+    alertPopupIntervalHours: 4,
     autoLockMinutes: 0,
     docCode: "JSSK-MPR-170",
     docVersion: "A",

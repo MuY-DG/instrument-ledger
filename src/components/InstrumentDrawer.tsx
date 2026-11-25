@@ -20,6 +20,7 @@ import type {
   Instrument,
   InstrumentInput,
   LedgerCategory,
+  WarningThreshold,
 } from "@/types";
 
 interface InstrumentDrawerProps {
@@ -28,7 +29,7 @@ interface InstrumentDrawerProps {
   initialCategory: LedgerCategory;
   instrument: Instrument | null;
   allInstruments: Instrument[];
-  warningDays: number;
+  warningThresholds: WarningThreshold[];
   onClose: () => void;
   onSaved: (saved: Instrument) => void;
   onNotify: (msg: string, type?: "success" | "error") => void;
@@ -43,7 +44,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
   initialCategory,
   instrument,
   allInstruments,
-  warningDays,
+  warningThresholds,
   onClose,
   onSaved,
   onNotify,
@@ -182,9 +183,9 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
     () =>
       getInstrumentStatus(
         { exemptCalibration, nextCalDate, remark },
-        warningDays
+        warningThresholds
       ),
-    [exemptCalibration, nextCalDate, remark, warningDays]
+    [exemptCalibration, nextCalDate, remark, warningThresholds]
   );
 
   const handlePickPhoto = async () => {

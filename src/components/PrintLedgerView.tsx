@@ -1,5 +1,6 @@
 import React from "react";
 import { calTypeLabel, getInstrumentStatus, getTodayStr } from "@/lib/status";
+import { getThresholdVisuals } from "@/lib/thresholdColors";
 import type { AppSettings, CategoryTab, Instrument } from "@/types";
 
 interface PrintLedgerViewProps {
@@ -73,12 +74,16 @@ export const PrintLedgerView: React.FC<PrintLedgerViewProps> = ({
         </thead>
         <tbody>
           {instruments.map((inst, idx) => {
-            const st = getInstrumentStatus(inst, settings.warningDays);
+            const st = getInstrumentStatus(inst, settings.warningThresholds);
+            const tierVisuals =
+              st.status === "warning" && st.matchedThreshold
+                ? getThresholdVisuals(st.matchedThreshold.color)
+                : null;
             const statusBg =
               st.status === "valid"
                 ? "bg-emerald-100 text-emerald-900"
                 : st.status === "warning"
-                  ? "bg-amber-100 text-amber-900"
+                  ? "font-medium"
                   : st.status === "expired"
                     ? "bg-rose-100 text-rose-900 font-bold"
                     : "bg-slate-100 text-slate-600";
@@ -96,7 +101,17 @@ export const PrintLedgerView: React.FC<PrintLedgerViewProps> = ({
                   {inst.calCycleMonths > 0 ? `${inst.calCycleMonths}月` : ""}
                 </td>
                 <td className="text-center font-mono text-[8pt]">{inst.nextCalDate}</td>
-                <td className={`text-center ${statusBg}`}>
+                <td
+                  className={`text-center ${statusBg}`}
+                  style={
+                    tierVisuals
+                      ? {
+                          backgroundColor: tierVisuals.printBg,
+                          color: tierVisuals.printText,
+                        }
+                      : undefined
+                  }
+                >
                   {st.label}
                   {st.daysRemaining !== null ? `(${st.detailText})` : ""}
                 </td>

@@ -1,5 +1,6 @@
 import React from "react";
 import type { InstrumentStatusInfo } from "@/lib/status";
+import { getThresholdVisuals } from "@/lib/thresholdColors";
 import { cn } from "@/lib/utils";
 
 interface StatusBadgeProps {
@@ -8,6 +9,54 @@ interface StatusBadgeProps {
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ info, compact }) => {
+  // Custom multi-tier warning color rendering
+  if (info.status === "warning" && info.matchedThreshold) {
+    const visuals = getThresholdVisuals(info.matchedThreshold.color);
+    const shouldPulse =
+      info.daysRemaining !== null &&
+      info.daysRemaining <= Math.min(30, info.matchedThreshold.days);
+
+    return (
+      <div
+        className="inline-flex flex-col items-start gap-1"
+        style={visuals.cssVars}
+      >
+        <span
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full border font-medium whitespace-nowrap transition-colors",
+            "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)]",
+            "text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]",
+            "border-[var(--tier-border)] dark:border-[var(--tier-border-dark)]",
+            compact ? "px-2 py-0.5 text-[11px]" : "px-2.5 py-0.5 text-[11.5px]"
+          )}
+        >
+          <span className="relative flex h-1.5 w-1.5 shrink-0">
+            {shouldPulse && (
+              <span
+                className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-70"
+                style={{ backgroundColor: visuals.hex }}
+              />
+            )}
+            <span
+              className="relative inline-flex rounded-full h-1.5 w-1.5"
+              style={{
+                backgroundColor: visuals.hex,
+                boxShadow: visuals.glow,
+              }}
+            />
+          </span>
+          <span className="tracking-tight">{info.label}</span>
+        </span>
+
+        {!compact && info.detailText && (
+          <span className="text-[11px] font-mono tabular-nums pl-0.5 whitespace-nowrap font-medium text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]">
+            {info.detailText}
+          </span>
+        )}
+      </div>
+    );
+  }
+
   const styles: Record<
     InstrumentStatusInfo["status"],
     { pill: string; dot: string; glow: string; sub: string; pulse?: boolean }

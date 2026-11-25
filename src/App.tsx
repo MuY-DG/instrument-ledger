@@ -5,6 +5,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { Toaster, toast } from "sonner";
 import {
   ArrowUpDown,
+  BellRing,
+  CalendarClock,
   ChevronDown,
   ChevronRight,
   CloudDownload,
@@ -24,6 +26,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Sun,
   Trash2,
   Upload,
@@ -32,7 +35,18 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { exportJsskExcel, uint8ArrayToBase64 } from "@/lib/excel";
-import { calTypeLabel, getInstrumentStatus, getTodayStr } from "@/lib/status";
+import {
+  calTypeLabel,
+  getInstrumentStatus,
+  getTodayStr,
+  summarizeExpiryAlerts,
+} from "@/lib/status";
+import {
+  DEFAULT_WARNING_THRESHOLDS,
+  getMaxWarningDays,
+  getThresholdVisuals,
+  sortThresholdsDesc,
+} from "@/lib/thresholdColors";
 import { cn } from "@/lib/utils";
 import { OnboardingSetup } from "@/components/OnboardingSetup";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -46,10 +60,12 @@ import { ImportModal } from "@/components/ImportModal";
 import { PrintLedgerView } from "@/components/PrintLedgerView";
 import { CommandPalette } from "@/components/CommandPalette";
 import { UpdateBannerToast } from "@/components/UpdateBannerToast";
+import { ExpiryAlertModal } from "@/components/ExpiryAlertModal";
 import type {
   AppSettings,
   AuthStatus,
   CategoryTab,
+  ExpiryFilter,
   Instrument,
   SortMode,
   StatusFilter,
@@ -59,7 +75,11 @@ import type {
 
 const DEFAULT_SETTINGS: AppSettings = {
   adminUsername: "",
-  warningDays: 30,
+  warningDays: 60,
+  warningThresholds: DEFAULT_WARNING_THRESHOLDS,
+  alertPopupEnabled: true,
+  alertPopupFrequency: "every_open",
+  alertPopupIntervalHours: 4,
   autoLockMinutes: 0,
   docCode: "JSSK-MPR-170",
   docVersion: "A",
@@ -73,6 +93,26 @@ const DEFAULT_SETTINGS: AppSettings = {
 };
 
 const THEME_KEY = "instrument_ledger_theme";
+const ALERT_MUTED_DATE_KEY = "instrument_ledger_alert_muted_date";
+const ALERT_LAST_SHOWN_DATE_KEY = "instrument_ledger_alert_last_shown_date";
+const ALERT_LAST_SHOWN_TS_KEY = "instrument_ledger_alert_last_shown_ts";
+
+function readStorage(key: string): string {
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function writeStorage(key: string, value: string) {
+  try {
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // ignore storage access issues
+  }
+}
 
 function loadInitialTheme(): "light" | "dark" {
   try {
@@ -87,6 +127,7 @@ function loadInitialTheme(): "light" | "dark" {
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
+  const [instrumentsLoaded, setInstrumentsLoaded] = useState(false);
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [logoDataUrl, setLogoDataUrl] = useState("");
@@ -103,6 +144,7 @@ export default function App() {
   // Navigation & Filters
   const [activeTab, setActiveTab] = useState<CategoryTab>("gauge");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
   const [deptFilter, setDeptFilter] = useState("all");
   const [calTypeFilter, setCalTypeFilter] = useState("all");
   const [sortMode, setSortMode] = useState<SortMode>("seq");
@@ -110,6 +152,12 @@ export default function App() {
 
   // Modals / Drawers / Overlays
   const [commandOpen, setCommandOpen] = useState(false);
+  const [alertModalOpen, setAlertModalOpen] = useState(false);
+  const [mutedToday, setMutedToday] = useState<boolean>(
+    () => readStorage(ALERT_MUTED_DATE_KEY) === getTodayStr()
+  );
+  const startupAlertCheckedRef = useRef(false);
+
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerMode, setDrawerMode] = useState<"create" | "edit" | "view">("view");
   const [editingInstrument, setEditingInstrument] = useState<Instrument | null>(null);
@@ -124,7 +172,7 @@ export default function App() {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<
-    "general" | "security" | "backup" | "update"
+    "general" | "alerts" | "security" | "backup" | "update"
   >("general");
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -178,6 +226,7 @@ export default function App() {
       if (authSt.isInitialized && !authSt.isLocked) {
         const list = await api.listInstruments();
         setInstruments(list);
+        setInstrumentsLoaded(true);
       }
     } catch (err) {
       notify(`加载数据失败：${String(err)}`, "error");
@@ -347,24 +396,191 @@ export default function App() {
     return Array.from(set).sort();
   }, [categoryScoped]);
 
+  // Multi-tier warning thresholds & global expiry alert summary
+  const descThresholds = useMemo(
+    () => sortThresholdsDesc(settings.warningThresholds),
+    [settings.warningThresholds]
+  );
+
+  const maxWarningDays = useMemo(
+    () => getMaxWarningDays(settings.warningThresholds, settings.warningDays),
+    [settings.warningThresholds, settings.warningDays]
+  );
+
+  const alertSummary = useMemo(
+    () => summarizeExpiryAlerts(instruments, settings.warningThresholds),
+    [instruments, settings.warningThresholds]
+  );
+
+  // Reset numeric expiryFilter if that custom threshold was deleted
+  useEffect(() => {
+    if (
+      typeof expiryFilter === "number" &&
+      !descThresholds.some((t) => t.days === expiryFilter)
+    ) {
+      setExpiryFilter("all");
+    }
+  }, [expiryFilter, descThresholds]);
+
+  const recordAlertPopupShown = useCallback(() => {
+    writeStorage(ALERT_LAST_SHOWN_DATE_KEY, getTodayStr());
+    writeStorage(ALERT_LAST_SHOWN_TS_KEY, String(Date.now()));
+  }, []);
+
+  const openAlertModal = useCallback(() => {
+    setAlertModalOpen(true);
+    recordAlertPopupShown();
+  }, [recordAlertPopupShown]);
+
+  const handleToggleMuteToday = useCallback((muted: boolean) => {
+    setMutedToday(muted);
+    writeStorage(ALERT_MUTED_DATE_KEY, muted ? getTodayStr() : "");
+  }, []);
+
+  // Auto-open expiry alert popup on startup based on user rules
+  useEffect(() => {
+    if (
+      startupAlertCheckedRef.current ||
+      booting ||
+      loading ||
+      !instrumentsLoaded ||
+      !auth.isInitialized ||
+      auth.isLocked
+    ) {
+      return;
+    }
+    startupAlertCheckedRef.current = true;
+
+    if (!settings.alertPopupEnabled || alertSummary.totalAlertCount === 0) {
+      return;
+    }
+
+    const today = getTodayStr();
+    if (readStorage(ALERT_MUTED_DATE_KEY) === today) {
+      return;
+    }
+
+    const freq = settings.alertPopupFrequency || "every_open";
+    const lastDate = readStorage(ALERT_LAST_SHOWN_DATE_KEY);
+    const lastTs = Number(readStorage(ALERT_LAST_SHOWN_TS_KEY) || "0");
+
+    if (freq === "daily" && lastDate === today) {
+      return;
+    }
+    if (freq === "interval") {
+      const intervalMs =
+        Math.max(1, settings.alertPopupIntervalHours || 4) * 3600 * 1000;
+      if (lastDate === today && lastTs > 0 && Date.now() - lastTs < intervalMs) {
+        return;
+      }
+    }
+
+    const timer = window.setTimeout(() => {
+      setAlertModalOpen(true);
+      recordAlertPopupShown();
+    }, 450);
+
+    return () => window.clearTimeout(timer);
+  }, [
+    booting,
+    loading,
+    instrumentsLoaded,
+    auth.isInitialized,
+    auth.isLocked,
+    settings.alertPopupEnabled,
+    settings.alertPopupFrequency,
+    settings.alertPopupIntervalHours,
+    alertSummary.totalAlertCount,
+    recordAlertPopupShown,
+  ]);
+
+  // Periodic interval reminder when app remains open
+  useEffect(() => {
+    if (
+      booting ||
+      !auth.isInitialized ||
+      auth.isLocked ||
+      !settings.alertPopupEnabled ||
+      settings.alertPopupFrequency !== "interval"
+    ) {
+      return;
+    }
+
+    const intervalMs =
+      Math.max(1, settings.alertPopupIntervalHours || 4) * 3600 * 1000;
+
+    const timer = window.setInterval(() => {
+      if (
+        alertSummary.totalAlertCount === 0 ||
+        alertModalOpen ||
+        settingsModalOpen ||
+        drawerOpen
+      ) {
+        return;
+      }
+      const today = getTodayStr();
+      const isMuted = readStorage(ALERT_MUTED_DATE_KEY) === today;
+      setMutedToday(isMuted);
+      if (isMuted) return;
+
+      const lastDate = readStorage(ALERT_LAST_SHOWN_DATE_KEY);
+      const lastTs = Number(readStorage(ALERT_LAST_SHOWN_TS_KEY) || "0");
+      if (lastDate !== today || Date.now() - lastTs >= intervalMs) {
+        setAlertModalOpen(true);
+        recordAlertPopupShown();
+      }
+    }, 60 * 1000);
+
+    return () => window.clearInterval(timer);
+  }, [
+    booting,
+    auth.isInitialized,
+    auth.isLocked,
+    settings.alertPopupEnabled,
+    settings.alertPopupFrequency,
+    settings.alertPopupIntervalHours,
+    alertSummary.totalAlertCount,
+    alertModalOpen,
+    settingsModalOpen,
+    drawerOpen,
+    recordAlertPopupShown,
+  ]);
+
   // Calibration status distribution for sidebar navigation & compliance health bar
   const stats = useMemo(() => {
     let valid = 0;
     let warning = 0;
     let expired = 0;
     let exempt = 0;
+    const tierCountMap = new Map<string, number>();
+    for (const t of descThresholds) {
+      tierCountMap.set(t.id, 0);
+    }
 
     for (const inst of categoryScoped) {
-      const info = getInstrumentStatus(inst, settings.warningDays);
+      const info = getInstrumentStatus(inst, settings.warningThresholds);
       if (info.status === "valid") valid++;
-      else if (info.status === "warning") warning++;
-      else if (info.status === "expired") expired++;
+      else if (info.status === "warning") {
+        warning++;
+        if (info.matchedThreshold) {
+          tierCountMap.set(
+            info.matchedThreshold.id,
+            (tierCountMap.get(info.matchedThreshold.id) || 0) + 1
+          );
+        }
+      } else if (info.status === "expired") expired++;
       else exempt++;
     }
 
     const controlled = valid + warning + expired;
     const compliancePct =
       controlled > 0 ? Math.round(((valid + warning) / controlled) * 100) : 100;
+
+    const tierSegments = descThresholds.map((t) => ({
+      id: t.id,
+      color: t.color,
+      count: tierCountMap.get(t.id) || 0,
+    }));
 
     return {
       total: categoryScoped.length,
@@ -374,16 +590,52 @@ export default function App() {
       exempt,
       controlled,
       compliancePct,
+      tierSegments,
     };
-  }, [categoryScoped, settings.warningDays]);
+  }, [categoryScoped, settings.warningThresholds, descThresholds]);
+
+  // Cumulative counts for list expiry filter pills (0 <= daysRemaining <= threshold.days)
+  const expiryFilterCounts = useMemo(() => {
+    let expired = 0;
+    const byDays: Record<number, number> = {};
+    for (const t of descThresholds) {
+      byDays[t.days] = 0;
+    }
+    for (const inst of categoryScoped) {
+      const st = getInstrumentStatus(inst, settings.warningThresholds);
+      if (st.daysRemaining === null) continue;
+      if (st.daysRemaining < 0) {
+        expired++;
+      } else {
+        for (const t of descThresholds) {
+          if (st.daysRemaining <= t.days) {
+            byDays[t.days] += 1;
+          }
+        }
+      }
+    }
+    return { expired, byDays };
+  }, [categoryScoped, settings.warningThresholds, descThresholds]);
 
   // Filtered and sorted rows
   const filteredInstruments = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     const list = categoryScoped.filter((inst) => {
-      const st = getInstrumentStatus(inst, settings.warningDays);
+      const st = getInstrumentStatus(inst, settings.warningThresholds);
 
       if (statusFilter !== "all" && st.status !== statusFilter) return false;
+
+      if (expiryFilter === "expired") {
+        if (st.status !== "expired") return false;
+      } else if (typeof expiryFilter === "number") {
+        if (
+          st.daysRemaining === null ||
+          st.daysRemaining < 0 ||
+          st.daysRemaining > expiryFilter
+        ) {
+          return false;
+        }
+      }
 
       if (deptFilter !== "all") {
         if (deptFilter === "__empty__" && inst.department.trim() !== "") return false;
@@ -417,8 +669,8 @@ export default function App() {
 
     if (sortMode === "expiry") {
       return [...list].sort((a, b) => {
-        const sa = getInstrumentStatus(a, settings.warningDays);
-        const sb = getInstrumentStatus(b, settings.warningDays);
+        const sa = getInstrumentStatus(a, settings.warningThresholds);
+        const sb = getInstrumentStatus(b, settings.warningThresholds);
         const da = sa.daysRemaining ?? Number.MAX_SAFE_INTEGER;
         const db = sb.daysRemaining ?? Number.MAX_SAFE_INTEGER;
         return da - db;
@@ -431,11 +683,12 @@ export default function App() {
   }, [
     categoryScoped,
     statusFilter,
+    expiryFilter,
     deptFilter,
     calTypeFilter,
     searchQuery,
     sortMode,
-    settings.warningDays,
+    settings.warningThresholds,
   ]);
 
   const handleLogout = async () => {
@@ -527,13 +780,45 @@ export default function App() {
     setDrawerOpen(true);
   };
 
-  const openSettingsTab = (tab: "general" | "security" | "backup" | "update") => {
+  const openSettingsTab = (
+    tab: "general" | "alerts" | "security" | "backup" | "update"
+  ) => {
     setSettingsInitialTab(tab);
     setSettingsModalOpen(true);
   };
 
+  const handleSelectStatusFilter = (next: StatusFilter) => {
+    setStatusFilter(next);
+    if (next === "expired") {
+      setExpiryFilter("expired");
+    } else {
+      setExpiryFilter("all");
+    }
+  };
+
+  const handleSelectExpiryFilter = (next: ExpiryFilter) => {
+    setExpiryFilter(next);
+    if (next === "expired") {
+      setStatusFilter("expired");
+    } else if (typeof next === "number") {
+      setStatusFilter("all");
+    } else if (statusFilter === "expired") {
+      setStatusFilter("all");
+    }
+  };
+
+  const handleApplyFilterFromAlertModal = (next: ExpiryFilter) => {
+    setActiveTab("all");
+    setDeptFilter("all");
+    setCalTypeFilter("all");
+    setSearchQuery("");
+    handleSelectExpiryFilter(next);
+    setSortMode("expiry");
+  };
+
   const resetAllFilters = () => {
     setStatusFilter("all");
+    setExpiryFilter("all");
     setDeptFilter("all");
     setCalTypeFilter("all");
     setSearchQuery("");
@@ -541,6 +826,7 @@ export default function App() {
 
   const hasActiveFilters =
     statusFilter !== "all" ||
+    expiryFilter !== "all" ||
     deptFilter !== "all" ||
     calTypeFilter !== "all" ||
     searchQuery.trim() !== "";
@@ -741,9 +1027,14 @@ export default function App() {
               <div>
                 <div className="px-2.5 pb-1.5 flex items-center justify-between text-[10.5px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
                   <span>效期状态</span>
-                  <span className="font-mono normal-case text-[10px]">
-                    预警 ≤{settings.warningDays}d
-                  </span>
+                  <button
+                    type="button"
+                    onClick={() => openSettingsTab("alerts")}
+                    className="font-mono normal-case text-[10px] hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+                    title="点击配置多级到期预警天数与颜色"
+                  >
+                    预警 ≤{maxWarningDays}d
+                  </button>
                 </div>
                 <nav className="space-y-0.5">
                   {(
@@ -790,7 +1081,7 @@ export default function App() {
                       <button
                         key={st.id}
                         type="button"
-                        onClick={() => setStatusFilter(st.id)}
+                        onClick={() => handleSelectStatusFilter(st.id)}
                         className={cn(
                           "relative w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors",
                           active
@@ -837,30 +1128,40 @@ export default function App() {
                 <div className="h-1.5 w-full rounded-full bg-zinc-200/80 dark:bg-white/[0.07] overflow-hidden flex gap-0.5">
                   {stats.controlled > 0 ? (
                     <>
-                      <motion.div
-                        initial={false}
-                        animate={{
-                          width: `${(stats.valid / stats.controlled) * 100}%`,
-                        }}
-                        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                        className="h-full bg-emerald-500 rounded-full"
-                      />
-                      <motion.div
-                        initial={false}
-                        animate={{
-                          width: `${(stats.warning / stats.controlled) * 100}%`,
-                        }}
-                        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                        className="h-full bg-amber-400 rounded-full"
-                      />
-                      <motion.div
-                        initial={false}
-                        animate={{
-                          width: `${(stats.expired / stats.controlled) * 100}%`,
-                        }}
-                        transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
-                        className="h-full bg-rose-500 rounded-full"
-                      />
+                      {stats.valid > 0 && (
+                        <motion.div
+                          initial={false}
+                          animate={{
+                            width: `${(stats.valid / stats.controlled) * 100}%`,
+                          }}
+                          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                          className="h-full bg-emerald-500 rounded-full"
+                        />
+                      )}
+                      {stats.tierSegments.map((seg) =>
+                        seg.count > 0 ? (
+                          <motion.div
+                            key={seg.id}
+                            initial={false}
+                            animate={{
+                              width: `${(seg.count / stats.controlled) * 100}%`,
+                            }}
+                            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                            className="h-full rounded-full"
+                            style={{ backgroundColor: seg.color }}
+                          />
+                        ) : null
+                      )}
+                      {stats.expired > 0 && (
+                        <motion.div
+                          initial={false}
+                          animate={{
+                            width: `${(stats.expired / stats.controlled) * 100}%`,
+                          }}
+                          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                          className="h-full bg-rose-500 rounded-full"
+                        />
+                      )}
                     </>
                   ) : (
                     <div className="h-full w-full bg-zinc-300/60 dark:bg-zinc-700/50 rounded-full" />
@@ -1018,7 +1319,7 @@ export default function App() {
                 {statusFilter !== "all" && (
                   <button
                     type="button"
-                    onClick={() => setStatusFilter("all")}
+                    onClick={() => handleSelectStatusFilter("all")}
                     className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200/80 dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-[11px] text-zinc-700 dark:text-zinc-200 transition"
                   >
                     <span
@@ -1032,6 +1333,31 @@ export default function App() {
                   </button>
                 )}
 
+                {typeof expiryFilter === "number" &&
+                  (() => {
+                    const matched = descThresholds.find(
+                      (t) => t.days === expiryFilter
+                    );
+                    const visuals = getThresholdVisuals(
+                      matched?.color || "#f59e0b"
+                    );
+                    return (
+                      <button
+                        type="button"
+                        onClick={() => handleSelectExpiryFilter("all")}
+                        style={visuals.cssVars}
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] border-[var(--tier-border)] dark:border-[var(--tier-border-dark)] transition"
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full"
+                          style={{ backgroundColor: visuals.hex }}
+                        />
+                        <span>≤{expiryFilter}天到期</span>
+                        <X className="h-3 w-3 opacity-70" />
+                      </button>
+                    );
+                  })()}
+
                 {!auth.isAdmin && (
                   <span className="hidden xl:inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-200/80 dark:border-white/[0.08] text-[10.5px] text-zinc-400">
                     <Eye className="h-3 w-3" />
@@ -1042,6 +1368,47 @@ export default function App() {
 
               {/* Primary Action Toolbar */}
               <div className="flex items-center gap-2 shrink-0">
+                {/* Expiry Alert Center Trigger */}
+                {(() => {
+                  const hasAlerts = alertSummary.totalAlertCount > 0;
+                  const alertColor =
+                    alertSummary.highestSeverityColor || "#10b981";
+                  const alertVisuals = getThresholdVisuals(alertColor);
+                  return (
+                    <button
+                      type="button"
+                      onClick={() => openAlertModal()}
+                      style={hasAlerts ? alertVisuals.cssVars : undefined}
+                      className={cn(
+                        "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition",
+                        hasAlerts
+                          ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] border-[var(--tier-border)] dark:border-[var(--tier-border-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] hover:opacity-90"
+                          : "border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-zinc-700 dark:text-zinc-200"
+                      )}
+                      title="打开设备效期预警弹窗"
+                    >
+                      <span className="relative flex items-center justify-center">
+                        <BellRing className="h-3.5 w-3.5" />
+                        {hasAlerts && (
+                          <span
+                            className="animate-ping absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full opacity-75"
+                            style={{ backgroundColor: alertColor }}
+                          />
+                        )}
+                      </span>
+                      <span>到期预警</span>
+                      {hasAlerts && (
+                        <span
+                          className="px-1.5 py-0.2 rounded-full text-[10.5px] font-mono tabular-nums font-semibold text-white"
+                          style={{ backgroundColor: alertColor }}
+                        >
+                          {alertSummary.totalAlertCount}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })()}
+
                 {auth.isAdmin && (
                   <button
                     type="button"
@@ -1134,103 +1501,214 @@ export default function App() {
             </header>
 
             {/* Sleek Filter & Sort Strip */}
-            <div className="px-6 py-2.5 border-b border-zinc-200/70 dark:border-white/[0.06] bg-zinc-50/50 dark:bg-white/[0.015] flex flex-wrap items-center justify-between gap-3 shrink-0">
-              <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
-                {/* Inline Search */}
-                <div className="relative flex-1 max-w-xs min-w-[200px]">
-                  <Search className="h-3.5 w-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="过滤名称、编号、规格、位置..."
-                    className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
-                  />
-                  {searchQuery && (
+            <div className="border-b border-zinc-200/70 dark:border-white/[0.06] bg-zinc-50/50 dark:bg-white/[0.015] shrink-0">
+              <div className="px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
+                  {/* Inline Search */}
+                  <div className="relative flex-1 max-w-xs min-w-[200px]">
+                    <Search className="h-3.5 w-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="过滤名称、编号、规格、位置..."
+                      className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
+                    />
+                    {searchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setSearchQuery("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Department Filter */}
+                  <select
+                    value={deptFilter}
+                    onChange={(e) => setDeptFilter(e.target.value)}
+                    className="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#121216] text-zinc-700 dark:text-zinc-200 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
+                  >
+                    <option value="all">全部部门</option>
+                    {departmentOptions.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                    <option value="__empty__">未填部门</option>
+                  </select>
+
+                  {/* Sort Selector */}
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#121216] text-xs text-zinc-600 dark:text-zinc-300">
+                    <ArrowUpDown className="h-3 w-3 text-zinc-400" />
+                    <select
+                      value={sortMode}
+                      onChange={(e) => setSortMode(e.target.value as SortMode)}
+                      className="bg-transparent focus:outline-none text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer"
+                    >
+                      <option value="seq">默认序号</option>
+                      <option value="expiry">到期日优先</option>
+                      <option value="name">名称排序</option>
+                    </select>
+                  </div>
+
+                  {hasActiveFilters && (
                     <button
                       type="button"
-                      onClick={() => setSearchQuery("")}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                      onClick={resetAllFilters}
+                      className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 px-2 py-1 rounded-md hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] transition"
                     >
-                      <X className="h-3.5 w-3.5" />
+                      重置筛选
                     </button>
                   )}
                 </div>
 
-                {/* Department Filter */}
-                <select
-                  value={deptFilter}
-                  onChange={(e) => setDeptFilter(e.target.value)}
-                  className="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#121216] text-zinc-700 dark:text-zinc-200 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
-                >
-                  <option value="all">全部部门</option>
-                  {departmentOptions.map((d) => (
-                    <option key={d} value={d}>
-                      {d}
-                    </option>
-                  ))}
-                  <option value="__empty__">未填部门</option>
-                </select>
-
-                {/* Sort Selector */}
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#121216] text-xs text-zinc-600 dark:text-zinc-300">
-                  <ArrowUpDown className="h-3 w-3 text-zinc-400" />
-                  <select
-                    value={sortMode}
-                    onChange={(e) => setSortMode(e.target.value as SortMode)}
-                    className="bg-transparent focus:outline-none text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer"
-                  >
-                    <option value="seq">默认序号</option>
-                    <option value="expiry">到期日优先</option>
-                    <option value="name">名称排序</option>
-                  </select>
+                {/* Segmented Calibration Method Control */}
+                <div className="inline-flex items-center p-0.5 rounded-lg bg-zinc-200/60 dark:bg-white/[0.05] border border-zinc-200/70 dark:border-white/[0.06]">
+                  {(
+                    [
+                      { id: "all", label: "全部方式" },
+                      { id: "external", label: "外校" },
+                      { id: "internal", label: "内校" },
+                      { id: "exempt", label: "免校" },
+                    ] as const
+                  ).map((item) => {
+                    const active = calTypeFilter === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setCalTypeFilter(item.id)}
+                        className={cn(
+                          "relative px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors",
+                          active
+                            ? "text-zinc-900 dark:text-white"
+                            : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+                        )}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="cal-type-pill"
+                            transition={{ type: "spring", stiffness: 450, damping: 34 }}
+                            className="absolute inset-0 rounded-md bg-white dark:bg-white/[0.11] shadow-hairline"
+                          />
+                        )}
+                        <span className="relative z-10">{item.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
-
-                {hasActiveFilters && (
-                  <button
-                    type="button"
-                    onClick={resetAllFilters}
-                    className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 px-2 py-1 rounded-md hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] transition"
-                  >
-                    重置筛选
-                  </button>
-                )}
               </div>
 
-              {/* Segmented Calibration Method Control */}
-              <div className="inline-flex items-center p-0.5 rounded-lg bg-zinc-200/60 dark:bg-white/[0.05] border border-zinc-200/70 dark:border-white/[0.06]">
-                {(
-                  [
-                    { id: "all", label: "全部方式" },
-                    { id: "external", label: "外校" },
-                    { id: "internal", label: "内校" },
-                    { id: "exempt", label: "免校" },
-                  ] as const
-                ).map((item) => {
-                  const active = calTypeFilter === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => setCalTypeFilter(item.id)}
+              {/* Dedicated Expiry Countdown Filter Strip (60d / 30d / 15d / Custom + Expired) */}
+              <div className="px-6 py-2 border-t border-zinc-200/60 dark:border-white/[0.05] flex flex-wrap items-center justify-between gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500 mr-1 select-none">
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    <span>到期筛选</span>
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => handleSelectExpiryFilter("all")}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition",
+                      expiryFilter === "all"
+                        ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 border-zinc-900 dark:border-white shadow-hairline"
+                        : "bg-white dark:bg-white/[0.03] border-zinc-200/90 dark:border-white/[0.08] text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-300 dark:hover:border-white/[0.15]"
+                    )}
+                  >
+                    <span>全部</span>
+                  </button>
+
+                  {descThresholds.map((tier) => {
+                    const visuals = getThresholdVisuals(tier.color);
+                    const active = expiryFilter === tier.days;
+                    const count = expiryFilterCounts.byDays[tier.days] ?? 0;
+                    return (
+                      <button
+                        key={tier.id}
+                        type="button"
+                        onClick={() =>
+                          handleSelectExpiryFilter(active ? "all" : tier.days)
+                        }
+                        style={{
+                          ...visuals.cssVars,
+                          borderColor: active ? visuals.hex : undefined,
+                        }}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition",
+                          active
+                            ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] shadow-hairline"
+                            : "bg-white dark:bg-white/[0.03] border-zinc-200/90 dark:border-white/[0.08] text-zinc-600 dark:text-zinc-300 hover:bg-[var(--tier-bg)] dark:hover:bg-[var(--tier-bg-dark)]"
+                        )}
+                        title={`筛选未来 ${tier.days} 天内到期的设备（${tier.label}）`}
+                      >
+                        <span
+                          className="h-1.5 w-1.5 rounded-full shrink-0"
+                          style={{
+                            backgroundColor: visuals.hex,
+                            boxShadow: active ? visuals.glow : undefined,
+                          }}
+                        />
+                        <span>{tier.days}天内</span>
+                        <span
+                          className={cn(
+                            "font-mono tabular-nums text-[10.5px]",
+                            active
+                              ? "font-semibold"
+                              : count > 0
+                                ? "text-zinc-500 dark:text-zinc-400"
+                                : "text-zinc-300 dark:text-zinc-600"
+                          )}
+                        >
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleSelectExpiryFilter(
+                        expiryFilter === "expired" ? "all" : "expired"
+                      )
+                    }
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition",
+                      expiryFilter === "expired"
+                        ? "bg-rose-500/[0.12] dark:bg-rose-500/[0.18] text-rose-700 dark:text-rose-300 border-rose-500 shadow-hairline"
+                        : "bg-white dark:bg-white/[0.03] border-zinc-200/90 dark:border-white/[0.08] text-zinc-600 dark:text-zinc-300 hover:bg-rose-500/[0.07] hover:border-rose-300 dark:hover:border-rose-500/40"
+                    )}
+                    title="筛选已超过下次检验日期的设备"
+                  >
+                    <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+                    <span>已超期</span>
+                    <span
                       className={cn(
-                        "relative px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors",
-                        active
-                          ? "text-zinc-900 dark:text-white"
-                          : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+                        "font-mono tabular-nums text-[10.5px]",
+                        expiryFilterCounts.expired > 0
+                          ? "text-rose-600 dark:text-rose-400 font-semibold"
+                          : "text-zinc-300 dark:text-zinc-600"
                       )}
                     >
-                      {active && (
-                        <motion.span
-                          layoutId="cal-type-pill"
-                          transition={{ type: "spring", stiffness: 450, damping: 34 }}
-                          className="absolute inset-0 rounded-md bg-white dark:bg-white/[0.11] shadow-hairline"
-                        />
-                      )}
-                      <span className="relative z-10">{item.label}</span>
-                    </button>
-                  );
-                })}
+                      {expiryFilterCounts.expired}
+                    </span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => openSettingsTab("alerts")}
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] transition shrink-0"
+                  title="前往设置中自定义预警天数阈值、颜色与弹窗提示规则"
+                >
+                  <SlidersHorizontal className="h-3 w-3" />
+                  <span>阈值与配色设置</span>
+                </button>
               </div>
             </div>
 
@@ -1320,21 +1798,30 @@ export default function App() {
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-white/[0.05] text-sm">
                     {filteredInstruments.map((inst, idx) => {
-                      const statusInfo = getInstrumentStatus(inst, settings.warningDays);
-                      const rowAccent =
+                      const statusInfo = getInstrumentStatus(
+                        inst,
+                        settings.warningThresholds
+                      );
+                      const tierVisuals =
+                        statusInfo.status === "warning" &&
+                        statusInfo.matchedThreshold
+                          ? getThresholdVisuals(statusInfo.matchedThreshold.color)
+                          : null;
+                      const rowStyle: React.CSSProperties | undefined =
                         statusInfo.status === "expired"
-                          ? "shadow-[inset_2.5px_0_0_0_rgb(244,63,94)]"
-                          : statusInfo.status === "warning"
-                            ? "shadow-[inset_2.5px_0_0_0_rgb(245,158,11)]"
-                            : "";
+                          ? { boxShadow: "inset 2.5px 0 0 0 rgb(244, 63, 94)" }
+                          : tierVisuals
+                            ? {
+                                ...tierVisuals.cssVars,
+                                boxShadow: tierVisuals.rowAccentShadow,
+                              }
+                            : undefined;
                       return (
                         <tr
                           key={inst.id}
                           onClick={() => openViewDrawer(inst)}
-                          className={cn(
-                            "group cursor-pointer transition-colors hover:bg-zinc-50/90 dark:hover:bg-white/[0.025]",
-                            rowAccent
-                          )}
+                          style={rowStyle}
+                          className="group cursor-pointer transition-colors hover:bg-zinc-50/90 dark:hover:bg-white/[0.025]"
                         >
                           <td className="py-3 pl-6 pr-2 font-mono tabular-nums text-[11.5px] text-zinc-400 dark:text-zinc-600">
                             {String(idx + 1).padStart(2, "0")}
@@ -1446,8 +1933,8 @@ export default function App() {
                                   "font-medium",
                                   statusInfo.status === "expired"
                                     ? "text-rose-600 dark:text-rose-400"
-                                    : statusInfo.status === "warning"
-                                      ? "text-amber-700 dark:text-amber-300"
+                                    : statusInfo.status === "warning" && tierVisuals
+                                      ? "text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]"
                                       : "text-zinc-800 dark:text-zinc-200"
                                 )}
                               >
@@ -1571,7 +2058,7 @@ export default function App() {
       <CommandPalette
         open={commandOpen}
         instruments={instruments}
-        warningDays={settings.warningDays}
+        warningThresholds={settings.warningThresholds}
         isAdmin={auth.isAdmin}
         theme={theme}
         onClose={() => setCommandOpen(false)}
@@ -1580,7 +2067,9 @@ export default function App() {
           setActiveTab(tab);
           setDeptFilter("all");
         }}
-        onFilterStatus={(st) => setStatusFilter(st)}
+        onFilterStatus={(st) => handleSelectStatusFilter(st)}
+        onFilterExpiry={(f) => handleSelectExpiryFilter(f)}
+        onOpenAlerts={() => openAlertModal()}
         onCreateInstrument={openCreateDrawer}
         onOpenImport={() => setImportModalOpen(true)}
         onExportAll={() => handleExportExcel(false)}
@@ -1594,6 +2083,18 @@ export default function App() {
         }}
       />
 
+      {/* Expiry Alert Popup Modal (Alerts Info Only) */}
+      <ExpiryAlertModal
+        open={alertModalOpen && !(auth.isInitialized && auth.isLocked)}
+        instruments={instruments}
+        settings={settings}
+        mutedToday={mutedToday}
+        onToggleMuteToday={handleToggleMuteToday}
+        onClose={() => setAlertModalOpen(false)}
+        onSelectInstrument={(inst) => openViewDrawer(inst)}
+        onApplyFilterInList={handleApplyFilterFromAlertModal}
+      />
+
       {/* Modals & Drawers */}
       <InstrumentDrawer
         openDrawer={drawerOpen}
@@ -1601,7 +2102,7 @@ export default function App() {
         initialCategory={activeTab === "fixture" ? "fixture" : "gauge"}
         instrument={editingInstrument}
         allInstruments={instruments}
-        warningDays={settings.warningDays}
+        warningThresholds={settings.warningThresholds}
         onClose={() => setDrawerOpen(false)}
         onSaved={() => refreshAll()}
         onNotify={notify}
@@ -1654,6 +2155,7 @@ export default function App() {
         }}
         onDataRestored={() => refreshAll()}
         onNotify={notify}
+        onRequestLogin={() => setLoginModalOpen(true)}
       />
 
       {/* Right-to-Left Sliding Auto-Update Notification Popup */}

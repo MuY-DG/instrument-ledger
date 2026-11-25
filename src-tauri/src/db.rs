@@ -4,7 +4,7 @@ use chrono::{Duration, Months, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::auth::verify_password;
-use crate::models::{AppSettings, CalibrationReport, Instrument};
+use crate::models::{AppSettings, CalibrationReport, Instrument, WarningThreshold};
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339()
@@ -100,10 +100,100 @@ pub fn init_db(db_path: &Path) -> Result<Connection, String> {
 
 pub const DEFAULT_GITHUB_REPO: &str = "MuY-DG/instrument-ledger";
 pub const DEFAULT_UPDATE_PROXY_URL: &str = "https://gh-proxy.com/";
+pub const DEFAULT_ALERT_POPUP_FREQUENCY: &str = "every_open";
+
+pub fn default_warning_thresholds() -> Vec<WarningThreshold> {
+    vec![
+        WarningThreshold {
+            id: "tier-60".to_string(),
+            days: 60,
+            color: "#0ea5e9".to_string(),
+            label: "60天提醒".to_string(),
+        },
+        WarningThreshold {
+            id: "tier-30".to_string(),
+            days: 30,
+            color: "#eab308".to_string(),
+            label: "30天预警".to_string(),
+        },
+        WarningThreshold {
+            id: "tier-15".to_string(),
+            days: 15,
+            color: "#f97316".to_string(),
+            label: "15天紧急".to_string(),
+        },
+    ]
+}
+
+fn normalize_hex_color(raw: &str, fallback: &str) -> String {
+    let trimmed = raw.trim();
+    let hex = trimmed.strip_prefix('#').unwrap_or(trimmed);
+    if hex.len() == 6 && hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        return format!("#{}", hex.to_ascii_lowercase());
+    }
+    fallback.to_string()
+}
+
+pub fn sanitize_warning_thresholds(items: Vec<WarningThreshold>) -> Vec<WarningThreshold> {
+    let fallback_colors = ["#0ea5e9", "#eab308", "#f97316", "#ef4444", "#8b5cf6", "#14b8a6"];
+    let mut seen_days = std::collections::HashSet::new();
+    let mut cleaned = Vec::new();
+
+    for (idx, item) in items.into_iter().enumerate() {
+        let days = item.days.clamp(1, 3650);
+        if !seen_days.insert(days) {
+            continue;
+        }
+        let fallback_color = fallback_colors[idx % fallback_colors.len()];
+        let color = normalize_hex_color(&item.color, fallback_color);
+        let label = {
+            let trimmed = item.label.trim();
+            if trimmed.is_empty() {
+                format!("{}天预警", days)
+            } else {
+                trimmed.chars().take(24).collect()
+            }
+        };
+        let id = {
+            let trimmed = item.id.trim();
+            if trimmed.is_empty() {
+                format!("tier-{}", days)
+            } else {
+                trimmed.chars().take(48).collect()
+            }
+        };
+        cleaned.push(WarningThreshold {
+            id,
+            days,
+            color,
+            label,
+        });
+    }
+
+    if cleaned.is_empty() {
+        return default_warning_thresholds();
+    }
+
+    cleaned.sort_by(|a, b| b.days.cmp(&a.days));
+    cleaned
+}
+
+pub fn sanitize_popup_frequency(raw: &str) -> String {
+    match raw.trim() {
+        "every_open" | "daily" | "interval" => raw.trim().to_string(),
+        _ => DEFAULT_ALERT_POPUP_FREQUENCY.to_string(),
+    }
+}
 
 fn seed_default_settings(conn: &Connection) -> Result<(), String> {
+    let default_thresholds_json = serde_json::to_string(&default_warning_thresholds())
+        .map_err(|e| format!("序列化默认预警阈值失败: {}", e))?;
     let defaults = [
-        ("warning_days", "30"),
+        ("warning_days", "60"),
+        ("warning_thresholds", default_thresholds_json.as_str()),
+        ("alert_popup_enabled", "1"),
+        ("alert_popup_frequency", DEFAULT_ALERT_POPUP_FREQUENCY),
+        ("alert_popup_interval_hours", "4"),
         ("auto_lock_minutes", "0"),
         ("doc_code", "JSSK-MPR-170"),
         ("doc_version", "A"),
@@ -197,9 +287,35 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
             .flatten()
             .unwrap_or_else(|| d.to_string())
     };
+    let warning_thresholds = get_setting(conn, "warning_thresholds")
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Vec<WarningThreshold>>(&raw).ok())
+        .map(sanitize_warning_thresholds)
+        .unwrap_or_else(default_warning_thresholds);
+    let max_threshold_days = warning_thresholds
+        .iter()
+        .map(|t| t.days)
+        .max()
+        .unwrap_or(60);
+    let warning_days = get_or("warning_days", &max_threshold_days.to_string())
+        .parse()
+        .unwrap_or(max_threshold_days);
+    let alert_popup_enabled = get_or("alert_popup_enabled", "1") != "0";
+    let alert_popup_frequency =
+        sanitize_popup_frequency(&get_or("alert_popup_frequency", DEFAULT_ALERT_POPUP_FREQUENCY));
+    let alert_popup_interval_hours = get_or("alert_popup_interval_hours", "4")
+        .parse::<i64>()
+        .unwrap_or(4)
+        .clamp(1, 168);
+
     Ok(AppSettings {
         admin_username: get_or("admin_username", ""),
-        warning_days: get_or("warning_days", "30").parse().unwrap_or(30),
+        warning_days,
+        warning_thresholds,
+        alert_popup_enabled,
+        alert_popup_frequency,
+        alert_popup_interval_hours,
         auto_lock_minutes: get_or("auto_lock_minutes", "0").parse().unwrap_or(0),
         doc_code: get_or("doc_code", "JSSK-MPR-170"),
         doc_version: get_or("doc_version", "A"),
@@ -438,6 +554,52 @@ mod tests {
         let s2 = load_app_settings(&conn2).unwrap();
         assert_eq!(s2.github_repo, "other/repo");
         assert_eq!(s2.update_proxy_url, "");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_warning_thresholds_defaults_and_sanitization() {
+        let root = std::env::temp_dir().join(format!("inst_thr_test_{}", uuid::Uuid::new_v4()));
+        let db_path = root.join("ledger.db");
+
+        let conn = init_db(&db_path).expect("init_db failed");
+        let s1 = load_app_settings(&conn).unwrap();
+        assert_eq!(s1.warning_thresholds.len(), 3);
+        assert_eq!(s1.warning_thresholds[0].days, 60);
+        assert_eq!(s1.warning_thresholds[1].days, 30);
+        assert_eq!(s1.warning_thresholds[2].days, 15);
+        assert!(s1.alert_popup_enabled);
+        assert_eq!(s1.alert_popup_frequency, "every_open");
+        assert_eq!(s1.alert_popup_interval_hours, 4);
+
+        // Sanitize unsorted, duplicate, and invalid color thresholds
+        let custom = sanitize_warning_thresholds(vec![
+            WarningThreshold {
+                id: "".to_string(),
+                days: 7,
+                color: "invalid".to_string(),
+                label: "".to_string(),
+            },
+            WarningThreshold {
+                id: "custom-90".to_string(),
+                days: 90,
+                color: "#8B5CF6".to_string(),
+                label: "季度提醒".to_string(),
+            },
+            WarningThreshold {
+                id: "dup-7".to_string(),
+                days: 7,
+                color: "#ef4444".to_string(),
+                label: "重复项".to_string(),
+            },
+        ]);
+        assert_eq!(custom.len(), 2);
+        assert_eq!(custom[0].days, 90);
+        assert_eq!(custom[0].color, "#8b5cf6");
+        assert_eq!(custom[0].label, "季度提醒");
+        assert_eq!(custom[1].days, 7);
+        assert_eq!(custom[1].label, "7天预警");
 
         let _ = std::fs::remove_dir_all(&root);
     }

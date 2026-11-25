@@ -3,7 +3,16 @@ export type CategoryTab = "gauge" | "fixture" | "all";
 export type CalibrationType = "internal" | "external" | "exempt";
 export type CalibrationStatus = "valid" | "warning" | "expired" | "exempt";
 export type StatusFilter = "all" | "valid" | "warning" | "expired" | "exempt";
+export type ExpiryFilter = "all" | "expired" | number;
 export type SortMode = "seq" | "expiry" | "name";
+export type AlertPopupFrequency = "every_open" | "daily" | "interval";
+
+export interface WarningThreshold {
+  id: string;
+  days: number;
+  color: string;
+  label: string;
+}
 
 export interface Instrument {
   id: number;
@@ -95,6 +104,10 @@ export interface ImportResult {
 export interface AppSettings {
   adminUsername: string;
   warningDays: number;
+  warningThresholds: WarningThreshold[];
+  alertPopupEnabled: boolean;
+  alertPopupFrequency: AlertPopupFrequency;
+  alertPopupIntervalHours: number;
   autoLockMinutes: number;
   docCode: string;
   docVersion: string;
@@ -108,6 +121,10 @@ export interface AppSettings {
 
 export interface SettingsUpdateInput {
   warningDays?: number;
+  warningThresholds?: WarningThreshold[];
+  alertPopupEnabled?: boolean;
+  alertPopupFrequency?: AlertPopupFrequency;
+  alertPopupIntervalHours?: number;
   autoLockMinutes?: number;
   docCode?: string;
   docVersion?: string;

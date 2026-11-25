@@ -1,4 +1,8 @@
-import type { CalibrationStatus, Instrument } from "@/types";
+import type { CalibrationStatus, Instrument, WarningThreshold } from "@/types";
+import {
+  DEFAULT_WARNING_THRESHOLDS,
+  sortThresholdsAsc,
+} from "@/lib/thresholdColors";
 
 export function getTodayStr(): string {
   const now = new Date();
@@ -66,11 +70,12 @@ export interface InstrumentStatusInfo {
   label: string;
   detailText: string;
   isDueThisWeek: boolean;
+  matchedThreshold: WarningThreshold | null;
 }
 
 export function getInstrumentStatus(
   inst: Pick<Instrument, "exemptCalibration" | "nextCalDate" | "remark">,
-  warningDays = 30
+  thresholdsOrWarningDays: WarningThreshold[] | number = DEFAULT_WARNING_THRESHOLDS
 ): InstrumentStatusInfo {
   if (inst.exemptCalibration || !inst.nextCalDate.trim()) {
     return {
@@ -83,6 +88,7 @@ export function getInstrumentStatus(
           ? "无需校验"
           : "未设效期",
       isDueThisWeek: false,
+      matchedThreshold: null,
     };
   }
 
@@ -94,6 +100,7 @@ export function getInstrumentStatus(
       label: "待核对",
       detailText: inst.nextCalDate,
       isDueThisWeek: false,
+      matchedThreshold: null,
     };
   }
 
@@ -106,16 +113,32 @@ export function getInstrumentStatus(
       label: "已超期",
       detailText: `超期 ${Math.abs(diff)} 天`,
       isDueThisWeek: false,
+      matchedThreshold: null,
     };
   }
 
-  if (diff <= warningDays) {
+  const ascThresholds: WarningThreshold[] =
+    typeof thresholdsOrWarningDays === "number"
+      ? [
+          {
+            id: `tier-${thresholdsOrWarningDays}`,
+            days: thresholdsOrWarningDays,
+            color: "#f59e0b",
+            label: "即将到期",
+          },
+        ]
+      : sortThresholdsAsc(thresholdsOrWarningDays);
+
+  // Match the tightest (smallest days) threshold that covers daysRemaining
+  const matched = ascThresholds.find((t) => diff <= t.days) ?? null;
+  if (matched) {
     return {
       status: "warning",
       daysRemaining: diff,
-      label: "即将到期",
+      label: matched.label || `${matched.days}天预警`,
       detailText: diff === 0 ? "今日到期" : `剩 ${diff} 天`,
       isDueThisWeek,
+      matchedThreshold: matched,
     };
   }
 
@@ -125,6 +148,80 @@ export function getInstrumentStatus(
     label: "正常有效",
     detailText: `剩 ${diff} 天`,
     isDueThisWeek,
+    matchedThreshold: null,
+  };
+}
+
+export interface ExpiryAlertTierGroup {
+  threshold: WarningThreshold;
+  items: Array<{ instrument: Instrument; statusInfo: InstrumentStatusInfo }>;
+}
+
+export interface ExpiryAlertSummary {
+  expired: Array<{ instrument: Instrument; statusInfo: InstrumentStatusInfo }>;
+  tiers: ExpiryAlertTierGroup[];
+  allAlertItems: Array<{ instrument: Instrument; statusInfo: InstrumentStatusInfo }>;
+  totalAlertCount: number;
+  highestSeverityColor: string | null;
+}
+
+export function summarizeExpiryAlerts(
+  instruments: Instrument[],
+  thresholds: WarningThreshold[]
+): ExpiryAlertSummary {
+  const asc = sortThresholdsAsc(thresholds);
+  const expired: Array<{ instrument: Instrument; statusInfo: InstrumentStatusInfo }> = [];
+  const tierMap = new Map<string, ExpiryAlertTierGroup>();
+
+  for (const t of asc) {
+    tierMap.set(t.id, { threshold: t, items: [] });
+  }
+
+  for (const inst of instruments) {
+    const statusInfo = getInstrumentStatus(inst, asc);
+    if (statusInfo.status === "expired") {
+      expired.push({ instrument: inst, statusInfo });
+    } else if (statusInfo.status === "warning" && statusInfo.matchedThreshold) {
+      const bucket = tierMap.get(statusInfo.matchedThreshold.id);
+      if (bucket) {
+        bucket.items.push({ instrument: inst, statusInfo });
+      }
+    }
+  }
+
+  const byDaysAsc = (
+    a: { statusInfo: InstrumentStatusInfo },
+    b: { statusInfo: InstrumentStatusInfo }
+  ) =>
+    (a.statusInfo.daysRemaining ?? Number.MAX_SAFE_INTEGER) -
+    (b.statusInfo.daysRemaining ?? Number.MAX_SAFE_INTEGER);
+
+  expired.sort(byDaysAsc);
+  const tiers = asc.map((t) => {
+    const group = tierMap.get(t.id)!;
+    group.items.sort(byDaysAsc);
+    return group;
+  });
+
+  const allAlertItems = [...expired, ...tiers.flatMap((g) => g.items)];
+  const totalAlertCount = allAlertItems.length;
+
+  let highestSeverityColor: string | null = null;
+  if (expired.length > 0) {
+    highestSeverityColor = "#f43f5e";
+  } else {
+    const firstNonEmpty = tiers.find((g) => g.items.length > 0);
+    if (firstNonEmpty) {
+      highestSeverityColor = firstNonEmpty.threshold.color;
+    }
+  }
+
+  return {
+    expired,
+    tiers,
+    allAlertItems,
+    totalAlertCount,
+    highestSeverityColor,
   };
 }
 

@@ -2,6 +2,7 @@ import React, { useEffect } from "react";
 import { Command } from "cmdk";
 import { AnimatePresence, motion } from "motion/react";
 import {
+  BellRing,
   CloudDownload,
   FileSpreadsheet,
   Gauge,
@@ -14,29 +15,39 @@ import {
   Printer,
   Search,
   Settings,
+  SlidersHorizontal,
   Sun,
   Upload,
   Wrench,
 } from "lucide-react";
 import { getInstrumentStatus } from "@/lib/status";
-import type { CategoryTab, Instrument, StatusFilter } from "@/types";
+import { getMaxWarningDays, sortThresholdsDesc } from "@/lib/thresholdColors";
+import type {
+  CategoryTab,
+  ExpiryFilter,
+  Instrument,
+  StatusFilter,
+  WarningThreshold,
+} from "@/types";
 
 interface CommandPaletteProps {
   open: boolean;
   instruments: Instrument[];
-  warningDays: number;
+  warningThresholds: WarningThreshold[];
   isAdmin: boolean;
   theme: "light" | "dark";
   onClose: () => void;
   onSelectInstrument: (inst: Instrument) => void;
   onNavigateTab: (tab: CategoryTab) => void;
   onFilterStatus: (status: StatusFilter) => void;
+  onFilterExpiry: (filter: ExpiryFilter) => void;
+  onOpenAlerts: () => void;
   onCreateInstrument: () => void;
   onOpenImport: () => void;
   onExportAll: () => void;
   onPrint: () => void;
   onLock: () => void;
-  onOpenSettings: (tab: "general" | "security" | "backup" | "update") => void;
+  onOpenSettings: (tab: "general" | "alerts" | "security" | "backup" | "update") => void;
   onToggleTheme: () => void;
   onLoginOrLogout: () => void;
 }
@@ -44,13 +55,15 @@ interface CommandPaletteProps {
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
   open,
   instruments,
-  warningDays,
+  warningThresholds,
   isAdmin,
   theme,
   onClose,
   onSelectInstrument,
   onNavigateTab,
   onFilterStatus,
+  onFilterExpiry,
+  onOpenAlerts,
   onCreateInstrument,
   onOpenImport,
   onExportAll,
@@ -60,6 +73,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onToggleTheme,
   onLoginOrLogout,
 }) => {
+  const descThresholds = sortThresholdsDesc(warningThresholds);
+  const maxWarningDays = getMaxWarningDays(warningThresholds);
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -144,6 +159,26 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       </span>
                     </Command.Item>
                   )}
+
+                  <Command.Item
+                    onSelect={() => runAndClose(() => onOpenAlerts())}
+                    className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <BellRing className="h-3.5 w-3.5 text-amber-500" />
+                      <span>打开到期预警弹窗</span>
+                    </span>
+                  </Command.Item>
+
+                  <Command.Item
+                    onSelect={() => runAndClose(() => onOpenSettings("alerts"))}
+                    className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-500" />
+                      <span>配置预警天数、颜色与弹窗策略</span>
+                    </span>
+                  </Command.Item>
 
                   <Command.Item
                     onSelect={() => runAndClose(onExportAll)}
@@ -267,8 +302,23 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
                   >
                     <span className="h-2 w-2 rounded-full bg-amber-500 ml-0.5 mr-1" />
-                    <span>仅查看即将到期设备（≤{warningDays}天）</span>
+                    <span>仅查看全部预警设备（≤{maxWarningDays}天）</span>
                   </Command.Item>
+                  {descThresholds.map((t) => (
+                    <Command.Item
+                      key={t.id}
+                      onSelect={() => runAndClose(() => onFilterExpiry(t.days))}
+                      className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
+                    >
+                      <span
+                        className="h-2 w-2 rounded-full ml-0.5 mr-1"
+                        style={{ backgroundColor: t.color }}
+                      />
+                      <span>
+                        到期筛选：{t.days}天内到期（{t.label}）
+                      </span>
+                    </Command.Item>
+                  ))}
                 </Command.Group>
 
                 {/* Instruments direct jump */}
@@ -278,15 +328,22 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-zinc-400 [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                   >
                     {instruments.slice(0, 60).map((inst) => {
-                      const st = getInstrumentStatus(inst, warningDays);
+                      const st = getInstrumentStatus(inst, warningThresholds);
                       const dotClass =
                         st.status === "valid"
                           ? "bg-emerald-500"
-                          : st.status === "warning"
-                            ? "bg-amber-500"
-                            : st.status === "expired"
-                              ? "bg-rose-500"
+                          : st.status === "expired"
+                            ? "bg-rose-500"
+                            : st.status === "warning"
+                              ? ""
                               : "bg-zinc-400";
+                      const dotStyle =
+                        st.status === "warning"
+                          ? {
+                              backgroundColor:
+                                st.matchedThreshold?.color || "#f59e0b",
+                            }
+                          : undefined;
                       return (
                         <Command.Item
                           key={inst.id}
@@ -297,6 +354,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                           <div className="flex items-center gap-2.5 min-w-0">
                             <span
                               className={`h-1.5 w-1.5 rounded-full shrink-0 ${dotClass}`}
+                              style={dotStyle}
                             />
                             <span className="font-medium truncate">{inst.name}</span>
                             {inst.serialNo && (

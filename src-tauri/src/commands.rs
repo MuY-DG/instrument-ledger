@@ -12,7 +12,8 @@ use crate::auth::{hash_password, verify_password, SessionState};
 use crate::backup::{create_backup, restore_backup};
 use crate::db::{
     calc_next_cal_date, get_setting, is_account_initialized, load_app_settings, now_iso,
-    query_instrument_by_id, query_instruments, query_reports_for_instrument, set_setting,
+    query_instrument_by_id, query_instruments, query_reports_for_instrument,
+    sanitize_popup_frequency, sanitize_warning_thresholds, set_setting,
 };
 use crate::models::{
     AddReportInput, AppSettings, AuthStatus, BackupResult, CalibrationReport, DataDirInfo,
@@ -852,7 +853,28 @@ pub fn update_settings(
     check_admin(&state)?;
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
     if let Some(w) = input.warning_days {
-        set_setting(&conn, "warning_days", &w.clamp(1, 365).to_string())?;
+        set_setting(&conn, "warning_days", &w.clamp(1, 3650).to_string())?;
+    }
+    if let Some(thresholds) = input.warning_thresholds {
+        let cleaned = sanitize_warning_thresholds(thresholds);
+        let max_days = cleaned.iter().map(|t| t.days).max().unwrap_or(60);
+        let serialized = serde_json::to_string(&cleaned)
+            .map_err(|e| format!("序列化预警阈值失败: {}", e))?;
+        set_setting(&conn, "warning_thresholds", &serialized)?;
+        set_setting(&conn, "warning_days", &max_days.to_string())?;
+    }
+    if let Some(enabled) = input.alert_popup_enabled {
+        set_setting(&conn, "alert_popup_enabled", if enabled { "1" } else { "0" })?;
+    }
+    if let Some(freq) = input.alert_popup_frequency {
+        set_setting(&conn, "alert_popup_frequency", &sanitize_popup_frequency(&freq))?;
+    }
+    if let Some(hours) = input.alert_popup_interval_hours {
+        set_setting(
+            &conn,
+            "alert_popup_interval_hours",
+            &hours.clamp(1, 168).to_string(),
+        )?;
     }
     if let Some(m) = input.auto_lock_minutes {
         set_setting(&conn, "auto_lock_minutes", &m.clamp(0, 240).to_string())?;

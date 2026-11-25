@@ -6,6 +6,7 @@ import {
   AlertCircle,
   Archive,
   ArrowRight,
+  BellRing,
   CheckCircle2,
   ChevronDown,
   CloudDownload,
@@ -28,6 +29,7 @@ import {
 import { api, clearMediaCache } from "@/lib/api";
 import { formatFileSize, getTodayStr } from "@/lib/status";
 import { MarkdownNotes } from "@/components/MarkdownNotes";
+import { ThresholdSettingsEditor } from "@/components/ThresholdSettingsEditor";
 import type {
   AppSettings,
   DataDirInfo,
@@ -35,7 +37,7 @@ import type {
   UpdateDownloadProgress,
 } from "@/types";
 
-type SettingsTab = "general" | "security" | "backup" | "update";
+type SettingsTab = "general" | "alerts" | "security" | "backup" | "update";
 
 interface SettingsModalProps {
   openModal: boolean;
@@ -51,6 +53,7 @@ interface SettingsModalProps {
   onSettingsChanged: (next: AppSettings) => void;
   onDataRestored: () => void;
   onNotify: (msg: string, type?: "success" | "error") => void;
+  onRequestLogin?: () => void;
 }
 
 const INPUT_CLS =
@@ -75,11 +78,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSettingsChanged,
   onDataRestored,
   onNotify,
+  onRequestLogin,
 }) => {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
 
   // General form
-  const [warningDays, setWarningDays] = useState(settings.warningDays);
   const [autoLockMinutes, setAutoLockMinutes] = useState(settings.autoLockMinutes);
   const [docCode, setDocCode] = useState(settings.docCode);
   const [docVersion, setDocVersion] = useState(settings.docVersion);
@@ -111,8 +114,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   useEffect(() => {
     if (!openModal) return;
-    setTab(isAdmin ? initialTab : "update");
-    setWarningDays(settings.warningDays);
+    setTab(
+      isAdmin || initialTab === "alerts" || initialTab === "update"
+        ? initialTab
+        : "update"
+    );
     setAutoLockMinutes(settings.autoLockMinutes);
     setDocCode(settings.docCode);
     setDocVersion(settings.docVersion);
@@ -149,7 +155,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setSavingGeneral(true);
     try {
       const updated = await api.updateSettings({
-        warningDays: Number(warningDays) || 30,
         autoLockMinutes: Number(autoLockMinutes) || 0,
         docCode,
         docVersion,
@@ -317,6 +322,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     adminOnly?: boolean;
   }> = [
     { id: "general", label: "台账与表头", icon: <Settings className="h-3.5 w-3.5" />, adminOnly: true },
+    { id: "alerts", label: "到期预警设置", icon: <BellRing className="h-3.5 w-3.5" /> },
     { id: "security", label: "账号与锁屏", icon: <Shield className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "backup", label: "本地备份还原", icon: <HardDrive className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "update", label: "检查更新", icon: <CloudDownload className="h-3.5 w-3.5" /> },
@@ -346,7 +352,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex items-center gap-2.5">
                 <Settings className="h-4 w-4 text-zinc-700 dark:text-zinc-200" />
                 <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                  {isAdmin ? "系统偏好与维护中心" : "软件版本与更新检查"}
+                  设置
                 </h2>
               </div>
               <button
@@ -387,45 +393,29 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex-1 overflow-y-auto p-6">
                 {tab === "general" && isAdmin && (
                   <form onSubmit={handleSaveGeneral} className="space-y-5">
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                          即将到期提前提醒（天）
-                        </label>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        表单编号 / 版本
+                      </label>
+                      <div className="grid grid-cols-[1fr_104px] gap-2">
                         <input
-                          type="number"
-                          min={1}
-                          max={365}
-                          value={warningDays}
-                          onChange={(e) => setWarningDays(Number(e.target.value))}
+                          type="text"
+                          value={docCode}
+                          onChange={(e) => setDocCode(e.target.value)}
+                          placeholder="例如：JSSK-MPR-170"
                           className={`${INPUT_CLS} font-mono`}
                         />
-                        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">
-                          距下次校验 ≤ 该天数时自动归入「即将到期」视图
-                        </p>
+                        <input
+                          type="text"
+                          value={docVersion}
+                          onChange={(e) => setDocVersion(e.target.value)}
+                          placeholder="如：A"
+                          className={`${INPUT_CLS} font-mono text-center`}
+                        />
                       </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                          表单编号 / 版本
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="text"
-                            value={docCode}
-                            onChange={(e) => setDocCode(e.target.value)}
-                            placeholder="JSSK-MPR-170"
-                            className={`${INPUT_CLS} flex-1 font-mono`}
-                          />
-                          <input
-                            type="text"
-                            value={docVersion}
-                            onChange={(e) => setDocVersion(e.target.value)}
-                            placeholder="A"
-                            className={`${INPUT_CLS} w-16 font-mono text-center`}
-                          />
-                        </div>
-                      </div>
+                      <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-1">
+                        质量体系受控文件编号与修订版次，用于侧边栏副标题、打印抬头及 Excel 导出表头与默认文件名
+                      </p>
                     </div>
 
                     <div>
@@ -513,6 +503,23 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </button>
                     </div>
                   </form>
+                )}
+
+                {tab === "alerts" && (
+                  <ThresholdSettingsEditor
+                    settings={settings}
+                    isAdmin={isAdmin}
+                    onSettingsChanged={onSettingsChanged}
+                    onNotify={onNotify}
+                    onRequestLogin={
+                      onRequestLogin
+                        ? () => {
+                            onClose();
+                            onRequestLogin();
+                          }
+                        : undefined
+                    }
+                  />
                 )}
 
                 {tab === "security" && isAdmin && (

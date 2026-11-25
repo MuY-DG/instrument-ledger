@@ -97,11 +97,24 @@ pub struct ImportResult {
     pub mode: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct WarningThreshold {
+    pub id: String,
+    pub days: i64,
+    pub color: String,
+    pub label: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub admin_username: String,
     pub warning_days: i64,
+    pub warning_thresholds: Vec<WarningThreshold>,
+    pub alert_popup_enabled: bool,
+    pub alert_popup_frequency: String,
+    pub alert_popup_interval_hours: i64,
     pub auto_lock_minutes: i64,
     pub doc_code: String,
     pub doc_version: String,
@@ -117,6 +130,10 @@ pub struct AppSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SettingsUpdateInput {
     pub warning_days: Option<i64>,
+    pub warning_thresholds: Option<Vec<WarningThreshold>>,
+    pub alert_popup_enabled: Option<bool>,
+    pub alert_popup_frequency: Option<String>,
+    pub alert_popup_interval_hours: Option<i64>,
     pub auto_lock_minutes: Option<i64>,
     pub doc_code: Option<String>,
     pub doc_version: Option<String>,

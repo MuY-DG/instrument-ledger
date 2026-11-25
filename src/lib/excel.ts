@@ -7,6 +7,10 @@ import type {
   LedgerCategory,
 } from "@/types";
 import { calcNextCalDate, getInstrumentStatus, getTodayStr } from "@/lib/status";
+import {
+  getThresholdVisuals,
+  sortThresholdsDesc,
+} from "@/lib/thresholdColors";
 
 function formatUtcDate(dt: Date): string {
   const y = dt.getUTCFullYear();
@@ -542,8 +546,9 @@ function buildSheet(
   styleHeaderCell(legendGreen, "FFDCFCE7");
   legendGreen.font = { name: "Microsoft YaHei", size: 8, bold: true, color: { argb: "FF166534" } };
 
+  const descThresholds = sortThresholdsDesc(settings.warningThresholds);
   const legendYellow = ws.getCell(7, statusCol);
-  legendYellow.value = `临近≤${settings.warningDays}天`;
+  legendYellow.value = `临近≤${descThresholds.map((t) => t.days).join("/")}天`;
   styleHeaderCell(legendYellow, "FFFEF3C7");
   legendYellow.font = { name: "Microsoft YaHei", size: 8, bold: true, color: { argb: "FF92400E" } };
 
@@ -562,7 +567,7 @@ function buildSheet(
   // Data rows
   items.forEach((item, idx) => {
     const rowIdx = 9 + idx;
-    const statusInfo = getInstrumentStatus(item, settings.warningDays);
+    const statusInfo = getInstrumentStatus(item, settings.warningThresholds);
     const isInternal = item.calibrationType === "internal";
     const isExternal = item.calibrationType === "external";
 
@@ -629,8 +634,20 @@ function buildSheet(
       sc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDCFCE7" } };
       sc.font = { name: "Microsoft YaHei", size: 9, bold: true, color: { argb: "FF166534" } };
     } else if (statusInfo.status === "warning") {
-      sc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEF3C7" } };
-      sc.font = { name: "Microsoft YaHei", size: 9, bold: true, color: { argb: "FF92400E" } };
+      const visuals = statusInfo.matchedThreshold
+        ? getThresholdVisuals(statusInfo.matchedThreshold.color)
+        : null;
+      sc.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: visuals?.excelFillArgb || "FFFEF3C7" },
+      };
+      sc.font = {
+        name: "Microsoft YaHei",
+        size: 9,
+        bold: true,
+        color: { argb: visuals?.excelTextArgb || "FF92400E" },
+      };
     } else if (statusInfo.status === "expired") {
       sc.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FFFEE2E2" } };
       sc.font = { name: "Microsoft YaHei", size: 9, bold: true, color: { argb: "FF991B1B" } };
