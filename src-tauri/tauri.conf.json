@@ -53,6 +53,10 @@
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDYwNzJDQjlDRUY0MzNFRDUKUldUVlBrUHZuTXR5WUhpVEtSdzBacGp4SHpzUDBtZUV6UW1XOWsvWEFvNU9IaG9LQ1JhcFBFTFMK",
       "endpoints": [
         "https://gh-proxy.com/https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json",
+        "https://ghfast.top/https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json",
+        "https://gh-proxy.org/https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json",
+        "https://cdn.gh-proxy.org/https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json",
+        "https://edgeone.gh-proxy.org/https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json",
         "https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json"
       ],
       "windows": {

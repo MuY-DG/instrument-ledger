@@ -198,6 +198,7 @@ export interface UpdateCheckResult {
   htmlUrl: string;
   assetName: string;
   assetSize: number;
+  resolvedSource?: string;
 }
 
 export interface UpdateDownloadProgress {

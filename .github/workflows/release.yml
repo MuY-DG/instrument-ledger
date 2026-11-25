@@ -288,7 +288,7 @@ jobs:
 
           - 软件无默认账号或初始密码，安装后首次打开将播放启动动画并引导初始化本机管理员账号。
           - 已接入 Tauri 官方 `tauri-plugin-updater` 与 Ed25519 签名校验：启动时后台静默检测新版本，发现更新后侧边栏亮起红点并从右侧滑入更新弹窗，点击「立即更新并重启」即可自动下载、验签替换本体并重启。
-          - 默认预填更新源 `MuY-DG/instrument-ledger` 与国内下载加速代理 `https://gh-proxy.com/`（代理异常时自动回退直连），管理员可在「设置 → 检查更新」中随时修改或清空。
+          - 默认预填更新源 `MuY-DG/instrument-ledger` 并内置多节点国内加速代理兜底池（`gh-proxy.com` / `ghfast.top` / `gh-proxy.org` / `cdn.gh-proxy.org` / `edgeone.gh-proxy.org` / GitHub 直连），版本检测与安装包下载均支持自动择优与异常切换，管理员可在「设置 → 检查更新」中随时自定义或留空。
           """).strip()
 
           release_notes = f"{changelog_section}\n\n{guide_section}\n"

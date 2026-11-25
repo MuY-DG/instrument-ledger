@@ -1,4 +1,7 @@
-use std::time::Duration;
+use std::collections::HashSet;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Condvar, Mutex};
+use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::{Update, UpdaterExt};
@@ -6,9 +9,61 @@ use url::Url;
 
 use crate::models::{UpdateCheckResult, UpdateDownloadProgress};
 
+/// Built-in zero-cost public GitHub mirror acceleration pool (all verified against
+/// static Release `latest.json` redirects & binary downloads; integrity is strictly
+/// enforced by Tauri's Ed25519 signature verification).
+pub const BUILTIN_PROXY_POOL: &[&str] = &[
+    "https://gh-proxy.com/",
+    "https://ghfast.top/",
+    "https://gh-proxy.org/",
+    "https://cdn.gh-proxy.org/",
+    "https://edgeone.gh-proxy.org/",
+];
+
+const CHECK_CHANNEL_TIMEOUT: Duration = Duration::from_secs(10);
+const CHECK_HEDGE_DELAY: Duration = Duration::from_millis(2500);
+const DOWNLOAD_TOTAL_TIMEOUT: Duration = Duration::from_secs(240);
+const DOWNLOAD_FIRST_BYTE_TIMEOUT: Duration = Duration::from_secs(15);
+const DOWNLOAD_STALL_TIMEOUT: Duration = Duration::from_secs(25);
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum UpdateChannel {
+    Proxy(String),
+    Direct,
+}
+
+impl UpdateChannel {
+    pub fn label(&self) -> String {
+        match self {
+            UpdateChannel::Direct => "GitHub 直连".to_string(),
+            UpdateChannel::Proxy(prefix) => Url::parse(prefix)
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()))
+                .unwrap_or_else(|| prefix.trim_end_matches('/').to_string()),
+        }
+    }
+
+    pub fn dedup_key(&self) -> String {
+        match self {
+            UpdateChannel::Direct => "__direct__".to_string(),
+            UpdateChannel::Proxy(prefix) => prefix.to_ascii_lowercase(),
+        }
+    }
+
+    pub fn apply_to_url(&self, target_url: &str) -> Result<Url, String> {
+        let final_str = match self {
+            UpdateChannel::Direct => target_url.to_string(),
+            UpdateChannel::Proxy(prefix) => apply_proxy(target_url, prefix),
+        };
+        Url::parse(&final_str).map_err(|e| format!("构造更新地址失败: {}", e))
+    }
+}
+
 #[derive(Clone)]
 pub struct PendingUpdate {
     pub repo: String,
+    pub proxy_config: String,
+    pub preferred_channel: UpdateChannel,
     pub update: Update,
 }
 
@@ -44,25 +99,136 @@ pub fn apply_proxy(url: &str, proxy_prefix: &str) -> String {
     }
 }
 
-fn build_manifest_endpoints(repo: &str, proxy_url: &str) -> Result<Vec<Url>, String> {
-    let direct_str = format!(
-        "https://github.com/{}/releases/latest/download/latest.json",
-        repo
-    );
-    let direct_url =
-        Url::parse(&direct_str).map_err(|e| format!("构造更新地址失败: {}", e))?;
+pub fn normalize_proxy_prefix(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let with_scheme = if trimmed.contains("://") {
+        trimmed.to_string()
+    } else {
+        format!("https://{}", trimmed)
+    };
+    let parsed = Url::parse(&with_scheme).ok()?;
+    if parsed.scheme() != "https" {
+        return None;
+    }
+    let host = parsed.host_str()?;
+    if host.eq_ignore_ascii_case("github.com") {
+        return None;
+    }
+    let mut normalized = parsed.to_string();
+    if !normalized.ends_with('/') {
+        normalized.push('/');
+    }
+    Some(normalized)
+}
 
-    let mut endpoints = Vec::with_capacity(2);
-    if !proxy_url.trim().is_empty() {
-        let proxied_str = apply_proxy(&direct_str, proxy_url);
-        if let Ok(proxied_url) = Url::parse(&proxied_str) {
-            if proxied_url.scheme() == "https" {
-                endpoints.push(proxied_url);
+pub fn parse_custom_proxies(raw: &str) -> Vec<String> {
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    for token in raw.split(|c: char| matches!(c, ',' | '，' | ';' | '；' | '\n' | '\r' | ' ' | '\t')) {
+        if let Some(norm) = normalize_proxy_prefix(token) {
+            if seen.insert(norm.to_ascii_lowercase()) {
+                out.push(norm);
             }
         }
     }
-    endpoints.push(direct_url);
-    Ok(endpoints)
+    out
+}
+
+fn push_unique_channel(
+    channels: &mut Vec<UpdateChannel>,
+    seen: &mut HashSet<String>,
+    channel: UpdateChannel,
+) {
+    if seen.insert(channel.dedup_key()) {
+        channels.push(channel);
+    }
+}
+
+/// Builds the ordered multi-node channel list for both manifest checks and binary downloads.
+/// - When `proxy_url` is empty: Direct GitHub is tried first, with the built-in mirror pool
+///   serving as automatic fallback when direct connectivity is blocked or slow.
+/// - When `proxy_url` is non-empty: user-specified proxy prefix(es) go first, followed by the
+///   remaining built-in mirror pool, and Direct GitHub as the final fallback.
+pub fn build_update_channels(proxy_url: &str) -> Vec<UpdateChannel> {
+    let mut channels = Vec::with_capacity(BUILTIN_PROXY_POOL.len() + 3);
+    let mut seen = HashSet::new();
+
+    if proxy_url.trim().is_empty() {
+        push_unique_channel(&mut channels, &mut seen, UpdateChannel::Direct);
+        for builtin in BUILTIN_PROXY_POOL {
+            if let Some(norm) = normalize_proxy_prefix(builtin) {
+                push_unique_channel(&mut channels, &mut seen, UpdateChannel::Proxy(norm));
+            }
+        }
+        return channels;
+    }
+
+    for custom in parse_custom_proxies(proxy_url) {
+        push_unique_channel(&mut channels, &mut seen, UpdateChannel::Proxy(custom));
+    }
+    for builtin in BUILTIN_PROXY_POOL {
+        if let Some(norm) = normalize_proxy_prefix(builtin) {
+            push_unique_channel(&mut channels, &mut seen, UpdateChannel::Proxy(norm));
+        }
+    }
+    push_unique_channel(&mut channels, &mut seen, UpdateChannel::Direct);
+    channels
+}
+
+fn is_github_url(url: &Url) -> bool {
+    match url.host_str() {
+        Some(host) => {
+            let lower = host.to_ascii_lowercase();
+            lower == "github.com"
+                || lower.ends_with(".github.com")
+                || lower == "githubusercontent.com"
+                || lower.ends_with(".githubusercontent.com")
+        }
+        None => false,
+    }
+}
+
+/// Builds download channels prioritizing the channel that just succeeded during update check
+/// (unless the user explicitly edited the proxy configuration since the check).
+pub fn build_download_channels(
+    original_url: &Url,
+    proxy_url: &str,
+    preferred: Option<&UpdateChannel>,
+    proxy_matches_pending: bool,
+) -> Vec<UpdateChannel> {
+    if !is_github_url(original_url) {
+        return vec![UpdateChannel::Direct];
+    }
+
+    let base = build_update_channels(proxy_url);
+    let Some(pref) = preferred else {
+        return base;
+    };
+
+    let mut channels = Vec::with_capacity(base.len() + 1);
+    let mut seen = HashSet::new();
+
+    if proxy_matches_pending {
+        push_unique_channel(&mut channels, &mut seen, pref.clone());
+        for ch in base {
+            push_unique_channel(&mut channels, &mut seen, ch);
+        }
+    } else {
+        // User changed proxy input right before downloading: honor new custom proxies first,
+        // then reuse the recently verified node before falling back to the rest.
+        for custom in parse_custom_proxies(proxy_url) {
+            push_unique_channel(&mut channels, &mut seen, UpdateChannel::Proxy(custom));
+        }
+        push_unique_channel(&mut channels, &mut seen, pref.clone());
+        for ch in base {
+            push_unique_channel(&mut channels, &mut seen, ch);
+        }
+    }
+
+    channels
 }
 
 fn extract_asset_name(url: &Url) -> String {
@@ -93,31 +259,194 @@ fn emit_progress(
     );
 }
 
+fn signal_done(signal: &Arc<(Mutex<bool>, Condvar)>) {
+    let (lock, cvar) = &**signal;
+    if let Ok(mut done) = lock.lock() {
+        *done = true;
+        cvar.notify_all();
+    }
+}
+
+enum ProbeEvent {
+    AttemptFinished {
+        channel: UpdateChannel,
+        outcome: Result<Option<Update>, String>,
+    },
+    HedgeTimerFired,
+}
+
+fn spawn_manifest_probe(
+    app: &AppHandle,
+    direct_manifest_url: &str,
+    channel: UpdateChannel,
+    tx: tauri::async_runtime::Sender<ProbeEvent>,
+) -> tauri::async_runtime::JoinHandle<()> {
+    let app_clone = app.clone();
+    let direct_url_owned = direct_manifest_url.to_string();
+
+    tauri::async_runtime::spawn(async move {
+        let outcome = match channel.apply_to_url(&direct_url_owned) {
+            Ok(endpoint_url) if endpoint_url.scheme() == "https" => {
+                match app_clone
+                    .updater_builder()
+                    .endpoints(vec![endpoint_url])
+                    .map_err(|e| format!("配置更新源失败: {}", e))
+                    .and_then(|b| {
+                        b.timeout(CHECK_CHANNEL_TIMEOUT)
+                            .build()
+                            .map_err(|e| format!("初始化更新客户端失败: {}", e))
+                    }) {
+                    Ok(updater) => updater.check().await.map_err(|e| e.to_string()),
+                    Err(e) => Err(e),
+                }
+            }
+            Ok(_) => Err("更新源仅支持 HTTPS 协议".to_string()),
+            Err(e) => Err(e),
+        };
+
+        let _ = tx
+            .send(ProbeEvent::AttemptFinished { channel, outcome })
+            .await;
+    })
+}
+
+fn format_check_failure(repo: &str, total_channels: usize, errors: &[(String, String)]) -> String {
+    let missing_manifest_hits = errors
+        .iter()
+        .filter(|(_, msg)| {
+            let lower = msg.to_lowercase();
+            msg.contains("404") || lower.contains("release json") || lower.contains("valid release")
+        })
+        .count();
+
+    let sample_err = errors
+        .first()
+        .map(|(label, msg)| format!("{} ({})", label, msg))
+        .unwrap_or_else(|| "网络连接异常".to_string());
+
+    if missing_manifest_hits > 0 && missing_manifest_hits * 2 >= errors.len().max(1) {
+        format!(
+            "未能读取到版本更新清单（latest.json），请确认仓库 {} 已发布支持自动更新的版本（已尝试 {} 条线路）: {}",
+            repo, total_channels, sample_err
+        )
+    } else {
+        format!(
+            "已自动尝试 {} 条更新线路（含内置多节点加速与 GitHub 直连）均失败，请检查网络连接或代理设置: {}",
+            total_channels, sample_err
+        )
+    }
+}
+
 pub async fn check_github_release(
     app: &AppHandle,
     github_repo: &str,
     proxy_url: &str,
 ) -> Result<(UpdateCheckResult, Option<PendingUpdate>), String> {
     let repo = normalize_repo(github_repo)?;
-    let endpoints = build_manifest_endpoints(&repo, proxy_url)?;
+    let proxy_trimmed = proxy_url.trim().to_string();
+    let channels = build_update_channels(&proxy_trimmed);
+    let total_channels = channels.len();
+    let direct_manifest_url = format!(
+        "https://github.com/{}/releases/latest/download/latest.json",
+        repo
+    );
     let current_version = env!("CARGO_PKG_VERSION").to_string();
 
-    let updater = app
-        .updater_builder()
-        .endpoints(endpoints)
-        .map_err(|e| format!("配置更新源失败: {}", e))?
-        .timeout(Duration::from_secs(20))
-        .build()
-        .map_err(|e| format!("初始化更新客户端失败: {}", e))?;
+    let (tx, mut rx) = tauri::async_runtime::channel::<ProbeEvent>(total_channels + 2);
+    let mut handles: Vec<tauri::async_runtime::JoinHandle<()>> = Vec::with_capacity(total_channels);
 
-    let maybe_update = updater.check().await.map_err(|e| {
-        let msg = e.to_string();
-        if msg.contains("404") || msg.to_lowercase().contains("release") {
-            format!("未能读取到版本更新清单（latest.json），请确认仓库 {} 已发布支持自动更新的版本: {}", repo, msg)
-        } else {
-            format!("连接更新源检查更新失败，请检查网络或代理设置: {}", msg)
+    // 1) Launch the primary channel first to stay polite when the primary node is healthy.
+    handles.push(spawn_manifest_probe(
+        app,
+        &direct_manifest_url,
+        channels[0].clone(),
+        tx.clone(),
+    ));
+    let mut remaining_pending: usize = 1;
+    let mut fallbacks_launched = total_channels <= 1;
+
+    // 2) If primary hangs longer than CHECK_HEDGE_DELAY, automatically race all fallback nodes
+    //    in parallel instead of waiting sequentially on a dead/blocked proxy.
+    let timer_signal = Arc::new((Mutex::new(false), Condvar::new()));
+    if !fallbacks_launched {
+        let sig_clone = Arc::clone(&timer_signal);
+        let tx_timer = tx.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let (lock, cvar) = &*sig_clone;
+            if let Ok(guard) = lock.lock() {
+                if !*guard {
+                    let (guard_after, _) = cvar.wait_timeout(guard, CHECK_HEDGE_DELAY).unwrap();
+                    if !*guard_after {
+                        let _ = tx_timer.blocking_send(ProbeEvent::HedgeTimerFired);
+                    }
+                }
+            }
+        });
+    }
+
+    let mut errors: Vec<(String, String)> = Vec::new();
+    let mut winner: Option<(UpdateChannel, Option<Update>)> = None;
+
+    while remaining_pending > 0 {
+        let Some(event) = rx.recv().await else {
+            break;
+        };
+
+        match event {
+            ProbeEvent::HedgeTimerFired => {
+                if !fallbacks_launched {
+                    fallbacks_launched = true;
+                    for ch in channels.iter().skip(1) {
+                        handles.push(spawn_manifest_probe(
+                            app,
+                            &direct_manifest_url,
+                            ch.clone(),
+                            tx.clone(),
+                        ));
+                        remaining_pending += 1;
+                    }
+                }
+            }
+            ProbeEvent::AttemptFinished { channel, outcome } => {
+                remaining_pending = remaining_pending.saturating_sub(1);
+                match outcome {
+                    Ok(maybe_update) => {
+                        winner = Some((channel, maybe_update));
+                        break;
+                    }
+                    Err(err_msg) => {
+                        errors.push((channel.label(), err_msg));
+                        // Primary failed fast -> launch fallback race immediately without waiting
+                        // for the hedge timer.
+                        if !fallbacks_launched {
+                            fallbacks_launched = true;
+                            signal_done(&timer_signal);
+                            for ch in channels.iter().skip(1) {
+                                handles.push(spawn_manifest_probe(
+                                    app,
+                                    &direct_manifest_url,
+                                    ch.clone(),
+                                    tx.clone(),
+                                ));
+                                remaining_pending += 1;
+                            }
+                        }
+                    }
+                }
+            }
         }
-    })?;
+    }
+
+    signal_done(&timer_signal);
+    for h in handles {
+        h.abort();
+    }
+
+    let Some((winning_channel, maybe_update)) = winner else {
+        return Err(format_check_failure(&repo, total_channels, &errors));
+    };
+
+    let resolved_source = winning_channel.label();
 
     if let Some(update) = maybe_update {
         let latest_version = update.version.trim().trim_start_matches(['v', 'V']).to_string();
@@ -137,8 +466,14 @@ pub async fn check_github_release(
             html_url,
             asset_name,
             asset_size: 0,
+            resolved_source,
         };
-        let pending = PendingUpdate { repo, update };
+        let pending = PendingUpdate {
+            repo,
+            proxy_config: proxy_trimmed,
+            preferred_channel: winning_channel,
+            update,
+        };
         Ok((result, Some(pending)))
     } else {
         let result = UpdateCheckResult {
@@ -151,45 +486,121 @@ pub async fn check_github_release(
             html_url: format!("https://github.com/{}/releases", repo),
             asset_name: String::new(),
             asset_size: 0,
+            resolved_source,
         };
         Ok((result, None))
     }
 }
 
-async fn download_with_progress(
+/// Downloads a single candidate update URL with first-byte and mid-stream stall watchdogs,
+/// so hanging or throttled-to-zero nodes automatically abort and fail over to the next node.
+/// Note: `Update::download` also verifies the Ed25519 signature automatically, so corrupted or
+/// HTML error responses from a faulty proxy are rejected and trigger failover cleanly.
+async fn download_single_channel_with_watchdog(
     app: &AppHandle,
-    update: &Update,
+    update: Update,
     label: &str,
 ) -> Result<Vec<u8>, String> {
-    let mut downloaded: u64 = 0;
-    let app_clone = app.clone();
-    let label_owned = label.to_string();
+    let start = Instant::now();
+    let downloaded_atomic = Arc::new(AtomicU64::new(0));
+    let last_activity_ms = Arc::new(AtomicU64::new(0));
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let done_signal = Arc::new((Mutex::new(false), Condvar::new()));
+
+    let (tx, mut rx) = tauri::async_runtime::channel::<Result<Vec<u8>, String>>(2);
 
     emit_progress(app, 0, 0, 0.0, "downloading", label);
 
-    update
-        .download(
-            move |chunk_len, content_len| {
-                downloaded = downloaded.saturating_add(chunk_len as u64);
-                let total = content_len.unwrap_or(0);
-                let percent = if total > 0 {
-                    ((downloaded as f64 / total as f64) * 100.0).min(100.0)
-                } else {
-                    0.0
-                };
-                emit_progress(
-                    &app_clone,
-                    downloaded,
-                    total,
-                    percent,
-                    "downloading",
-                    &label_owned,
-                );
-            },
-            || {},
-        )
+    let dl_handle = {
+        let app_clone = app.clone();
+        let label_owned = label.to_string();
+        let downloaded_ref = Arc::clone(&downloaded_atomic);
+        let activity_ref = Arc::clone(&last_activity_ms);
+        let cancelled_ref = Arc::clone(&cancelled);
+        let tx_dl = tx.clone();
+
+        tauri::async_runtime::spawn(async move {
+            let mut downloaded: u64 = 0;
+            let res = update
+                .download(
+                    move |chunk_len, content_len| {
+                        if cancelled_ref.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        downloaded = downloaded.saturating_add(chunk_len as u64);
+                        downloaded_ref.store(downloaded, Ordering::Relaxed);
+                        activity_ref.store(start.elapsed().as_millis() as u64, Ordering::Relaxed);
+
+                        let total = content_len.unwrap_or(0);
+                        let percent = if total > 0 {
+                            ((downloaded as f64 / total as f64) * 100.0).min(100.0)
+                        } else {
+                            0.0
+                        };
+                        emit_progress(
+                            &app_clone,
+                            downloaded,
+                            total,
+                            percent,
+                            "downloading",
+                            &label_owned,
+                        );
+                    },
+                    || {},
+                )
+                .await
+                .map_err(|e| e.to_string());
+
+            let _ = tx_dl.send(res).await;
+        })
+    };
+
+    // Lightweight watchdog checking first-byte timeout & mid-stream stall
+    {
+        let downloaded_ref = Arc::clone(&downloaded_atomic);
+        let activity_ref = Arc::clone(&last_activity_ms);
+        let sig_clone = Arc::clone(&done_signal);
+        let tx_wd = tx.clone();
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let first_byte_ms = DOWNLOAD_FIRST_BYTE_TIMEOUT.as_millis() as u64;
+            let stall_ms = DOWNLOAD_STALL_TIMEOUT.as_millis() as u64;
+            let (lock, cvar) = &*sig_clone;
+            let Ok(mut guard) = lock.lock() else {
+                return;
+            };
+            while !*guard {
+                let (next_guard, _) = cvar.wait_timeout(guard, Duration::from_secs(1)).unwrap();
+                guard = next_guard;
+                if *guard {
+                    break;
+                }
+                let elapsed = start.elapsed().as_millis() as u64;
+                let received = downloaded_ref.load(Ordering::Relaxed);
+                let last_act = activity_ref.load(Ordering::Relaxed);
+
+                if received == 0 && elapsed >= first_byte_ms {
+                    let _ = tx_wd.blocking_send(Err("节点响应超时（15 秒内未收到数据）".to_string()));
+                    break;
+                }
+                if received > 0 && elapsed.saturating_sub(last_act) >= stall_ms {
+                    let _ = tx_wd.blocking_send(Err("节点传输停滞超时（25 秒无新数据）".to_string()));
+                    break;
+                }
+            }
+        });
+    }
+
+    let result = rx
+        .recv()
         .await
-        .map_err(|e| e.to_string())
+        .unwrap_or_else(|| Err("下载任务意外中止".to_string()));
+
+    cancelled.store(true, Ordering::Relaxed);
+    signal_done(&done_signal);
+    dl_handle.abort();
+
+    result
 }
 
 pub async fn download_and_install_update(
@@ -199,52 +610,86 @@ pub async fn download_and_install_update(
     proxy_url: &str,
 ) -> Result<String, String> {
     let repo = normalize_repo(github_repo)?;
-    let mut update = match pending {
-        Some(p) if p.repo == repo => p.update,
+    let proxy_trimmed = proxy_url.trim();
+
+    let (mut update, preferred_channel, proxy_matches_pending) = match pending {
+        Some(p) if p.repo == repo => {
+            let matches = p.proxy_config == proxy_trimmed;
+            (p.update, Some(p.preferred_channel), matches)
+        }
         _ => {
-            let (_, fresh) = check_github_release(app, &repo, proxy_url).await?;
+            let (_, fresh) = check_github_release(app, &repo, proxy_trimmed).await?;
             match fresh {
-                Some(p) => p.update,
+                Some(p) => (p.update, Some(p.preferred_channel), true),
                 None => return Err("当前已是最新版本，无需更新".to_string()),
             }
         }
     };
 
-    // Give binary downloads generous timeout while keeping proxy fallback responsive
-    update.timeout = Some(Duration::from_secs(300));
+    update.timeout = Some(DOWNLOAD_TOTAL_TIMEOUT);
 
     let original_url = update.download_url.clone();
-    let proxy_trimmed = proxy_url.trim();
+    let channels = build_download_channels(
+        &original_url,
+        proxy_trimmed,
+        preferred_channel.as_ref(),
+        proxy_matches_pending,
+    );
+    let total_channels = channels.len();
 
-    let bytes = if !proxy_trimmed.is_empty() {
-        let proxied_str = apply_proxy(original_url.as_str(), proxy_trimmed);
-        let tried_proxy = match Url::parse(&proxied_str) {
-            Ok(proxied_url) => {
-                update.download_url = proxied_url;
-                download_with_progress(app, &update, "正在通过加速代理下载更新包...").await
+    let mut downloaded_bytes: Option<Vec<u8>> = None;
+    let mut last_err = String::new();
+    let mut prev_label: Option<String> = None;
+
+    for (idx, channel) in channels.iter().enumerate() {
+        let ch_label = channel.label();
+        let target_url = match channel.apply_to_url(original_url.as_str()) {
+            Ok(u) => u,
+            Err(e) => {
+                last_err = format!("{} ({})", ch_label, e);
+                prev_label = Some(ch_label);
+                continue;
             }
-            Err(_) => Err("代理前缀格式无效".to_string()),
         };
 
-        match tried_proxy {
-            Ok(b) => b,
-            Err(_proxy_err) => {
-                // Automatic fallback to direct GitHub release download
-                update.download_url = original_url.clone();
-                download_with_progress(
-                    app,
-                    &update,
-                    "代理节点不可用，已自动切换直连下载...",
-                )
-                .await
-                .map_err(|e| format!("代理与直连下载更新均失败，请检查网络设置: {}", e))?
+        let status_msg = match (idx, channel, prev_label.as_deref()) {
+            (0, UpdateChannel::Direct, _) => "正在从 GitHub 直连下载更新包...".to_string(),
+            (0, UpdateChannel::Proxy(_), _) => {
+                format!("正在通过加速节点 {} 下载更新包...", ch_label)
+            }
+            (_, UpdateChannel::Direct, Some(prev)) => {
+                format!("节点 {} 不可用，已切换 GitHub 直连下载...", prev)
+            }
+            (_, UpdateChannel::Proxy(_), Some(prev)) => {
+                format!("节点 {} 不可用，已切换节点 {} 下载...", prev, ch_label)
+            }
+            (_, UpdateChannel::Direct, None) => "正在从 GitHub 直连下载更新包...".to_string(),
+            (_, UpdateChannel::Proxy(_), None) => {
+                format!("正在通过加速节点 {} 下载更新包...", ch_label)
+            }
+        };
+
+        let mut attempt_update = update.clone();
+        attempt_update.download_url = target_url;
+
+        match download_single_channel_with_watchdog(app, attempt_update, &status_msg).await {
+            Ok(bytes) => {
+                downloaded_bytes = Some(bytes);
+                break;
+            }
+            Err(err) => {
+                last_err = format!("{} ({})", ch_label, err);
+                prev_label = Some(ch_label);
             }
         }
-    } else {
-        download_with_progress(app, &update, "正在从 GitHub 下载更新包...")
-            .await
-            .map_err(|e| format!("下载更新包失败: {}", e))?
-    };
+    }
+
+    let bytes = downloaded_bytes.ok_or_else(|| {
+        format!(
+            "已尝试 {} 条下载线路（含多节点加速与直连）均失败，请检查网络后重试: {}",
+            total_channels, last_err
+        )
+    })?;
 
     emit_progress(
         app,
@@ -299,23 +744,95 @@ mod tests {
             apply_proxy("https://github.com/a/b", ""),
             "https://github.com/a/b"
         );
+        assert_eq!(
+            normalize_proxy_prefix("ghfast.top").as_deref(),
+            Some("https://ghfast.top/")
+        );
+        assert_eq!(normalize_proxy_prefix("http://insecure.example.com"), None);
+        assert_eq!(normalize_proxy_prefix("https://github.com/"), None);
     }
 
     #[test]
-    fn test_build_manifest_endpoints_with_fallback() {
-        let eps = build_manifest_endpoints("MuY-DG/instrument-ledger", "https://gh-proxy.com/")
-            .unwrap();
-        assert_eq!(eps.len(), 2);
-        assert_eq!(
-            eps[0].as_str(),
-            "https://gh-proxy.com/https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json"
+    fn test_parse_custom_proxies_and_dedup() {
+        let parsed = parse_custom_proxies(
+            "https://my-proxy.example.com, ghfast.top；https://MY-PROXY.example.com/\nhttps://gh-proxy.org",
         );
         assert_eq!(
-            eps[1].as_str(),
-            "https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json"
+            parsed,
+            vec![
+                "https://my-proxy.example.com/".to_string(),
+                "https://ghfast.top/".to_string(),
+                "https://gh-proxy.org/".to_string(),
+            ]
         );
+    }
 
-        let direct_only = build_manifest_endpoints("MuY-DG/instrument-ledger", "").unwrap();
-        assert_eq!(direct_only.len(), 1);
+    #[test]
+    fn test_build_update_channels_default_custom_and_direct_first() {
+        // Default proxy puts gh-proxy.com first, then remaining built-in mirrors, then Direct
+        let default_chs = build_update_channels("https://gh-proxy.com/");
+        assert_eq!(default_chs.len(), BUILTIN_PROXY_POOL.len() + 1);
+        assert_eq!(
+            default_chs[0],
+            UpdateChannel::Proxy("https://gh-proxy.com/".to_string())
+        );
+        assert_eq!(default_chs.last(), Some(&UpdateChannel::Direct));
+
+        // Custom proxy goes ahead of all built-in nodes and deduplicates
+        let custom_chs =
+            build_update_channels("https://worker.example.com, https://ghfast.top/");
+        assert_eq!(custom_chs.len(), BUILTIN_PROXY_POOL.len() + 2);
+        assert_eq!(
+            custom_chs[0],
+            UpdateChannel::Proxy("https://worker.example.com/".to_string())
+        );
+        assert_eq!(
+            custom_chs[1],
+            UpdateChannel::Proxy("https://ghfast.top/".to_string())
+        );
+        assert_eq!(custom_chs.last(), Some(&UpdateChannel::Direct));
+
+        // Empty proxy puts Direct first, then falls back to built-in mirror pool
+        let direct_first = build_update_channels("");
+        assert_eq!(direct_first.len(), BUILTIN_PROXY_POOL.len() + 1);
+        assert_eq!(direct_first[0], UpdateChannel::Direct);
+        assert_eq!(
+            direct_first[1],
+            UpdateChannel::Proxy("https://gh-proxy.com/".to_string())
+        );
+    }
+
+    #[test]
+    fn test_build_download_channels_prioritizes_winning_node() {
+        let gh_asset = Url::parse(
+            "https://github.com/MuY-DG/instrument-ledger/releases/download/v1.3.0/app.tar.gz",
+        )
+        .unwrap();
+        let winner = UpdateChannel::Proxy("https://ghfast.top/".to_string());
+
+        // Same proxy config -> winning channel goes straight to index 0
+        let dl_chs = build_download_channels(&gh_asset, "https://gh-proxy.com/", Some(&winner), true);
+        assert_eq!(dl_chs[0], winner);
+        assert_eq!(dl_chs.len(), BUILTIN_PROXY_POOL.len() + 1);
+
+        // User changed proxy input -> new custom proxy goes first, then previously verified node
+        let dl_changed = build_download_channels(
+            &gh_asset,
+            "https://custom.example.com/",
+            Some(&winner),
+            false,
+        );
+        assert_eq!(
+            dl_changed[0],
+            UpdateChannel::Proxy("https://custom.example.com/".to_string())
+        );
+        assert_eq!(dl_changed[1], winner);
+
+        // Non-GitHub asset URL should not be prefixed with GitHub mirrors
+        let oss_asset = Url::parse("https://cdn.example.com/releases/app.tar.gz").unwrap();
+        assert_eq!(
+            build_download_channels(&oss_asset, "https://gh-proxy.com/", Some(&winner), true),
+            vec![UpdateChannel::Direct]
+        );
     }
 }

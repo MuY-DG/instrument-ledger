@@ -1897,6 +1897,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   {updateResult.assetName}
                                 </span>
                               )}
+                              {updateResult.resolvedSource && (
+                                <>
+                                  <span className="text-zinc-300 dark:text-zinc-700">·</span>
+                                  <span className="font-mono text-zinc-400 dark:text-zinc-500">
+                                    线路：{updateResult.resolvedSource}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
 
@@ -2002,11 +2010,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       <div className="px-4 py-3 rounded-xl bg-emerald-500/[0.04] dark:bg-emerald-500/[0.06] border border-emerald-500/20 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                          <div className="text-xs text-zinc-700 dark:text-zinc-200">
-                            已是最新版本{" "}
-                            <span className="font-mono font-semibold text-zinc-950 dark:text-white">
-                              v{updateResult.currentVersion}
+                          <div className="text-xs text-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 flex-wrap">
+                            <span>
+                              已是最新版本{" "}
+                              <span className="font-mono font-semibold text-zinc-950 dark:text-white">
+                                v{updateResult.currentVersion}
+                              </span>
                             </span>
+                            {updateResult.resolvedSource && (
+                              <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500">
+                                · {updateResult.resolvedSource}
+                              </span>
+                            )}
                           </div>
                         </div>
                         {updateResult.htmlUrl && (
@@ -2036,7 +2051,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </span>
                             <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500 truncate">
                               {githubRepo || "未配置仓库"}
-                              {updateProxyUrl.trim() ? " · 代理" : " · 直连"}
+                              {updateProxyUrl.trim() ? " · 多节点加速" : " · 直连优先/自动兜底"}
                             </span>
                           </div>
                           <ChevronDown
@@ -2063,17 +2078,35 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                 />
                               </div>
                               <div>
-                                <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                                  <span>加速代理</span>
-                                  <InfoTip content="选填，默认 https://gh-proxy.com/，留空则直连 GitHub；代理不可用时自动回退直连。" />
-                                </label>
+                                <div className="flex items-center justify-between gap-2 mb-1">
+                                  <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+                                    <span>加速代理（检测与下载通用）</span>
+                                    <InfoTip content="同时用于检测更新与安装包下载，支持逗号分隔多个自定义前缀。首选节点异常或超时时自动并发切换内置多节点池与 GitHub 直连；留空则直连优先并自动兜底。" />
+                                  </label>
+                                  {updateProxyUrl.trim() !== "https://gh-proxy.com/" && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setUpdateProxyUrl("https://gh-proxy.com/")}
+                                      className="text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+                                    >
+                                      恢复默认
+                                    </button>
+                                  )}
+                                </div>
                                 <input
                                   type="text"
                                   value={updateProxyUrl}
                                   onChange={(e) => setUpdateProxyUrl(e.target.value)}
-                                  placeholder="留空则直连 GitHub"
+                                  placeholder="留空则直连优先，不通时自动切换内置多节点"
                                   className={`${INPUT_CLS} font-mono text-xs`}
                                 />
+                                <p className="mt-1.5 text-[10.5px] text-zinc-400 dark:text-zinc-500 leading-relaxed">
+                                  内置自动兜底节点：
+                                  <span className="font-mono">
+                                    gh-proxy.com · ghfast.top · gh-proxy.org · cdn.gh-proxy.org · edgeone.gh-proxy.org · GitHub 直连
+                                  </span>
+                                  （全程 Ed25519 验签）
+                                </p>
                               </div>
                             </div>
                             <div className="flex justify-end">

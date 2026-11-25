@@ -219,6 +219,7 @@ pub struct UpdateCheckResult {
     pub html_url: String,
     pub asset_name: String,
     pub asset_size: u64,
+    pub resolved_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
