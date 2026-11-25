@@ -66,6 +66,7 @@ import { PrintLedgerView } from "@/components/PrintLedgerView";
 import { CommandPalette } from "@/components/CommandPalette";
 import { UpdateBannerToast } from "@/components/UpdateBannerToast";
 import { ExpiryAlertModal } from "@/components/ExpiryAlertModal";
+import { ConfirmDialogHost, confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
 import type {
   AppSettings,
@@ -81,6 +82,8 @@ import type {
 
 const DEFAULT_SETTINGS: AppSettings = {
   adminUsername: "",
+  adminTitle: "系统管理员",
+  adminAvatarPath: "",
   warningDays: 60,
   warningThresholds: DEFAULT_WARNING_THRESHOLDS,
   alertPopupEnabled: true,
@@ -89,6 +92,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   autoLockMinutes: 0,
   closeBehavior: "ask",
   keepAdminSession: true,
+  adminSessionDays: 7,
   appLockEnabled: false,
   appLockPinLength: 0,
   lockOnHide: false,
@@ -136,6 +140,17 @@ function loadInitialTheme(): "light" | "dark" {
   return "light";
 }
 
+function formatAdminSessionRemaining(expiresAt?: string | null): string {
+  if (!expiresAt) return "本次有效";
+  const diffMs = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return "已过期";
+  const hours = diffMs / (60 * 60 * 1000);
+  if (hours < 24) {
+    return `剩 ${Math.max(1, Math.ceil(hours))} 小时`;
+  }
+  return `剩 ${Math.ceil(hours / 24)} 天`;
+}
+
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -143,6 +158,7 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [logoDataUrl, setLogoDataUrl] = useState("");
+  const [avatarDataUrl, setAvatarDataUrl] = useState("");
   const [auth, setAuth] = useState<AuthStatus>({
     isInitialized: true,
     isAdmin: false,
@@ -150,6 +166,7 @@ export default function App() {
     isLocked: false,
     appLockEnabled: false,
     appLockPinLength: 0,
+    adminSessionExpiresAt: null,
   });
   const authRef = useRef(auth);
   authRef.current = auth;
@@ -244,6 +261,14 @@ export default function App() {
       } else {
         setLogoDataUrl("");
       }
+      if (cfg.adminAvatarPath) {
+        api
+          .getStoredImageDataUrl(cfg.adminAvatarPath)
+          .then(setAvatarDataUrl)
+          .catch(() => setAvatarDataUrl(""));
+      } else {
+        setAvatarDataUrl("");
+      }
       if (authSt.isInitialized && !authSt.isLocked) {
         const list = await api.listInstruments();
         setInstruments(list);
@@ -272,6 +297,18 @@ export default function App() {
       setLogoDataUrl("");
     }
   }, [settings.companyLogoPath]);
+
+  // Reload avatar when adminAvatarPath changes
+  useEffect(() => {
+    if (settings.adminAvatarPath) {
+      api
+        .getStoredImageDataUrl(settings.adminAvatarPath)
+        .then(setAvatarDataUrl)
+        .catch(() => setAvatarDataUrl(""));
+    } else {
+      setAvatarDataUrl("");
+    }
+  }, [settings.adminAvatarPath]);
 
   const handleLock = useCallback(async () => {
     const current = authRef.current;
@@ -363,6 +400,7 @@ export default function App() {
       }),
       listen("window-shown", () => {
         setWindowFocusNonce((n) => n + 1);
+        api.getAuthStatus().then(setAuth).catch(() => {});
       }),
     ];
     return () => {
@@ -786,9 +824,11 @@ export default function App() {
   };
 
   const handleDelete = async (inst: Instrument) => {
-    const ok = window.confirm(
-      `确定删除「${inst.name}」（编号：${inst.serialNo || "无"}）吗？\n删除后将同时清理其位置照片及 ${inst.reportCount} 份校验报告附件，不可恢复。`
-    );
+    const ok = await confirmDialog({
+      title: "删除设备",
+      description: `确定删除「${inst.name}」${inst.serialNo ? `（${inst.serialNo}）` : ""}？将同时清理位置照片及 ${inst.reportCount} 份报告，不可恢复。`,
+      destructive: true,
+    });
     if (!ok) return;
     try {
       await api.deleteInstrument(inst.id);
@@ -1253,26 +1293,51 @@ export default function App() {
             {/* Sidebar Bottom Account & Utility Rail */}
             <div className="p-3 border-t border-zinc-200/80 dark:border-white/[0.07] space-y-2">
               {auth.isAdmin ? (
-                <div className="px-2.5 py-2 rounded-xl bg-white dark:bg-white/[0.04] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between gap-2">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => openSettingsTab("account")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      openSettingsTab("account");
+                    }
+                  }}
+                  title="账号"
+                  className="px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50 dark:bg-white/[0.04] dark:hover:bg-white/[0.07] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between gap-2 cursor-pointer transition"
+                >
                   <div className="flex items-center gap-2 min-w-0">
-                    <div className="h-6 w-6 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-[11px] font-semibold uppercase shrink-0">
-                      {auth.username.slice(0, 1) || "A"}
-                    </div>
+                    {avatarDataUrl ? (
+                      <img
+                        src={avatarDataUrl}
+                        alt="头像"
+                        className="h-7 w-7 rounded-full object-cover border border-zinc-200 dark:border-white/15 shrink-0"
+                      />
+                    ) : (
+                      <div className="h-7 w-7 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-[11px] font-semibold uppercase shrink-0">
+                        {auth.username.slice(0, 1) || "A"}
+                      </div>
+                    )}
                     <div className="min-w-0">
                       <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">
                         {auth.username}
                       </div>
-                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
-                        <ShieldCheck className="h-2.5 w-2.5" />
-                        <span>管理员</span>
+                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 min-w-0">
+                        <ShieldCheck className="h-2.5 w-2.5 shrink-0" />
+                        <span className="truncate">
+                          {settings.adminTitle || "系统管理员"} · {formatAdminSessionRemaining(auth.adminSessionExpiresAt)}
+                        </span>
                       </div>
                     </div>
                   </div>
                   <button
                     type="button"
-                    onClick={handleLogout}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleLogout();
+                    }}
                     className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition"
-                    title="退出管理员模式"
+                    title="退出登录"
                   >
                     <LogOut className="h-3.5 w-3.5" />
                   </button>
@@ -2193,14 +2258,19 @@ export default function App() {
         open={loginModalOpen}
         defaultUsername={auth.username}
         defaultKeepSession={settings.keepAdminSession}
+        defaultSessionDays={settings.adminSessionDays}
         onClose={() => setLoginModalOpen(false)}
-        onSuccess={(st, keepSession) => {
+        onSuccess={(st, keepSession, sessionDays) => {
           setAuth(st);
-          setSettings((prev) => ({ ...prev, keepAdminSession: keepSession }));
+          setSettings((prev) => ({
+            ...prev,
+            keepAdminSession: keepSession,
+            adminSessionDays: sessionDays,
+          }));
           notify(
             keepSession
-              ? "管理员登录成功，已为您保持登录状态"
-              : "管理员登录成功（仅本次运行有效）",
+              ? `登录成功，${sessionDays} 天内保持登录`
+              : "登录成功（仅本次有效）",
             "success"
           );
         }}
@@ -2210,6 +2280,7 @@ export default function App() {
         openModal={settingsModalOpen}
         initialTab={settingsInitialTab}
         isAdmin={auth.isAdmin}
+        adminSessionExpiresAt={auth.adminSessionExpiresAt}
         settings={settings}
         availableUpdate={availableUpdate}
         updatingApp={updatingApp}
@@ -2320,6 +2391,9 @@ export default function App() {
           }
         }}
       />
+
+      {/* Global In-App Confirm Dialog */}
+      <ConfirmDialogHost />
 
       {/* Sonner Stacked Toast Notifications */}
       <Toaster

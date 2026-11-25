@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatFileSize, formatShortDateTime, getTodayStr } from "@/lib/status";
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
 import type { CalibrationReport, Instrument } from "@/types";
 
@@ -248,7 +249,12 @@ export const ReportModal: React.FC<ReportModalProps> = ({
 
   const handleDelete = async (rep: CalibrationReport) => {
     if (!instrument) return;
-    if (!window.confirm(`确定删除校验报告「${rep.fileName}」吗？此操作不可恢复。`)) {
+    const ok = await confirmDialog({
+      title: "删除报告",
+      description: `确定删除「${rep.fileName}」？此操作不可恢复。`,
+      destructive: true,
+    });
+    if (!ok) {
       return;
     }
     try {

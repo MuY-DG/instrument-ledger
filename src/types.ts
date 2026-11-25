@@ -104,6 +104,8 @@ export interface ImportResult {
 
 export interface AppSettings {
   adminUsername: string;
+  adminTitle: string;
+  adminAvatarPath: string;
   warningDays: number;
   warningThresholds: WarningThreshold[];
   alertPopupEnabled: boolean;
@@ -112,6 +114,7 @@ export interface AppSettings {
   autoLockMinutes: number;
   closeBehavior: CloseBehavior;
   keepAdminSession: boolean;
+  adminSessionDays: number;
   appLockEnabled: boolean;
   appLockPinLength: number;
   lockOnHide: boolean;
@@ -127,6 +130,8 @@ export interface AppSettings {
 }
 
 export interface SettingsUpdateInput {
+  adminUsername?: string;
+  adminTitle?: string;
   warningDays?: number;
   warningThresholds?: WarningThreshold[];
   alertPopupEnabled?: boolean;
@@ -135,6 +140,7 @@ export interface SettingsUpdateInput {
   autoLockMinutes?: number;
   closeBehavior?: CloseBehavior;
   keepAdminSession?: boolean;
+  adminSessionDays?: number;
   lockOnHide?: boolean;
   lockOnStartup?: boolean;
   docCode?: string;
@@ -153,6 +159,7 @@ export interface AuthStatus {
   isLocked: boolean;
   appLockEnabled: boolean;
   appLockPinLength: number;
+  adminSessionExpiresAt: string | null;
 }
 
 export interface Base64FilePayload {

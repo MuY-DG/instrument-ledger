@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "motion/react";
@@ -8,9 +8,11 @@ import {
   Archive,
   ArrowRight,
   BellRing,
+  Camera,
   CheckCircle2,
   ChevronDown,
   CloudDownload,
+  Edit3,
   ExternalLink,
   FileText,
   FolderOpen,
@@ -25,14 +27,16 @@ import {
   RotateCcw,
   Save,
   Settings,
-  Shield,
+  ShieldCheck,
   Trash2,
+  User,
   X,
 } from "lucide-react";
 import { api, clearMediaCache } from "@/lib/api";
 import { formatFileSize, getTodayStr } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { isMacPlatform } from "@/components/AuthLockModals";
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
 import { MarkdownNotes } from "@/components/MarkdownNotes";
 import { ThresholdSettingsEditor } from "@/components/ThresholdSettingsEditor";
@@ -45,10 +49,11 @@ import type {
 } from "@/types";
 
 export type SettingsTab =
+  | "account"
   | "general"
   | "window"
   | "alerts"
-  | "security"
+  | "applock"
   | "backup"
   | "update";
 
@@ -56,6 +61,7 @@ interface SettingsModalProps {
   openModal: boolean;
   initialTab?: SettingsTab;
   isAdmin: boolean;
+  adminSessionExpiresAt?: string | null;
   settings: AppSettings;
   availableUpdate?: UpdateCheckResult | null;
   updatingApp?: boolean;
@@ -80,10 +86,20 @@ function formatPublishDate(raw: string): string {
   return m ? m[1] : "";
 }
 
+function formatSessionBadge(expiresAt?: string | null): string {
+  if (!expiresAt) return "本次有效";
+  const diffMs = new Date(expiresAt).getTime() - Date.now();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) return "已过期";
+  const hours = diffMs / (60 * 60 * 1000);
+  if (hours < 24) return `剩 ${Math.max(1, Math.ceil(hours))} 小时`;
+  return `剩 ${Math.ceil(hours / 24)} 天`;
+}
+
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   openModal,
-  initialTab = "general",
+  initialTab = "account",
   isAdmin,
+  adminSessionExpiresAt = null,
   settings,
   availableUpdate = null,
   updatingApp = false,
@@ -117,8 +133,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [logoPreview, setLogoPreview] = useState("");
   const [savingGeneral, setSavingGeneral] = useState(false);
 
-  // Security password form
-  const [newUsername, setNewUsername] = useState(settings.adminUsername);
+  // Account showcase & edit state
+  const [avatarPreview, setAvatarPreview] = useState("");
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileUsername, setProfileUsername] = useState(settings.adminUsername);
+  const [profileTitle, setProfileTitle] = useState(settings.adminTitle || "系统管理员");
+  const [savingProfile, setSavingProfile] = useState(false);
+
+  const [editingPassword, setEditingPassword] = useState(false);
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -135,16 +157,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [updateError, setUpdateError] = useState("");
   const [showSourceConfig, setShowSourceConfig] = useState(!availableUpdate?.hasUpdate);
 
+  const wasOpenRef = useRef(false);
+
+  // Initialize active tab and transient modal state ONLY when the modal opens
+  useEffect(() => {
+    if (!openModal) {
+      wasOpenRef.current = false;
+      return;
+    }
+    if (!wasOpenRef.current) {
+      wasOpenRef.current = true;
+      setTab(
+        isAdmin ||
+          initialTab === "window" ||
+          initialTab === "alerts" ||
+          initialTab === "update"
+          ? initialTab
+          : "window"
+      );
+      setEditingProfile(false);
+      setEditingPassword(false);
+      setOldPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      setUpdateError("");
+      if (availableUpdate) {
+        setUpdateResult(availableUpdate);
+        setShowSourceConfig(!availableUpdate.hasUpdate);
+      } else {
+        setShowSourceConfig(true);
+      }
+      api.getDataDirInfo().then(setDirInfo).catch(() => {});
+    }
+  }, [openModal, initialTab, isAdmin, availableUpdate]);
+
+  // If admin session expires while open on an admin-only tab, leave that tab safely
+  useEffect(() => {
+    if (!openModal || isAdmin) return;
+    if (
+      tab === "account" ||
+      tab === "general" ||
+      tab === "applock" ||
+      tab === "backup"
+    ) {
+      setTab("window");
+    }
+  }, [openModal, isAdmin, tab]);
+
+  // Sync persisted settings into form inputs without resetting active tab
   useEffect(() => {
     if (!openModal) return;
-    setTab(
-      isAdmin ||
-        initialTab === "window" ||
-        initialTab === "alerts" ||
-        initialTab === "update"
-        ? initialTab
-        : "window"
-    );
     setAutoLockMinutes(settings.autoLockMinutes);
     setDocCode(settings.docCode);
     setDocVersion(settings.docVersion);
@@ -153,19 +215,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setWeeklyNotice(settings.weeklyNotice);
     setGithubRepo(settings.githubRepo);
     setUpdateProxyUrl(settings.updateProxyUrl);
-    setNewUsername(settings.adminUsername);
-    setOldPassword("");
-    setNewPassword("");
-    setConfirmPassword("");
-    setUpdateError("");
-    if (availableUpdate) {
-      setUpdateResult(availableUpdate);
-      setShowSourceConfig(!availableUpdate.hasUpdate);
-    } else {
-      setShowSourceConfig(true);
-    }
-
-    api.getDataDirInfo().then(setDirInfo).catch(() => {});
+    setProfileUsername(settings.adminUsername);
+    setProfileTitle(settings.adminTitle || "系统管理员");
     if (settings.companyLogoPath) {
       api
         .getStoredImageDataUrl(settings.companyLogoPath)
@@ -174,7 +225,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } else {
       setLogoPreview("");
     }
-  }, [openModal, initialTab, isAdmin, settings, availableUpdate]);
+    if (settings.adminAvatarPath) {
+      api
+        .getStoredImageDataUrl(settings.adminAvatarPath)
+        .then(setAvatarPreview)
+        .catch(() => setAvatarPreview(""));
+    } else {
+      setAvatarPreview("");
+    }
+  }, [openModal, settings]);
+
+  // Keep update result synced if a background update arrives while modal is open
+  useEffect(() => {
+    if (!openModal || !availableUpdate) return;
+    setUpdateResult(availableUpdate);
+  }, [openModal, availableUpdate]);
 
   const handleSaveGeneral = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -230,6 +295,61 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleUploadAvatar = async () => {
+    const picked = await open({
+      multiple: false,
+      title: "选择头像图片",
+      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg", "webp"] }],
+    });
+    if (typeof picked === "string" && picked) {
+      try {
+        const rel = await api.uploadAdminAvatar(picked);
+        const updated = await api.getSettings();
+        onSettingsChanged(updated);
+        const url = await api.getStoredImageDataUrl(rel);
+        setAvatarPreview(url);
+        onNotify("头像已更新", "success");
+      } catch (err) {
+        onNotify(String(err), "error");
+      }
+    }
+  };
+
+  const handleRemoveAvatar = async () => {
+    try {
+      await api.removeAdminAvatar();
+      const updated = await api.getSettings();
+      onSettingsChanged(updated);
+      setAvatarPreview("");
+      onNotify("已移除头像", "success");
+    } catch (err) {
+      onNotify(String(err), "error");
+    }
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedUser = profileUsername.trim();
+    if (trimmedUser.length < 2 || trimmedUser.length > 32) {
+      onNotify("用户名长度需在 2 到 32 个字符之间", "error");
+      return;
+    }
+    setSavingProfile(true);
+    try {
+      const updated = await api.updateSettings({
+        adminUsername: trimmedUser,
+        adminTitle: profileTitle.trim(),
+      });
+      onSettingsChanged(updated);
+      setEditingProfile(false);
+      onNotify("账号资料已保存", "success");
+    } catch (err) {
+      onNotify(String(err), "error");
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     if (newPassword !== confirmPassword) {
@@ -242,13 +362,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
     setSavingPwd(true);
     try {
-      await api.changeAdminPassword(oldPassword, newPassword, newUsername);
+      await api.changeAdminPassword(oldPassword, newPassword);
       const updated = await api.getSettings();
       onSettingsChanged(updated);
       setOldPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      onNotify("管理员账号密码已更新", "success");
+      setEditingPassword(false);
+      onNotify("登录密码已更新", "success");
     } catch (err) {
       onNotify(String(err), "error");
     } finally {
@@ -285,9 +406,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
     if (typeof src !== "string" || !src) return;
 
-    const confirmed = window.confirm(
-      "警告：从备份还原将用备份包中的数据完全覆盖当前台账、位置照片与校验报告！确定继续吗？"
-    );
+    const confirmed = await confirmDialog({
+      title: "还原备份",
+      description: "将用备份包覆盖当前全部台账、位置照片与校验报告，确定继续？",
+      destructive: true,
+    });
     if (!confirmed) return;
 
     setRestoring(true);
@@ -364,7 +487,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handlePatchSecuritySetting = async (
     patch: {
-      keepAdminSession?: boolean;
       autoLockMinutes?: number;
       lockOnHide?: boolean;
       lockOnStartup?: boolean;
@@ -386,9 +508,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleConfirmDisableAppLock = async () => {
     if (!onDisableAppLock || disablingLock) return;
-    const ok = window.confirm(
-      "确定关闭独立应用锁吗？关闭后将清除当前锁屏 PIN 码，之后可随时重新开启并设置新 PIN 码。"
-    );
+    const ok = await confirmDialog({
+      title: "关闭应用锁",
+      description: "关闭后将清除当前 PIN 码，之后可随时重新开启。",
+      destructive: true,
+    });
     if (!ok) return;
     setDisablingLock(true);
     try {
@@ -404,10 +528,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     icon: React.ReactNode;
     adminOnly?: boolean;
   }> = [
+    { id: "account", label: "账号", icon: <User className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "general", label: "台账与表头", icon: <Settings className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "window", label: "窗口与托盘", icon: <AppWindow className="h-3.5 w-3.5" /> },
     { id: "alerts", label: "到期预警", icon: <BellRing className="h-3.5 w-3.5" /> },
-    { id: "security", label: "账号与锁屏", icon: <Shield className="h-3.5 w-3.5" />, adminOnly: true },
+    { id: "applock", label: "应用锁", icon: <Lock className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "backup", label: "备份与还原", icon: <HardDrive className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "update", label: "检查更新", icon: <CloudDownload className="h-3.5 w-3.5" /> },
   ];
@@ -475,6 +600,313 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
               {/* Content */}
               <div className="flex-1 overflow-y-auto p-6">
+                {tab === "account" && isAdmin && (
+                  <div className="space-y-4">
+                    {/* Profile Showcase Hero Card with Cover Background */}
+                    <div className="rounded-2xl border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#141418] shadow-surface overflow-hidden">
+                      {/* Architectural Cover Banner */}
+                      <div className="relative h-32 overflow-hidden bg-gradient-to-br from-slate-100 via-indigo-50/90 to-sky-100/80 dark:from-[#161829] dark:via-[#11121a] dark:to-[#1b1730] border-b border-zinc-200/70 dark:border-white/[0.07]">
+                        <div className="absolute inset-0 bg-precision-grid-light dark:bg-precision-grid pointer-events-none" />
+                        <div className="absolute -top-12 -left-10 h-40 w-40 rounded-full bg-indigo-400/20 dark:bg-indigo-500/20 blur-3xl pointer-events-none" />
+                        <div className="absolute -bottom-14 right-8 h-44 w-44 rounded-full bg-sky-400/20 dark:bg-sky-500/15 blur-3xl pointer-events-none" />
+
+                        {/* Subtle Precision Dial Watermark */}
+                        <svg
+                          viewBox="0 0 180 180"
+                          className="absolute -right-8 -top-8 h-44 w-44 text-zinc-900/[0.05] dark:text-white/[0.06] pointer-events-none"
+                          fill="none"
+                        >
+                          <circle cx="90" cy="90" r="76" stroke="currentColor" strokeWidth="1" />
+                          <circle
+                            cx="90"
+                            cy="90"
+                            r="56"
+                            stroke="currentColor"
+                            strokeWidth="1"
+                            strokeDasharray="4 4"
+                          />
+                          <circle cx="90" cy="90" r="34" stroke="currentColor" strokeWidth="1" />
+                          <line x1="90" y1="14" x2="90" y2="34" stroke="currentColor" strokeWidth="1.5" />
+                          <line x1="166" y1="90" x2="146" y2="90" stroke="currentColor" strokeWidth="1.5" />
+                        </svg>
+
+                        {/* Session Status Pill */}
+                        <div className="absolute top-3.5 right-4 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/80 dark:bg-white/[0.08] backdrop-blur-md border border-zinc-200/80 dark:border-white/[0.1] text-[11px] font-medium text-zinc-700 dark:text-zinc-200 shadow-hairline">
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          <span>在线 · {formatSessionBadge(adminSessionExpiresAt)}</span>
+                        </div>
+                      </div>
+
+                      {/* Avatar + Identity Bar */}
+                      <div className="px-5 pb-5">
+                        <div className="flex items-end justify-between gap-3 -mt-10">
+                          {/* Avatar with Upload Overlay */}
+                          <div className="relative group shrink-0">
+                            <button
+                              type="button"
+                              onClick={handleUploadAvatar}
+                              title="更换头像"
+                              className="relative h-20 w-20 rounded-full ring-4 ring-white dark:ring-[#141418] shadow-elevated overflow-hidden bg-gradient-to-br from-zinc-900 to-zinc-700 dark:from-indigo-500 dark:to-sky-500 text-white flex items-center justify-center focus:outline-none"
+                            >
+                              {avatarPreview ? (
+                                <img
+                                  src={avatarPreview}
+                                  alt="头像"
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <span className="text-2xl font-semibold uppercase tracking-tight">
+                                  {(settings.adminUsername || "A").slice(0, 1)}
+                                </span>
+                              )}
+                              <span className="absolute inset-0 bg-black/45 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                <Camera className="h-5 w-5 text-white" />
+                              </span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleUploadAvatar}
+                              title="更换头像"
+                              className="absolute bottom-0 right-0 h-6 w-6 rounded-full bg-zinc-900 hover:bg-zinc-700 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 ring-2 ring-white dark:ring-[#141418] flex items-center justify-center shadow-sm transition"
+                            >
+                              <Camera className="h-3 w-3" />
+                            </button>
+                          </div>
+
+                          {!editingProfile && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProfileUsername(settings.adminUsername);
+                                setProfileTitle(settings.adminTitle || "系统管理员");
+                                setEditingProfile(true);
+                              }}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
+                            >
+                              <Edit3 className="h-3.5 w-3.5" />
+                              <span>编辑资料</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Displayed Name & Admin Title Badge */}
+                        <div className="mt-3.5 flex items-center gap-2.5 flex-wrap">
+                          <h3 className="text-lg font-semibold text-zinc-950 dark:text-white tracking-tight">
+                            {settings.adminUsername || "未设置"}
+                          </h3>
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-indigo-500/10 dark:bg-indigo-400/15 border border-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-[11px] font-medium">
+                            <ShieldCheck className="h-3 w-3" />
+                            <span>{settings.adminTitle || "系统管理员"}</span>
+                          </span>
+                        </div>
+
+                        {/* Expandable Profile Edit Form */}
+                        <AnimatePresence initial={false}>
+                          {editingProfile && (
+                            <motion.form
+                              key="profile-edit-form"
+                              initial={{ height: 0, opacity: 0 }}
+                              animate={{ height: "auto", opacity: 1 }}
+                              exit={{ height: 0, opacity: 0 }}
+                              transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                              onSubmit={handleSaveProfile}
+                              className="overflow-hidden"
+                            >
+                              <div className="mt-4 pt-4 border-t border-zinc-200/80 dark:border-white/[0.08] space-y-3.5">
+                                <div className="grid grid-cols-2 gap-3">
+                                  <div>
+                                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                                      用户名
+                                    </label>
+                                    <input
+                                      type="text"
+                                      required
+                                      minLength={2}
+                                      maxLength={32}
+                                      value={profileUsername}
+                                      onChange={(e) => setProfileUsername(e.target.value)}
+                                      className={INPUT_CLS}
+                                    />
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                                      管理员称号
+                                    </label>
+                                    <input
+                                      type="text"
+                                      maxLength={24}
+                                      placeholder="如：系统管理员"
+                                      value={profileTitle}
+                                      onChange={(e) => setProfileTitle(e.target.value)}
+                                      className={INPUT_CLS}
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center justify-between gap-2 pt-1">
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={handleUploadAvatar}
+                                      className="inline-flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-300 hover:text-zinc-950 dark:hover:text-white transition"
+                                    >
+                                      <Camera className="h-3.5 w-3.5" />
+                                      <span>{avatarPreview ? "更换头像" : "上传头像"}</span>
+                                    </button>
+                                    {avatarPreview && (
+                                      <button
+                                        type="button"
+                                        onClick={handleRemoveAvatar}
+                                        className="inline-flex items-center gap-1 text-xs text-rose-600 dark:text-rose-400 hover:underline transition"
+                                      >
+                                        <Trash2 className="h-3 w-3" />
+                                        <span>移除</span>
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  <div className="flex items-center gap-2">
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setProfileUsername(settings.adminUsername);
+                                        setProfileTitle(settings.adminTitle || "系统管理员");
+                                        setEditingProfile(false);
+                                      }}
+                                      className="px-3.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] transition"
+                                    >
+                                      取消
+                                    </button>
+                                    <button
+                                      type="submit"
+                                      disabled={savingProfile}
+                                      className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                                    >
+                                      <Save className="h-3.5 w-3.5" />
+                                      <span>{savingProfile ? "保存中..." : "保存"}</span>
+                                    </button>
+                                  </div>
+                                </div>
+                              </div>
+                            </motion.form>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+
+                    {/* Password Security Showcase & Edit Card */}
+                    <div className="rounded-2xl border border-zinc-200/85 dark:border-white/[0.08] bg-zinc-50/50 dark:bg-white/[0.02] overflow-hidden">
+                      <div className="px-5 py-4 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-9 w-9 rounded-xl bg-white dark:bg-white/[0.06] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-center text-indigo-500 shrink-0">
+                            <KeyRound className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <div className="text-xs font-semibold text-zinc-900 dark:text-white">
+                              登录密码
+                            </div>
+                            <div className="text-xs font-mono tracking-widest text-zinc-400 dark:text-zinc-500 mt-0.5">
+                              ••••••••
+                            </div>
+                          </div>
+                        </div>
+
+                        {!editingPassword && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingPassword(true)}
+                            className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition shrink-0"
+                          >
+                            修改密码
+                          </button>
+                        )}
+                      </div>
+
+                      <AnimatePresence initial={false}>
+                        {editingPassword && (
+                          <motion.form
+                            key="password-edit-form"
+                            initial={{ height: 0, opacity: 0 }}
+                            animate={{ height: "auto", opacity: 1 }}
+                            exit={{ height: 0, opacity: 0 }}
+                            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
+                            onSubmit={handleChangePassword}
+                            className="overflow-hidden"
+                          >
+                            <div className="px-5 pb-5 pt-4 border-t border-zinc-200/80 dark:border-white/[0.07] bg-white dark:bg-[#141418] space-y-3.5">
+                              <div>
+                                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                                  原密码
+                                </label>
+                                <input
+                                  type="password"
+                                  required
+                                  value={oldPassword}
+                                  onChange={(e) => setOldPassword(e.target.value)}
+                                  className={INPUT_CLS}
+                                />
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3">
+                                <div>
+                                  <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                                    新密码
+                                  </label>
+                                  <input
+                                    type="password"
+                                    required
+                                    minLength={6}
+                                    placeholder="至少 6 位"
+                                    value={newPassword}
+                                    onChange={(e) => setNewPassword(e.target.value)}
+                                    className={INPUT_CLS}
+                                  />
+                                </div>
+                                <div>
+                                  <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                                    确认密码
+                                  </label>
+                                  <input
+                                    type="password"
+                                    required
+                                    minLength={6}
+                                    value={confirmPassword}
+                                    onChange={(e) => setConfirmPassword(e.target.value)}
+                                    className={INPUT_CLS}
+                                  />
+                                </div>
+                              </div>
+
+                              <div className="flex justify-end gap-2 pt-1">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setOldPassword("");
+                                    setNewPassword("");
+                                    setConfirmPassword("");
+                                    setEditingPassword(false);
+                                  }}
+                                  className="px-3.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] transition"
+                                >
+                                  取消
+                                </button>
+                                <button
+                                  type="submit"
+                                  disabled={savingPwd}
+                                  className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                                >
+                                  <Save className="h-3.5 w-3.5" />
+                                  <span>{savingPwd ? "保存中..." : "保存"}</span>
+                                </button>
+                              </div>
+                            </div>
+                          </motion.form>
+                        )}
+                      </AnimatePresence>
+                    </div>
+                  </div>
+                )}
+
                 {tab === "general" && isAdmin && (
                   <form onSubmit={handleSaveGeneral} className="space-y-4">
                     <div>
@@ -698,46 +1130,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   />
                 )}
 
-                {tab === "security" && isAdmin && (
+                {tab === "applock" && isAdmin && (
                   <div className="space-y-4">
-                    {/* 1. Admin Session Persistence */}
-                    <div className="px-4 py-3.5 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                          保持管理员登录状态
-                        </span>
-                        <InfoTip content="个人电脑推荐。开启后重启软件自动保持管理员权限；关闭后下次启动默认进入只读模式。" />
-                      </div>
-                      <button
-                        type="button"
-                        role="switch"
-                        aria-checked={settings.keepAdminSession}
-                        disabled={savingSecurityPref}
-                        onClick={() =>
-                          handlePatchSecuritySetting(
-                            { keepAdminSession: !settings.keepAdminSession },
-                            !settings.keepAdminSession
-                              ? "已开启管理员登录状态保持"
-                              : "已关闭登录保持，下次退出重开后需重新登录管理员"
-                          )
-                        }
-                        className={cn(
-                          "relative inline-flex h-6 w-10 shrink-0 rounded-full border-2 border-transparent transition-colors cursor-pointer",
-                          settings.keepAdminSession
-                            ? "bg-zinc-900 dark:bg-white"
-                            : "bg-zinc-300 dark:bg-zinc-700"
-                        )}
-                      >
-                        <span
-                          className={cn(
-                            "pointer-events-none inline-block h-5 w-5 rounded-full bg-white dark:bg-zinc-950 shadow transform transition",
-                            settings.keepAdminSession ? "translate-x-4" : "translate-x-0"
-                          )}
-                        />
-                      </button>
-                    </div>
-
-                    {/* 2. Independent App Lock (4-6 Digit PIN) */}
+                    {/* Independent App Lock (4-6 Digit PIN) */}
                     <div className="p-4 rounded-xl border border-zinc-200/85 dark:border-white/[0.09] bg-white dark:bg-white/[0.02] space-y-4">
                       <div className="flex items-center justify-between gap-3 flex-wrap">
                         <div className="flex items-center gap-2 flex-wrap">
@@ -891,84 +1286,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </>
                       )}
                     </div>
-
-                    <form
-                      onSubmit={handleChangePassword}
-                      className="p-4 rounded-xl border border-zinc-200/80 dark:border-white/[0.08] space-y-3.5"
-                    >
-                      <div className="flex items-center gap-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                        <KeyRound className="h-4 w-4 text-indigo-500" />
-                        <span>修改账号与密码</span>
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                          用户名
-                        </label>
-                        <input
-                          type="text"
-                          required
-                          minLength={2}
-                          maxLength={32}
-                          value={newUsername}
-                          onChange={(e) => setNewUsername(e.target.value)}
-                          className={INPUT_CLS}
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                          原密码
-                        </label>
-                        <input
-                          type="password"
-                          required
-                          value={oldPassword}
-                          onChange={(e) => setOldPassword(e.target.value)}
-                          className={INPUT_CLS}
-                        />
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-3">
-                        <div>
-                          <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                            新密码
-                          </label>
-                          <input
-                            type="password"
-                            required
-                            minLength={6}
-                            placeholder="至少 6 位"
-                            value={newPassword}
-                            onChange={(e) => setNewPassword(e.target.value)}
-                            className={INPUT_CLS}
-                          />
-                        </div>
-                        <div>
-                          <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                            确认密码
-                          </label>
-                          <input
-                            type="password"
-                            required
-                            minLength={6}
-                            value={confirmPassword}
-                            onChange={(e) => setConfirmPassword(e.target.value)}
-                            className={INPUT_CLS}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end">
-                        <button
-                          type="submit"
-                          disabled={savingPwd}
-                          className="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold transition"
-                        >
-                          {savingPwd ? "保存中..." : "确定"}
-                        </button>
-                      </div>
-                    </form>
                   </div>
                 )}
 

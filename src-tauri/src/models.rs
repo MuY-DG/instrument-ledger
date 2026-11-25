@@ -110,6 +110,8 @@ pub struct WarningThreshold {
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub admin_username: String,
+    pub admin_title: String,
+    pub admin_avatar_path: String,
     pub warning_days: i64,
     pub warning_thresholds: Vec<WarningThreshold>,
     pub alert_popup_enabled: bool,
@@ -118,6 +120,7 @@ pub struct AppSettings {
     pub auto_lock_minutes: i64,
     pub close_behavior: String,
     pub keep_admin_session: bool,
+    pub admin_session_days: i64,
     pub app_lock_enabled: bool,
     pub app_lock_pin_length: usize,
     pub lock_on_hide: bool,
@@ -135,6 +138,8 @@ pub struct AppSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsUpdateInput {
+    pub admin_username: Option<String>,
+    pub admin_title: Option<String>,
     pub warning_days: Option<i64>,
     pub warning_thresholds: Option<Vec<WarningThreshold>>,
     pub alert_popup_enabled: Option<bool>,
@@ -143,6 +148,7 @@ pub struct SettingsUpdateInput {
     pub auto_lock_minutes: Option<i64>,
     pub close_behavior: Option<String>,
     pub keep_admin_session: Option<bool>,
+    pub admin_session_days: Option<i64>,
     pub lock_on_hide: Option<bool>,
     pub lock_on_startup: Option<bool>,
     pub doc_code: Option<String>,
@@ -163,6 +169,7 @@ pub struct AuthStatus {
     pub is_locked: bool,
     pub app_lock_enabled: bool,
     pub app_lock_pin_length: usize,
+    pub admin_session_expires_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

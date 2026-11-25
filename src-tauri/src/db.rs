@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use chrono::{Duration, Months, NaiveDate, Utc};
+use chrono::{DateTime, Duration, Months, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::auth::verify_password;
@@ -102,6 +102,8 @@ pub const DEFAULT_GITHUB_REPO: &str = "MuY-DG/instrument-ledger";
 pub const DEFAULT_UPDATE_PROXY_URL: &str = "https://gh-proxy.com/";
 pub const DEFAULT_ALERT_POPUP_FREQUENCY: &str = "every_open";
 pub const DEFAULT_CLOSE_BEHAVIOR: &str = "ask";
+pub const DEFAULT_ADMIN_SESSION_DAYS: i64 = 7;
+pub const DEFAULT_ADMIN_TITLE: &str = "系统管理员";
 
 pub fn default_warning_thresholds() -> Vec<WarningThreshold> {
     vec![
@@ -193,6 +195,53 @@ pub fn sanitize_close_behavior(raw: &str) -> String {
     }
 }
 
+pub fn sanitize_admin_session_days(days: i64) -> i64 {
+    days.clamp(1, 365)
+}
+
+pub fn resolve_startup_admin_session(
+    conn: &Connection,
+) -> Result<(bool, Option<DateTime<Utc>>), String> {
+    if !is_account_initialized(conn)? {
+        return Ok((false, None));
+    }
+    let keep_admin = get_setting(conn, "keep_admin_session")?.as_deref() != Some("0");
+    let admin_active = get_setting(conn, "admin_session_active")?.as_deref() == Some("1");
+    if !keep_admin || !admin_active {
+        return Ok((false, None));
+    }
+
+    let raw_expires = get_setting(conn, "admin_session_expires_at")?.unwrap_or_default();
+    if raw_expires.trim().is_empty() {
+        // Migrate legacy persisted sessions that had no expiry timestamp yet
+        let days = get_setting(conn, "admin_session_days")?
+            .and_then(|v| v.parse::<i64>().ok())
+            .map(sanitize_admin_session_days)
+            .unwrap_or(DEFAULT_ADMIN_SESSION_DAYS);
+        let expires_at = Utc::now() + Duration::days(days);
+        set_setting(conn, "admin_session_expires_at", &expires_at.to_rfc3339())?;
+        return Ok((true, Some(expires_at)));
+    }
+
+    match DateTime::parse_from_rfc3339(raw_expires.trim()) {
+        Ok(parsed) => {
+            let expires_utc = parsed.with_timezone(&Utc);
+            if expires_utc > Utc::now() {
+                Ok((true, Some(expires_utc)))
+            } else {
+                set_setting(conn, "admin_session_active", "0")?;
+                set_setting(conn, "admin_session_expires_at", "")?;
+                Ok((false, None))
+            }
+        }
+        Err(_) => {
+            set_setting(conn, "admin_session_active", "0")?;
+            set_setting(conn, "admin_session_expires_at", "")?;
+            Ok((false, None))
+        }
+    }
+}
+
 pub fn is_app_lock_configured(conn: &Connection) -> Result<(bool, usize), String> {
     let enabled = get_setting(conn, "app_lock_enabled")?.as_deref() == Some("1");
     let pin_hash = get_setting(conn, "app_lock_pin_hash")?.unwrap_or_default();
@@ -216,7 +265,9 @@ fn seed_default_settings(conn: &Connection) -> Result<(), String> {
         ("auto_lock_minutes", "0"),
         ("close_behavior", DEFAULT_CLOSE_BEHAVIOR),
         ("keep_admin_session", "1"),
+        ("admin_session_days", "7"),
         ("admin_session_active", "0"),
+        ("admin_session_expires_at", ""),
         ("app_lock_enabled", "0"),
         ("app_lock_pin_hash", ""),
         ("app_lock_pin_length", "0"),
@@ -237,6 +288,8 @@ fn seed_default_settings(conn: &Connection) -> Result<(), String> {
         ("github_repo", DEFAULT_GITHUB_REPO),
         ("update_proxy_url", DEFAULT_UPDATE_PROXY_URL),
         ("company_logo_path", ""),
+        ("admin_title", DEFAULT_ADMIN_TITLE),
+        ("admin_avatar_path", ""),
     ];
 
     for (key, value) in defaults {
@@ -338,12 +391,25 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         .clamp(1, 168);
     let close_behavior = sanitize_close_behavior(&get_or("close_behavior", DEFAULT_CLOSE_BEHAVIOR));
     let keep_admin_session = get_or("keep_admin_session", "1") != "0";
+    let admin_session_days = get_or("admin_session_days", &DEFAULT_ADMIN_SESSION_DAYS.to_string())
+        .parse::<i64>()
+        .map(sanitize_admin_session_days)
+        .unwrap_or(DEFAULT_ADMIN_SESSION_DAYS);
     let (app_lock_enabled, app_lock_pin_length) = is_app_lock_configured(conn)?;
     let lock_on_hide = get_or("lock_on_hide", "0") == "1";
     let lock_on_startup = get_or("lock_on_startup", "0") == "1";
 
     Ok(AppSettings {
         admin_username: get_or("admin_username", ""),
+        admin_title: {
+            let t = get_or("admin_title", DEFAULT_ADMIN_TITLE);
+            if t.trim().is_empty() {
+                DEFAULT_ADMIN_TITLE.to_string()
+            } else {
+                t
+            }
+        },
+        admin_avatar_path: get_or("admin_avatar_path", ""),
         warning_days,
         warning_thresholds,
         alert_popup_enabled,
@@ -352,6 +418,7 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         auto_lock_minutes: get_or("auto_lock_minutes", "0").parse().unwrap_or(0),
         close_behavior,
         keep_admin_session,
+        admin_session_days,
         app_lock_enabled,
         app_lock_pin_length,
         lock_on_hide,
@@ -674,6 +741,53 @@ mod tests {
         let s2 = load_app_settings(&conn).unwrap();
         assert!(s2.app_lock_enabled);
         assert_eq!(s2.app_lock_pin_length, 4);
+        assert_eq!(s2.admin_session_days, DEFAULT_ADMIN_SESSION_DAYS);
+        assert_eq!(s2.admin_title, DEFAULT_ADMIN_TITLE);
+        assert_eq!(s2.admin_avatar_path, "");
+
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_timed_admin_session_restore_and_expiry() {
+        use crate::auth::hash_password;
+        let root = std::env::temp_dir().join(format!("inst_sess_test_{}", uuid::Uuid::new_v4()));
+        let db_path = root.join("ledger.db");
+
+        let conn = init_db(&db_path).expect("init_db failed");
+        let hash = hash_password("SecurePass#1").unwrap();
+        set_setting(&conn, "admin_username", "qa").unwrap();
+        set_setting(&conn, "admin_password_hash", &hash).unwrap();
+        set_setting(&conn, "account_initialized", "1").unwrap();
+        set_setting(&conn, "keep_admin_session", "1").unwrap();
+
+        // 1. Legacy active session without expiry migrates cleanly to 7 days
+        set_setting(&conn, "admin_session_active", "1").unwrap();
+        set_setting(&conn, "admin_session_expires_at", "").unwrap();
+        let (restored, exp) = resolve_startup_admin_session(&conn).unwrap();
+        assert!(restored);
+        assert!(exp.is_some());
+        assert!(exp.unwrap() > Utc::now() + Duration::days(6));
+
+        // 2. Expired timestamp revokes and clears DB flags
+        let past = (Utc::now() - Duration::hours(2)).to_rfc3339();
+        set_setting(&conn, "admin_session_active", "1").unwrap();
+        set_setting(&conn, "admin_session_expires_at", &past).unwrap();
+        let (restored2, exp2) = resolve_startup_admin_session(&conn).unwrap();
+        assert!(!restored2);
+        assert!(exp2.is_none());
+        assert_eq!(
+            get_setting(&conn, "admin_session_active").unwrap().as_deref(),
+            Some("0")
+        );
+
+        // 3. Valid future timestamp restores session
+        let future = (Utc::now() + Duration::days(15)).to_rfc3339();
+        set_setting(&conn, "admin_session_active", "1").unwrap();
+        set_setting(&conn, "admin_session_expires_at", &future).unwrap();
+        let (restored3, exp3) = resolve_startup_admin_session(&conn).unwrap();
+        assert!(restored3);
+        assert!(exp3.is_some());
 
         let _ = std::fs::remove_dir_all(&root);
     }

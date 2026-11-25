@@ -4,6 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 
 use base64::Engine;
+use chrono::{Duration, Utc};
 use rusqlite::{params, Connection};
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -14,8 +15,9 @@ use crate::backup::{create_backup, restore_backup};
 use crate::db::{
     calc_next_cal_date, get_setting, is_account_initialized, is_app_lock_configured,
     load_app_settings, now_iso, query_instrument_by_id, query_instruments,
-    query_reports_for_instrument, sanitize_close_behavior, sanitize_popup_frequency,
-    sanitize_warning_thresholds, set_setting,
+    query_reports_for_instrument, sanitize_admin_session_days, sanitize_close_behavior,
+    sanitize_popup_frequency, sanitize_warning_thresholds, set_setting,
+    DEFAULT_ADMIN_SESSION_DAYS, DEFAULT_ADMIN_TITLE,
 };
 use crate::models::{
     AddReportInput, AppSettings, AuthStatus, BackupResult, CalibrationReport, DataDirInfo,
@@ -55,7 +57,14 @@ fn check_unlocked(state: &State<'_, AppState>) -> Result<(), String> {
 }
 
 fn check_admin(state: &State<'_, AppState>) -> Result<(), String> {
-    let session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    if session.check_and_expire() {
+        if let Ok(conn) = state.db.lock() {
+            let _ = set_setting(&conn, "admin_session_active", "0");
+            let _ = set_setting(&conn, "admin_session_expires_at", "");
+        }
+        return Err("管理员登录已过期，请重新登录".to_string());
+    }
     session.require_admin()
 }
 
@@ -71,14 +80,20 @@ pub fn build_auth_status(conn: &Connection, session: &SessionState) -> Result<Au
     } else {
         (false, 0)
     };
+    let is_admin = initialized && session.is_admin;
 
     Ok(AuthStatus {
         is_initialized: initialized,
-        is_admin: initialized && session.is_admin,
+        is_admin,
         username,
         is_locked: initialized && app_lock_enabled && session.is_locked,
         app_lock_enabled,
         app_lock_pin_length,
+        admin_session_expires_at: if is_admin {
+            session.admin_expires_at.map(|dt| dt.to_rfc3339())
+        } else {
+            None
+        },
     })
 }
 
@@ -87,6 +102,21 @@ fn emit_auth_status(app: &AppHandle, status: &AuthStatus) {
 }
 
 pub fn show_main_window(app: &AppHandle) {
+    let state = app.state::<AppState>();
+    let expired_status = (|| -> Option<AuthStatus> {
+        let mut session = state.session.lock().ok()?;
+        if !session.check_and_expire() {
+            return None;
+        }
+        let conn = state.db.lock().ok()?;
+        let _ = set_setting(&conn, "admin_session_active", "0");
+        let _ = set_setting(&conn, "admin_session_expires_at", "");
+        build_auth_status(&conn, &session).ok()
+    })();
+    if let Some(status) = expired_status {
+        emit_auth_status(app, &status);
+    }
+
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.unminimize();
         let _ = window.show();
@@ -156,8 +186,12 @@ pub fn lock_app_from_tray(app: &AppHandle) {
 
 #[tauri::command]
 pub fn get_auth_status(state: State<'_, AppState>) -> Result<AuthStatus, String> {
-    let session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if session.check_and_expire() {
+        let _ = set_setting(&conn, "admin_session_active", "0");
+        let _ = set_setting(&conn, "admin_session_expires_at", "");
+    }
     build_auth_status(&conn, &session)
 }
 
@@ -184,12 +218,19 @@ pub fn setup_initial_admin(
     }
 
     let pwd_hash = hash_password(&password)?;
+    let expires_at = Utc::now() + Duration::days(DEFAULT_ADMIN_SESSION_DAYS);
     set_setting(&conn, "admin_username", &clean_user)?;
     set_setting(&conn, "admin_password_hash", &pwd_hash)?;
     set_setting(&conn, "account_initialized", "1")?;
     set_setting(&conn, "must_change_password", "0")?;
     set_setting(&conn, "keep_admin_session", "1")?;
+    set_setting(
+        &conn,
+        "admin_session_days",
+        &DEFAULT_ADMIN_SESSION_DAYS.to_string(),
+    )?;
     set_setting(&conn, "admin_session_active", "1")?;
+    set_setting(&conn, "admin_session_expires_at", &expires_at.to_rfc3339())?;
 
     if let Some(title) = doc_title {
         let t = title.trim();
@@ -207,6 +248,7 @@ pub fn setup_initial_admin(
     let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
     session.is_admin = true;
     session.is_locked = false;
+    session.admin_expires_at = Some(expires_at);
 
     build_auth_status(&conn, &session)
 }
@@ -217,6 +259,7 @@ pub fn admin_login(
     username: String,
     password: String,
     remember: Option<bool>,
+    remember_days: Option<i64>,
 ) -> Result<AuthStatus, String> {
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
     if !is_account_initialized(&conn)? {
@@ -237,10 +280,33 @@ pub fn admin_login(
         }
         None => get_setting(&conn, "keep_admin_session")?.as_deref() != Some("0"),
     };
-    set_setting(&conn, "admin_session_active", if keep { "1" } else { "0" })?;
+
+    let days = match remember_days {
+        Some(d) => {
+            let clean = sanitize_admin_session_days(d);
+            set_setting(&conn, "admin_session_days", &clean.to_string())?;
+            clean
+        }
+        None => get_setting(&conn, "admin_session_days")?
+            .and_then(|s| s.parse::<i64>().ok())
+            .map(sanitize_admin_session_days)
+            .unwrap_or(DEFAULT_ADMIN_SESSION_DAYS),
+    };
+
+    let expires_at = if keep {
+        let exp = Utc::now() + Duration::days(days);
+        set_setting(&conn, "admin_session_active", "1")?;
+        set_setting(&conn, "admin_session_expires_at", &exp.to_rfc3339())?;
+        Some(exp)
+    } else {
+        set_setting(&conn, "admin_session_active", "0")?;
+        set_setting(&conn, "admin_session_expires_at", "")?;
+        None
+    };
 
     let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
     session.is_admin = true;
+    session.admin_expires_at = expires_at;
 
     build_auth_status(&conn, &session)
 }
@@ -249,9 +315,11 @@ pub fn admin_login(
 pub fn admin_logout(state: State<'_, AppState>) -> Result<AuthStatus, String> {
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
     set_setting(&conn, "admin_session_active", "0")?;
+    set_setting(&conn, "admin_session_expires_at", "")?;
 
     let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
     session.is_admin = false;
+    session.admin_expires_at = None;
 
     build_auth_status(&conn, &session)
 }
@@ -1057,6 +1125,23 @@ pub fn update_settings(
 ) -> Result<AppSettings, String> {
     check_admin(&state)?;
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if let Some(u) = input.admin_username {
+        let trimmed = u.trim();
+        let len = trimmed.chars().count();
+        if !(2..=32).contains(&len) {
+            return Err("用户名长度需在 2 到 32 个字符之间".to_string());
+        }
+        set_setting(&conn, "admin_username", trimmed)?;
+    }
+    if let Some(t) = input.admin_title {
+        let trimmed = t.trim();
+        let final_title: String = if trimmed.is_empty() {
+            DEFAULT_ADMIN_TITLE.to_string()
+        } else {
+            trimmed.chars().take(24).collect()
+        };
+        set_setting(&conn, "admin_title", &final_title)?;
+    }
     if let Some(w) = input.warning_days {
         set_setting(&conn, "warning_days", &w.clamp(1, 3650).to_string())?;
     }
@@ -1087,18 +1172,22 @@ pub fn update_settings(
     if let Some(behavior) = input.close_behavior {
         set_setting(&conn, "close_behavior", &sanitize_close_behavior(&behavior))?;
     }
-    if let Some(keep) = input.keep_admin_session {
-        set_setting(&conn, "keep_admin_session", if keep { "1" } else { "0" })?;
-        let is_currently_admin = state
-            .session
-            .lock()
-            .map(|s| s.is_admin)
-            .unwrap_or(false);
+    if let Some(days) = input.admin_session_days {
         set_setting(
             &conn,
-            "admin_session_active",
-            if keep && is_currently_admin { "1" } else { "0" },
+            "admin_session_days",
+            &sanitize_admin_session_days(days).to_string(),
         )?;
+    }
+    if let Some(keep) = input.keep_admin_session {
+        set_setting(&conn, "keep_admin_session", if keep { "1" } else { "0" })?;
+        if !keep {
+            set_setting(&conn, "admin_session_active", "0")?;
+            set_setting(&conn, "admin_session_expires_at", "")?;
+            if let Ok(mut s) = state.session.lock() {
+                s.admin_expires_at = None;
+            }
+        }
     }
     if let Some(v) = input.lock_on_hide {
         set_setting(&conn, "lock_on_hide", if v { "1" } else { "0" })?;
@@ -1153,6 +1242,32 @@ pub fn remove_company_logo(state: State<'_, AppState>) -> Result<(), String> {
         remove_stored_file(&state.data_dir, &old);
     }
     set_setting(&conn, "company_logo_path", "")?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn upload_admin_avatar(
+    state: State<'_, AppState>,
+    source_path: String,
+) -> Result<String, String> {
+    check_admin(&state)?;
+    let new_rel = save_image_from_path(&state.data_dir, Path::new(source_path.trim()))?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if let Ok(Some(old)) = get_setting(&conn, "admin_avatar_path") {
+        remove_stored_file(&state.data_dir, &old);
+    }
+    set_setting(&conn, "admin_avatar_path", &new_rel)?;
+    Ok(new_rel)
+}
+
+#[tauri::command]
+pub fn remove_admin_avatar(state: State<'_, AppState>) -> Result<(), String> {
+    check_admin(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if let Ok(Some(old)) = get_setting(&conn, "admin_avatar_path") {
+        remove_stored_file(&state.data_dir, &old);
+    }
+    set_setting(&conn, "admin_avatar_path", "")?;
     Ok(())
 }
 

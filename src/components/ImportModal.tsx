@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
 import {
   base64ToArrayBuffer,
@@ -77,9 +78,11 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const handleConfirmImport = async () => {
     if (!parsed || parsed.rows.length === 0) return;
     if (replaceExisting && existingCount > 0) {
-      const ok = window.confirm(
-        `注意：选择「清空并全量替换」将删除当前已有的 ${existingCount} 条台账记录及其关联附件！确认继续吗？`
-      );
+      const ok = await confirmDialog({
+        title: "覆盖替换台账",
+        description: `将清空现有 ${existingCount} 条记录及关联附件并导入新数据，确定继续？`,
+        destructive: true,
+      });
       if (!ok) return;
     }
 

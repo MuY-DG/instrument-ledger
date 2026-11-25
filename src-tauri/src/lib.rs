@@ -20,8 +20,8 @@ use crate::commands::{
     hide_main_window_and_maybe_lock, lock_app_from_tray, show_main_window, AppState,
 };
 use crate::db::{
-    get_setting, init_db, is_account_initialized, is_app_lock_configured, sanitize_close_behavior,
-    set_setting, DEFAULT_CLOSE_BEHAVIOR,
+    get_setting, init_db, is_account_initialized, is_app_lock_configured,
+    resolve_startup_admin_session, sanitize_close_behavior, set_setting, DEFAULT_CLOSE_BEHAVIOR,
 };
 use crate::storage::ensure_storage_dirs;
 
@@ -104,11 +104,9 @@ pub fn run() {
             let db_path = data_dir.join("ledger.db");
             let conn = init_db(&db_path)?;
 
-            // Restore persisted admin session and app-lock state independently
+            // Restore persisted admin session (with expiry validation) and app-lock state independently
             let initialized = is_account_initialized(&conn)?;
-            let keep_admin = get_setting(&conn, "keep_admin_session")?.as_deref() != Some("0");
-            let admin_active = get_setting(&conn, "admin_session_active")?.as_deref() == Some("1");
-            let restore_admin = initialized && keep_admin && admin_active;
+            let (restore_admin, admin_expires_at) = resolve_startup_admin_session(&conn)?;
 
             let (app_lock_ready, _) = is_app_lock_configured(&conn)?;
             let was_locked = get_setting(&conn, "app_lock_active")?.as_deref() == Some("1");
@@ -125,6 +123,7 @@ pub fn run() {
                 session: Mutex::new(SessionState {
                     is_admin: restore_admin,
                     is_locked: start_locked,
+                    admin_expires_at,
                 }),
                 pending_update: Mutex::new(None),
                 allow_exit: AtomicBool::new(false),
@@ -203,6 +202,8 @@ pub fn run() {
             commands::update_settings,
             commands::upload_company_logo,
             commands::remove_company_logo,
+            commands::upload_admin_avatar,
+            commands::remove_admin_avatar,
             commands::get_data_dir_info,
             commands::open_data_dir,
             commands::create_local_backup,

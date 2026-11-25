@@ -41,11 +41,17 @@ export const api = {
       docTitle: docTitle || null,
       docCode: docCode || null,
     }),
-  adminLogin: (username: string, password: string, remember?: boolean) =>
+  adminLogin: (
+    username: string,
+    password: string,
+    remember?: boolean,
+    rememberDays?: number
+  ) =>
     invoke<AuthStatus>("admin_login", {
       username,
       password,
       remember: remember ?? null,
+      rememberDays: rememberDays ?? null,
     }),
   adminLogout: () => invoke<AuthStatus>("admin_logout"),
   configureAppLock: (
@@ -137,6 +143,9 @@ export const api = {
   uploadCompanyLogo: (sourcePath: string) =>
     invoke<string>("upload_company_logo", { sourcePath }),
   removeCompanyLogo: () => invoke<void>("remove_company_logo"),
+  uploadAdminAvatar: (sourcePath: string) =>
+    invoke<string>("upload_admin_avatar", { sourcePath }),
+  removeAdminAvatar: () => invoke<void>("remove_admin_avatar"),
   getDataDirInfo: () => invoke<DataDirInfo>("get_data_dir_info"),
   openDataDir: () => invoke<void>("open_data_dir"),
   createLocalBackup: (destZipPath: string) =>

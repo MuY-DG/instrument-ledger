@@ -163,17 +163,20 @@ interface AdminLoginModalProps {
   open: boolean;
   defaultUsername: string;
   defaultKeepSession?: boolean;
+  defaultSessionDays?: number;
   onClose: () => void;
-  onSuccess: (status: AuthStatus, keepSession: boolean) => void;
+  onSuccess: (status: AuthStatus, keepSession: boolean, sessionDays: number) => void;
 }
 
 export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   open,
   defaultUsername,
   defaultKeepSession = true,
+  defaultSessionDays = 7,
   onClose,
   onSuccess,
 }) => {
+  const sessionDays = defaultSessionDays > 0 ? defaultSessionDays : 7;
   const [username, setUsername] = useState(defaultUsername || "");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(defaultKeepSession);
@@ -197,8 +200,8 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
     setError("");
     setLoading(true);
     try {
-      const status = await api.adminLogin(username, password, remember);
-      onSuccess(status, remember);
+      const status = await api.adminLogin(username, password, remember, sessionDays);
+      onSuccess(status, remember, sessionDays);
       onClose();
     } catch (err) {
       setError(String(err));
@@ -291,9 +294,11 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-600 accent-zinc-900 dark:accent-white"
                 />
                 <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
-                  保持管理员登录状态
+                  {sessionDays} 天内保持登录
                 </span>
-                <InfoTip content="个人电脑推荐。关闭或重启软件后自动保持登录，无需每次重输密码；可随时在侧边栏退出。" />
+                <InfoTip
+                  content={`勾选后 ${sessionDays} 天内重启软件无需重输密码，到期自动恢复只读；可随时在侧边栏退出。`}
+                />
               </label>
 
               {error && (
@@ -573,7 +578,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                 <div className="p-3.5 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.07] space-y-3">
                   <div className="flex items-center gap-1.5 text-[11.5px] font-semibold text-zinc-700 dark:text-zinc-200">
                     <span>触发时机</span>
-                    <InfoTip content="后续可随时在「设置 → 账号与锁屏」调整" />
+                    <InfoTip content="后续可随时在「设置 → 应用锁」调整" />
                   </div>
 
                   <div className="flex items-center justify-between gap-2">
