@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { Command } from "cmdk";
 import { ModalShell } from "@/components/ui/MotionPrimitives";
+import { KeycapBadge } from "@/components/ui/InteractiveControls";
 import {
   BellRing,
   CloudDownload,
@@ -108,9 +109,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
             placeholder="搜索设备或命令..."
             className="w-full py-3.5 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none"
           />
-          <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded-md bg-white dark:bg-white/[0.07] text-zinc-500 dark:text-zinc-400 border border-zinc-200/90 dark:border-white/[0.08] shadow-[0_1px_0_rgba(15,23,42,0.06)]">
-            ESC
-          </kbd>
+          <KeycapBadge onClick={onClose}>ESC</KeycapBadge>
         </div>
 
               <Command.List className="max-h-[380px] overflow-y-auto p-2 space-y-2">
@@ -212,7 +211,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <Lock className="h-3.5 w-3.5 text-amber-500" />
                       <span>立即锁屏</span>
                     </span>
-                    <kbd className="text-[10px] font-mono text-zinc-400">⌘L</kbd>
+                    <KeycapBadge>⌘L</KeycapBadge>
                   </Command.Item>
 
                   <Command.Item

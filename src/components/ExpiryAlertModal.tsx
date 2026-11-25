@@ -216,15 +216,22 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                     transition={SPRING_SNAPPY}
                     onClick={() => setSelectedTier("all")}
                     className={cn(
-                      "min-w-[104px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0",
+                      "relative min-w-[104px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0",
                       selectedTier === "all"
-                        ? "border-zinc-900 dark:border-white bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 shadow-tactile-primary"
+                        ? "border-transparent bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 shadow-tactile-primary"
                         : "border-zinc-200/95 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] shadow-tactile hover:border-zinc-300 dark:hover:border-white/[0.15]"
                     )}
                   >
+                    {selectedTier === "all" && (
+                      <motion.span
+                        layoutId="alert-tier-active-ring"
+                        transition={SPRING_SNAPPY}
+                        className="pointer-events-none absolute -inset-px rounded-xl border-2 border-zinc-900 dark:border-white"
+                      />
+                    )}
                     <div
                       className={cn(
-                        "text-[11px] font-medium",
+                        "relative z-10 text-[11px] font-medium",
                         selectedTier === "all"
                           ? "text-zinc-300 dark:text-zinc-600"
                           : "text-zinc-500 dark:text-zinc-400"
@@ -232,7 +239,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                     >
                       全部预警
                     </div>
-                    <div className="mt-1 text-lg font-semibold font-mono leading-none">
+                    <div className="relative z-10 mt-1 text-lg font-semibold font-mono leading-none">
                       <SlidingNumber value={summary.totalAlertCount} />
                     </div>
                   </motion.button>
@@ -244,17 +251,24 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                     transition={SPRING_SNAPPY}
                     onClick={() => setSelectedTier("expired")}
                     className={cn(
-                      "min-w-[112px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0",
+                      "relative min-w-[112px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0",
                       selectedTier === "expired"
-                        ? "border-rose-500 bg-rose-500/[0.12] dark:bg-rose-500/[0.18] ring-1 ring-rose-500/35 shadow-tactile"
+                        ? "border-transparent bg-rose-500/[0.12] dark:bg-rose-500/[0.18] shadow-tactile"
                         : "border-zinc-200/95 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] shadow-tactile hover:border-rose-300 dark:hover:border-rose-500/35"
                     )}
                   >
-                    <div className="flex items-center gap-1.5 text-[11px] font-medium text-rose-600 dark:text-rose-400">
+                    {selectedTier === "expired" && (
+                      <motion.span
+                        layoutId="alert-tier-active-ring"
+                        transition={SPRING_SNAPPY}
+                        className="pointer-events-none absolute -inset-px rounded-xl border-2 border-rose-500"
+                      />
+                    )}
+                    <div className="relative z-10 flex items-center gap-1.5 text-[11px] font-medium text-rose-600 dark:text-rose-400">
                       <span className="h-2 w-2 rounded-full bg-rose-500 shrink-0" />
                       <span>已超期</span>
                     </div>
-                    <div className="mt-1 flex items-baseline gap-1">
+                    <div className="relative z-10 mt-1 flex items-baseline gap-1">
                       <SlidingNumber
                         value={summary.expired.length}
                         className="text-lg font-semibold font-mono leading-none text-zinc-950 dark:text-white"
@@ -274,18 +288,23 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                         whileTap={TAP_SCALE}
                         transition={SPRING_SNAPPY}
                         onClick={() => setSelectedTier(group.threshold.id)}
-                        style={{
-                          ...visuals.cssVars,
-                          borderColor: active ? visuals.hex : undefined,
-                        }}
+                        style={visuals.cssVars}
                         className={cn(
-                          "min-w-[120px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0 shadow-tactile",
+                          "relative min-w-[120px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0 shadow-tactile",
                           active
-                            ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)]"
+                            ? "border-transparent bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)]"
                             : "border-zinc-200/95 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] hover:bg-[var(--tier-bg)] dark:hover:bg-[var(--tier-bg-dark)]"
                         )}
                       >
-                        <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]">
+                        {active && (
+                          <motion.span
+                            layoutId="alert-tier-active-ring"
+                            transition={SPRING_SNAPPY}
+                            style={{ borderColor: visuals.hex }}
+                            className="pointer-events-none absolute -inset-px rounded-xl border-2"
+                          />
+                        )}
+                        <div className="relative z-10 flex items-center gap-1.5 text-[11px] font-medium text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]">
                           <span
                             className="h-2 w-2 rounded-full shrink-0"
                             style={{
@@ -297,7 +316,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                             {group.threshold.label}
                           </span>
                         </div>
-                        <div className="mt-1 flex items-baseline justify-between gap-2">
+                        <div className="relative z-10 mt-1 flex items-baseline justify-between gap-2">
                           <div className="flex items-baseline gap-1">
                             <SlidingNumber
                               value={group.items.length}

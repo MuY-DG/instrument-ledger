@@ -1,6 +1,8 @@
 import React, { useMemo } from "react";
+import { motion } from "motion/react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PrecisionSelect, type SelectOption } from "@/components/ui/FormControls";
+import { SPRING_SNAPPY, TAP_SCALE_ICON } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
 export type PageSizeOption = 30 | 50 | 100 | 200 | "all";
@@ -128,20 +130,29 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
             }
             const active = token === currentPage;
             return (
-              <button
+              <motion.button
                 key={token}
                 type="button"
+                whileTap={TAP_SCALE_ICON}
+                transition={SPRING_SNAPPY}
                 aria-current={active ? "page" : undefined}
                 onClick={() => onPageChange(token)}
                 className={cn(
-                  "btn-tactile min-w-[26px] h-7 px-1.5 rounded-lg font-mono tabular-nums text-[11px] inline-flex items-center justify-center transition-colors",
+                  "relative min-w-[26px] h-7 px-1.5 rounded-lg font-mono tabular-nums text-[11px] inline-flex items-center justify-center transition-colors",
                   active
-                    ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 font-semibold shadow-tactile-primary"
+                    ? "text-white dark:text-zinc-950 font-semibold"
                     : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-200/70 dark:hover:bg-white/[0.08]"
                 )}
               >
-                {token}
-              </button>
+                {active && (
+                  <motion.span
+                    layoutId="pagination-active-pill"
+                    transition={SPRING_SNAPPY}
+                    className="absolute inset-0 rounded-lg bg-zinc-900 dark:bg-white shadow-tactile-primary"
+                  />
+                )}
+                <span className="relative z-10">{token}</span>
+              </motion.button>
             );
           })}
 

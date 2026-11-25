@@ -4,6 +4,7 @@ import { AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
 import { ModalShell } from "@/components/ui/MotionPrimitives";
+import { HoldConfirmButton } from "@/components/ui/InteractiveControls";
 
 export interface ConfirmOptions {
   title: string;
@@ -11,6 +12,9 @@ export interface ConfirmOptions {
   confirmText?: string;
   cancelText?: string;
   destructive?: boolean;
+  /** Require press-and-hold confirmation for high-risk destructive actions */
+  holdToConfirm?: boolean;
+  holdDurationMs?: number;
 }
 
 interface PendingConfirm extends ConfirmOptions {
@@ -136,31 +140,47 @@ export const ConfirmDialogHost: React.FC = () => {
             </div>
           </div>
 
-          <div className="px-5 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-end gap-2">
-            <motion.button
-              ref={cancelBtnRef}
-              type="button"
-              whileTap={TAP_SCALE}
-              transition={SPRING_SNAPPY}
-              onClick={() => settle(false)}
-              className="px-4 py-1.5 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
-            >
-              {displayReq.cancelText || "取消"}
-            </motion.button>
-            <motion.button
-              type="button"
-              whileTap={TAP_SCALE}
-              transition={SPRING_SNAPPY}
-              onClick={() => settle(true)}
-              className={cn(
-                "px-4 py-1.5 rounded-xl text-xs font-semibold shadow-tactile-primary transition-colors",
-                displayReq.destructive
-                  ? "bg-rose-600 hover:bg-rose-500 text-white"
-                  : "bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950"
+          <div className="px-5 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between gap-2">
+            <span className="text-[10.5px] text-zinc-400 dark:text-zinc-500 select-none">
+              {displayReq.holdToConfirm ? "为防误操作，请长按确认" : ""}
+            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <motion.button
+                ref={cancelBtnRef}
+                type="button"
+                whileTap={TAP_SCALE}
+                transition={SPRING_SNAPPY}
+                onClick={() => settle(false)}
+                className="px-4 py-1.5 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
+              >
+                {displayReq.cancelText || "取消"}
+              </motion.button>
+              {displayReq.holdToConfirm ? (
+                <HoldConfirmButton
+                  onConfirm={() => settle(true)}
+                  idleLabel={displayReq.confirmText || "按住确认"}
+                  holdingLabel="继续按住..."
+                  completedLabel="已确认"
+                  holdDurationMs={displayReq.holdDurationMs ?? 880}
+                  variant={displayReq.destructive ? "danger" : "primary"}
+                />
+              ) : (
+                <motion.button
+                  type="button"
+                  whileTap={TAP_SCALE}
+                  transition={SPRING_SNAPPY}
+                  onClick={() => settle(true)}
+                  className={cn(
+                    "px-4 py-1.5 rounded-xl text-xs font-semibold shadow-tactile-primary transition-colors",
+                    displayReq.destructive
+                      ? "bg-rose-600 hover:bg-rose-500 text-white"
+                      : "bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950"
+                  )}
+                >
+                  {displayReq.confirmText || "确定"}
+                </motion.button>
               )}
-            >
-              {displayReq.confirmText || "确定"}
-            </motion.button>
+            </div>
           </div>
         </>
       )}

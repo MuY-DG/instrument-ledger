@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle } from "lucide-react";
+import { useMorphTooltip } from "@/components/ui/MorphTooltip";
 import { cn } from "@/lib/utils";
 
 interface InfoTipProps {
@@ -13,6 +14,7 @@ interface InfoTipProps {
 
 const VIEWPORT_MARGIN = 12;
 const GAP = 8;
+let infoTipSeq = 0;
 
 export const InfoTip: React.FC<InfoTipProps> = ({
   content,
@@ -20,10 +22,19 @@ export const InfoTip: React.FC<InfoTipProps> = ({
   tone = "default",
   className,
 }) => {
+  const morphCtx = useMorphTooltip();
+  const morphCtxRef = useRef(morphCtx);
+  morphCtxRef.current = morphCtx;
+
+  const idRef = useRef<string>("");
+  if (!idRef.current) {
+    infoTipSeq += 1;
+    idRef.current = `infotip-${infoTipSeq}`;
+  }
+
   const triggerRef = useRef<HTMLSpanElement | null>(null);
   const tooltipRef = useRef<HTMLDivElement | null>(null);
   const [hovered, setHovered] = useState(false);
-  const [pinned, setPinned] = useState(false);
   const [focused, setFocused] = useState(false);
   const [coords, setCoords] = useState<{
     top: number;
@@ -31,8 +42,29 @@ export const InfoTip: React.FC<InfoTipProps> = ({
     actualPlacement: "top" | "bottom";
   } | null>(null);
 
-  const visible = hovered || pinned || focused;
+  const visible = hovered || focused;
 
+  // Only hide on actual unmount
+  useEffect(() => {
+    const id = idRef.current;
+    return () => {
+      morphCtxRef.current?.hide(id, true);
+    };
+  }, []);
+
+  // Keep dynamic content synced if currently hovered
+  useEffect(() => {
+    if (!visible || !triggerRef.current) return;
+    morphCtxRef.current?.updateContent({
+      id: idRef.current,
+      anchorEl: triggerRef.current,
+      content,
+      placement,
+      tone,
+    });
+  }, [visible, content, placement, tone]);
+
+  // Fallback standalone positioning when rendered outside MorphTooltipProvider
   const updatePosition = useCallback(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
@@ -69,7 +101,7 @@ export const InfoTip: React.FC<InfoTipProps> = ({
   }, [placement]);
 
   useLayoutEffect(() => {
-    if (!visible) return;
+    if (morphCtx || !visible) return;
     updatePosition();
     const raf = window.requestAnimationFrame(updatePosition);
     window.addEventListener("scroll", updatePosition, true);
@@ -79,32 +111,27 @@ export const InfoTip: React.FC<InfoTipProps> = ({
       window.removeEventListener("scroll", updatePosition, true);
       window.removeEventListener("resize", updatePosition);
     };
-  }, [visible, updatePosition, content]);
-
-  useEffect(() => {
-    if (!pinned) return;
-    const handleOutside = (e: PointerEvent) => {
-      if (triggerRef.current && triggerRef.current.contains(e.target as Node)) {
-        return;
-      }
-      setPinned(false);
-    };
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        setPinned(false);
-        setHovered(false);
-        setFocused(false);
-      }
-    };
-    window.addEventListener("pointerdown", handleOutside, true);
-    window.addEventListener("keydown", handleEsc);
-    return () => {
-      window.removeEventListener("pointerdown", handleOutside, true);
-      window.removeEventListener("keydown", handleEsc);
-    };
-  }, [pinned]);
+  }, [morphCtx, visible, updatePosition, content]);
 
   const ariaLabel = typeof content === "string" ? content : "查看说明";
+
+  const showTip = () => {
+    setHovered(true);
+    if (morphCtxRef.current && triggerRef.current) {
+      morphCtxRef.current.show({
+        id: idRef.current,
+        anchorEl: triggerRef.current,
+        content,
+        placement,
+        tone,
+      });
+    }
+  };
+
+  const hideTip = (immediate = false) => {
+    setHovered(false);
+    morphCtxRef.current?.hide(idRef.current, immediate);
+  };
 
   return (
     <>
@@ -113,31 +140,37 @@ export const InfoTip: React.FC<InfoTipProps> = ({
         role="button"
         tabIndex={0}
         aria-label={ariaLabel}
-        onPointerEnter={(e) => {
-          if (e.pointerType === "mouse") setHovered(true);
-        }}
-        onPointerLeave={(e) => {
-          if (e.pointerType === "mouse") setHovered(false);
-        }}
+        onMouseEnter={showTip}
+        onMouseLeave={() => hideTip(false)}
         onMouseDown={(e) => {
           e.stopPropagation();
         }}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          setPinned((v) => !v);
+          showTip();
         }}
-        onFocus={() => setFocused(true)}
-        onBlur={() => setFocused(false)}
+        onFocus={() => {
+          setFocused(true);
+          if (morphCtxRef.current && triggerRef.current) {
+            morphCtxRef.current.show({
+              id: idRef.current,
+              anchorEl: triggerRef.current,
+              content,
+              placement,
+              tone,
+            });
+          }
+        }}
+        onBlur={() => {
+          setFocused(false);
+          morphCtxRef.current?.hide(idRef.current, true);
+        }}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            e.stopPropagation();
-            setPinned((v) => !v);
-          } else if (e.key === "Escape") {
-            setPinned(false);
+          if (e.key === "Escape") {
             setHovered(false);
             setFocused(false);
+            morphCtxRef.current?.hide(idRef.current, true);
           }
         }}
         className={cn(
@@ -155,30 +188,30 @@ export const InfoTip: React.FC<InfoTipProps> = ({
         <AlertCircle className="h-3.5 w-3.5 shrink-0" />
       </span>
 
-      {typeof document !== "undefined" &&
+      {!morphCtx &&
+        typeof document !== "undefined" &&
         createPortal(
           <AnimatePresence>
-            {visible && (
+            {visible && coords && (
               <motion.div
                 ref={tooltipRef}
                 role="tooltip"
                 initial={{
                   opacity: 0,
-                  y: (coords?.actualPlacement ?? placement) === "top" ? 4 : -4,
+                  y: coords.actualPlacement === "top" ? 4 : -4,
                   scale: 0.97,
                 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{
                   opacity: 0,
-                  y: (coords?.actualPlacement ?? placement) === "top" ? 3 : -3,
+                  y: coords.actualPlacement === "top" ? 3 : -3,
                   scale: 0.98,
                 }}
                 transition={{ duration: 0.14, ease: [0.16, 1, 0.3, 1] }}
                 style={{
                   position: "fixed",
-                  top: coords ? coords.top : -9999,
-                  left: coords ? coords.left : -9999,
-                  visibility: coords ? "visible" : "hidden",
+                  top: coords.top,
+                  left: coords.left,
                 }}
                 className="z-[200] pointer-events-none max-w-[260px] px-3 py-2 rounded-xl bg-zinc-900/95 dark:bg-zinc-800/95 text-zinc-100 border border-white/[0.12] shadow-elevated backdrop-blur-md text-[11.5px] leading-relaxed font-normal tracking-normal text-left whitespace-normal break-words"
               >

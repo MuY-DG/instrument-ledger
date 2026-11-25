@@ -9,10 +9,15 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
-import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
 import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
 import { ModalShell } from "@/components/ui/MotionPrimitives";
+import {
+  ActionStatusButton,
+  HoldConfirmButton,
+  PrecisionFileDropZone,
+  useActionStatus,
+} from "@/components/ui/InteractiveControls";
 import {
   base64ToArrayBuffer,
   parseJsskExcel,
@@ -40,33 +45,31 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
+  const {
+    status: importStatus,
+    setStatus: setImportStatus,
+    setTransientSuccess: setImportSuccess,
+    reset: resetImportStatus,
+  } = useActionStatus(900);
 
   const resetAndClose = () => {
     setFileName("");
     setParsed(null);
     setError("");
+    resetImportStatus();
     onClose();
   };
 
-  const handleSelectExcel = async () => {
+  const parseExcelBuffer = async (buffer: ArrayBuffer, displayFileName: string) => {
     setError("");
-    const picked = await open({
-      multiple: false,
-      title: "选择 JSSK-MPR-170 监视与测量管理台账 Excel 文件",
-      filters: [{ name: "Excel 工作簿", extensions: ["xlsx"] }],
-    });
-    if (typeof picked !== "string" || !picked) return;
-
     setParsing(true);
     try {
-      const payload = await api.readExternalFileBase64(picked);
-      const buffer = base64ToArrayBuffer(payload.base64);
       const summary = await parseJsskExcel(buffer);
       if (summary.rows.length === 0) {
         setError("未能从该 Excel 中解析出有效的台账数据行，请检查表头格式。");
         setParsed(null);
       } else {
-        setFileName(payload.fileName);
+        setFileName(displayFileName);
         setParsed(summary);
       }
     } catch (err) {
@@ -77,27 +80,49 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
   };
 
+  const parseExcelFromPath = async (filePath: string) => {
+    setError("");
+    setParsing(true);
+    try {
+      const payload = await api.readExternalFileBase64(filePath);
+      const buffer = base64ToArrayBuffer(payload.base64);
+      await parseExcelBuffer(buffer, payload.fileName);
+    } catch (err) {
+      setError(`解析 Excel 失败：${String(err)}`);
+      setParsed(null);
+      setParsing(false);
+    }
+  };
+
+  const handleSelectExcel = async () => {
+    setError("");
+    const picked = await open({
+      multiple: false,
+      title: "选择 JSSK-MPR-170 监视与测量管理台账 Excel 文件",
+      filters: [{ name: "Excel 工作簿", extensions: ["xlsx"] }],
+    });
+    if (typeof picked !== "string" || !picked) return;
+    await parseExcelFromPath(picked);
+  };
+
   const handleConfirmImport = async () => {
     if (!parsed || parsed.rows.length === 0) return;
-    if (replaceExisting && existingCount > 0) {
-      const ok = await confirmDialog({
-        title: "覆盖替换台账",
-        description: `将清空现有 ${existingCount} 条记录及关联附件并导入新数据，确定继续？`,
-        destructive: true,
-      });
-      if (!ok) return;
-    }
 
     setImporting(true);
+    setImportStatus("loading");
     try {
       const res = await api.batchImportInstruments(parsed.rows, replaceExisting);
+      setImportSuccess();
       onNotify(
         `导入成功！共导入 ${res.importedCount} 条（量具 ${res.gaugeCount} 条，检具 ${res.fixtureCount} 条）`,
         "success"
       );
       onImported();
-      resetAndClose();
+      window.setTimeout(() => {
+        resetAndClose();
+      }, 360);
     } catch (err) {
+      setImportStatus("idle");
       onNotify(String(err), "error");
     } finally {
       setImporting(false);
@@ -129,19 +154,39 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             </div>
 
             <div className="p-6 space-y-5">
-              <button
-                type="button"
-                disabled={parsing}
-                onClick={handleSelectExcel}
-                className="w-full py-6 px-4 rounded-xl border border-dashed border-zinc-300 dark:border-white/15 hover:border-zinc-400 dark:hover:border-white/30 bg-zinc-50/50 dark:bg-white/[0.02] hover:bg-zinc-50 dark:hover:bg-white/[0.04] transition text-center"
-              >
-                <Upload className="h-6 w-6 text-zinc-400 dark:text-zinc-500 mx-auto mb-2" />
-                <div className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
-                  {parsing
-                    ? "解析中..."
-                    : fileName || "选择 .xlsx 文件"}
-                </div>
-              </button>
+              <PrecisionFileDropZone
+                active={openModal}
+                iconKind="excel"
+                acceptedExtensions={["xlsx"]}
+                loading={parsing}
+                loadingLabel="正在解析 Excel 台账..."
+                selectedFileName={fileName}
+                selectedMeta={
+                  parsed
+                    ? `已识别 ${parsed.rows.length} 条记录（量具 ${parsed.gaugeCount} · 检具 ${parsed.fixtureCount}）`
+                    : undefined
+                }
+                idleTitle="拖入或点击选择 .xlsx 台账文件"
+                idleSubtitle="支持 JSSK-MPR-170 双工作表与常规 Excel 表格"
+                onPickClick={handleSelectExcel}
+                onDropPaths={(paths) => {
+                  if (paths[0]) void parseExcelFromPath(paths[0]);
+                }}
+                onDropFiles={(files) => {
+                  const file = files[0];
+                  if (!file) return;
+                  void file.arrayBuffer().then((buf) => parseExcelBuffer(buf, file.name));
+                }}
+                onClear={
+                  fileName
+                    ? () => {
+                        setFileName("");
+                        setParsed(null);
+                        setError("");
+                      }
+                    : undefined
+                }
+              />
 
               {error && (
                 <div className="p-3.5 rounded-xl bg-rose-500/[0.08] border border-rose-500/20 flex items-start gap-2 text-xs text-rose-600 dark:text-rose-400">
@@ -253,30 +298,48 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               )}
             </div>
 
-            <div className="px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-end gap-2.5">
-              <motion.button
-                type="button"
-                whileTap={TAP_SCALE}
-                transition={SPRING_SNAPPY}
-                onClick={resetAndClose}
-                className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
-              >
-                取消
-              </motion.button>
-              <motion.button
-                type="button"
-                disabled={!parsed || importing}
-                whileTap={!parsed || importing ? undefined : TAP_SCALE}
-                transition={SPRING_SNAPPY}
-                onClick={handleConfirmImport}
-                className="btn-sheen px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
-              >
-                {importing
-                  ? "导入中..."
-                  : parsed
-                    ? `导入 (${parsed.rows.length})`
-                    : "导入"}
-              </motion.button>
+            <div className="px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between gap-2.5">
+              <span className="text-[11px] text-rose-600 dark:text-rose-400 font-medium">
+                {parsed && replaceExisting && existingCount > 0
+                  ? `将清空现有 ${existingCount} 条记录，长按右侧按钮确认覆盖`
+                  : ""}
+              </span>
+              <div className="flex items-center gap-2.5 shrink-0">
+                <motion.button
+                  type="button"
+                  whileTap={TAP_SCALE}
+                  transition={SPRING_SNAPPY}
+                  onClick={resetAndClose}
+                  className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
+                >
+                  取消
+                </motion.button>
+                {parsed && replaceExisting && existingCount > 0 ? (
+                  <HoldConfirmButton
+                    disabled={importing}
+                    loading={importing}
+                    loadingLabel="覆盖导入中..."
+                    idleLabel={`按住覆盖导入 (${parsed.rows.length})`}
+                    holdingLabel="继续按住确认覆盖..."
+                    completedLabel="开始覆盖"
+                    icon={<Upload className="h-3.5 w-3.5" />}
+                    onConfirm={() => {
+                      void handleConfirmImport();
+                    }}
+                    className="py-2"
+                  />
+                ) : (
+                  <ActionStatusButton
+                    status={importStatus}
+                    disabled={!parsed || importing}
+                    idleLabel={parsed ? `导入 (${parsed.rows.length})` : "导入"}
+                    loadingLabel="导入中..."
+                    successLabel="已导入"
+                    idleIcon={<Upload className="h-3.5 w-3.5" />}
+                    onClick={handleConfirmImport}
+                  />
+                )}
+              </div>
             </div>
     </ModalShell>
   );

@@ -27,6 +27,12 @@ import { InfoTip } from "@/components/InfoTip";
 import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
 import { Collapsible, ModalShell } from "@/components/ui/MotionPrimitives";
 import { PrecisionCheckbox } from "@/components/ui/FormControls";
+import {
+  ActionStatusButton,
+  CopyButton,
+  PrecisionFileDropZone,
+  useActionStatus,
+} from "@/components/ui/InteractiveControls";
 import type { CalibrationReport, Instrument } from "@/types";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -61,6 +67,12 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const [remark, setRemark] = useState("");
   const [syncDate, setSyncDate] = useState(true);
   const [uploading, setUploading] = useState(false);
+  const {
+    status: uploadStatus,
+    setStatus: setUploadStatus,
+    setTransientSuccess: setUploadSuccess,
+    reset: resetUploadStatus,
+  } = useActionStatus(950);
 
   // Preview state
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -101,6 +113,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     setCalAgency(instrument.calAgency || "");
     setRemark("");
     setSyncDate(true);
+    resetUploadStatus();
     loadReports(instrument.id, true);
   }, [instrument?.id]);
 
@@ -221,6 +234,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
       return;
     }
     setUploading(true);
+    setUploadStatus("loading");
     try {
       const created = await api.addReport({
         instrumentId: instrument.id,
@@ -230,20 +244,24 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         remark,
         syncInstrumentCalDate: syncDate,
       });
+      setUploadSuccess();
       onNotify(
         syncDate && calDate
           ? "校验报告上传成功，并已同步更新设备校验日期"
           : "校验报告上传成功",
         "success"
       );
-      setShowUpload(false);
-      setPickedPath("");
-      setPickedName("");
-      setRemark("");
       await loadReports(instrument.id, false);
       setSelectedId(created.id);
       onChanged();
+      window.setTimeout(() => {
+        setShowUpload(false);
+        setPickedPath("");
+        setPickedName("");
+        setRemark("");
+      }, 420);
     } catch (err) {
+      setUploadStatus("idle");
       onNotify(String(err), "error");
     } finally {
       setUploading(false);
@@ -255,7 +273,9 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     const ok = await confirmDialog({
       title: "删除报告",
       description: `确定删除「${rep.fileName}」？此操作不可恢复。`,
+      confirmText: "按住删除",
       destructive: true,
+      holdToConfirm: true,
     });
     if (!ok) {
       return;
@@ -326,8 +346,13 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                   校验报告 · {displayInstrument.name}
                 </h2>
                 {displayInstrument.serialNo && (
-                  <span className="px-2 py-0.5 text-[11px] font-mono bg-zinc-200/70 dark:bg-white/[0.07] text-zinc-700 dark:text-zinc-300 rounded shrink-0">
-                    {displayInstrument.serialNo}
+                  <span className="inline-flex items-center gap-1 pl-2 pr-1 py-0.5 text-[11px] font-mono bg-zinc-200/70 dark:bg-white/[0.07] text-zinc-700 dark:text-zinc-300 rounded shrink-0">
+                    <span>{displayInstrument.serialNo}</span>
+                    <CopyButton
+                      text={displayInstrument.serialNo}
+                      ariaLabel="复制设备编号"
+                      onCopied={() => onNotify(`已复制编号 ${displayInstrument.serialNo}`, "success")}
+                    />
                   </span>
                 )}
               </div>
@@ -367,16 +392,41 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                       上传报告
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={handlePickFile}
-                      className="btn-tactile w-full py-3 px-3 rounded-xl border border-dashed border-zinc-300 dark:border-white/20 bg-white dark:bg-white/[0.03] hover:border-indigo-400 text-center"
-                    >
-                      <Upload className="h-4 w-4 text-indigo-500 mx-auto mb-1" />
-                      <div className="text-xs font-medium text-zinc-700 dark:text-zinc-200 truncate">
-                        {pickedName || "选择 PDF / 图片 / Office"}
-                      </div>
-                    </button>
+                    <PrecisionFileDropZone
+                      active={Boolean(instrument) && showUpload && isAdmin}
+                      compact
+                      iconKind="report"
+                      acceptedExtensions={[
+                        "pdf",
+                        "png",
+                        "jpg",
+                        "jpeg",
+                        "webp",
+                        "doc",
+                        "docx",
+                        "xls",
+                        "xlsx",
+                      ]}
+                      selectedFileName={pickedName}
+                      idleTitle="拖入或选择报告文件"
+                      idleSubtitle="PDF / 图片 / Office"
+                      onPickClick={handlePickFile}
+                      onDropPaths={(paths) => {
+                        const first = paths[0];
+                        if (!first) return;
+                        setPickedPath(first);
+                        const parts = first.split(/[/\\]/);
+                        setPickedName(parts[parts.length - 1] || first);
+                      }}
+                      onClear={
+                        pickedName
+                          ? () => {
+                              setPickedPath("");
+                              setPickedName("");
+                            }
+                          : undefined
+                      }
+                    />
 
                     <div className="grid grid-cols-2 gap-2">
                       <div>
@@ -430,15 +480,17 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                       <InfoTip content="将本次校验日期同步写入设备的「上次检验日期」，并自动重算下次校验日期。" />
                     </div>
 
-                    <motion.button
+                    <ActionStatusButton
                       type="submit"
+                      size="sm"
+                      status={uploadStatus}
                       disabled={uploading || !pickedPath}
-                      whileTap={uploading || !pickedPath ? undefined : TAP_SCALE}
-                      transition={SPRING_SNAPPY}
-                      className="btn-sheen w-full py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
-                    >
-                      {uploading ? "上传中..." : "确定"}
-                    </motion.button>
+                      idleLabel="上传归档"
+                      loadingLabel="上传中..."
+                      successLabel="已上传"
+                      idleIcon={<Upload className="h-3.5 w-3.5" />}
+                      className="w-full"
+                    />
                   </form>
                 </Collapsible>
 

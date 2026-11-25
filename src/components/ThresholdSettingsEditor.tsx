@@ -23,6 +23,11 @@ import { InfoTip } from "@/components/InfoTip";
 import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
 import { Collapsible } from "@/components/ui/MotionPrimitives";
 import { PrecisionSwitch } from "@/components/ui/FormControls";
+import {
+  ActionStatusButton,
+  NumberStepper,
+  useActionStatus,
+} from "@/components/ui/InteractiveControls";
 import type {
   AlertPopupFrequency,
   AppSettings,
@@ -64,6 +69,11 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
     settings.alertPopupIntervalHours || 4
   );
   const [saving, setSaving] = useState(false);
+  const {
+    status: saveStatus,
+    setStatus: setSaveStatus,
+    setTransientSuccess: setSaveSuccess,
+  } = useActionStatus(1400);
 
   // Add custom threshold form state
   const [newDays, setNewDays] = useState("");
@@ -208,6 +218,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
     );
 
     setSaving(true);
+    setSaveStatus("loading");
     try {
       const updated = await api.updateSettings({
         warningThresholds: prepared,
@@ -216,8 +227,10 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
         alertPopupIntervalHours: clampedHours,
       });
       onSettingsChanged(updated);
+      setSaveSuccess();
       onNotify("到期预警阈值与弹窗规则已保存", "success");
     } catch (err) {
+      setSaveStatus("idle");
       onNotify(`保存失败：${String(err)}`, "error");
     } finally {
       setSaving(false);
@@ -297,23 +310,22 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
                     <span>{item.label.trim() || `${item.days}天预警`}</span>
                   </span>
 
-                  {/* Days Input */}
+                  {/* Days Stepper */}
                   <div className="inline-flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
                     <span className="font-mono text-[11px]">≤</span>
-                    <input
-                      type="number"
+                    <NumberStepper
+                      value={item.days || 1}
                       min={1}
                       max={3650}
+                      suffix="天"
+                      size="xs"
+                      ariaLabel="预警天数"
                       disabled={!isAdmin}
-                      value={item.days}
-                      onChange={(e) =>
-                        handleUpdateRow(item.id, {
-                          days: Math.max(0, Number(e.target.value) || 0),
-                        })
+                      onChange={(next) =>
+                        handleUpdateRow(item.id, { days: next })
                       }
-                      className={`${INPUT_CLS} w-20 font-mono text-center`}
+                      className="w-[108px]"
                     />
-                    <span className="text-[11px]">天</span>
                   </div>
 
                   {/* Label Input */}
@@ -585,20 +597,18 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
           <div className="flex items-center gap-2 pt-1 text-xs text-zinc-600 dark:text-zinc-300">
             <Clock className="h-3.5 w-3.5 text-zinc-400" />
             <span>每</span>
-            <input
-              type="number"
+            <NumberStepper
+              value={popupIntervalHours}
               min={1}
               max={168}
+              suffix="小时"
+              size="xs"
+              ariaLabel="提醒间隔小时"
               disabled={!isAdmin}
-              value={popupIntervalHours}
-              onChange={(e) =>
-                setPopupIntervalHours(
-                  Math.max(1, Math.min(168, Number(e.target.value) || 1))
-                )
-              }
-              className={`${INPUT_CLS} w-16 font-mono text-center`}
+              onChange={setPopupIntervalHours}
+              className="w-[116px]"
             />
-            <span>小时提醒一次</span>
+            <span>提醒一次</span>
           </div>
         </Collapsible>
       </section>
@@ -623,15 +633,16 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
                 撤销
               </button>
             )}
-            <button
-              type="button"
+            <ActionStatusButton
+              size="sm"
+              status={saveStatus}
               disabled={saving}
+              idleLabel="保存"
+              loadingLabel="保存中..."
+              successLabel="已保存"
+              idleIcon={<Save className="h-3.5 w-3.5" />}
               onClick={handleSave}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
-            >
-              <Save className="h-3.5 w-3.5" />
-              <span>{saving ? "保存中..." : "保存"}</span>
-            </button>
+            />
           </div>
         </div>
       )}

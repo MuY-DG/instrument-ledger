@@ -12,6 +12,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { formatFileSize } from "@/lib/status";
 import { InfoTip } from "@/components/InfoTip";
 import { MarkdownNotes } from "@/components/MarkdownNotes";
+import { ActionStatusButton } from "@/components/ui/InteractiveControls";
 import type { UpdateCheckResult, UpdateDownloadProgress } from "@/types";
 
 interface UpdateBannerToastProps {
@@ -175,27 +176,24 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
                     稍后
                   </button>
                 )}
-                <button
-                  type="button"
+                <ActionStatusButton
+                  size="sm"
+                  status={
+                    phase === "restarting"
+                      ? "success"
+                      : updating
+                        ? "loading"
+                        : "idle"
+                  }
                   disabled={updating}
+                  idleLabel="立即更新"
+                  loadingLabel={
+                    phase === "installing" ? "安装中..." : "下载中..."
+                  }
+                  successLabel="重启中..."
+                  idleIcon={<CloudDownload className="h-3.5 w-3.5" />}
                   onClick={onUpdateNow}
-                  className="btn-sheen btn-tactile inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-60 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary"
-                >
-                  {updating ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <CloudDownload className="h-3.5 w-3.5" />
-                  )}
-                  <span>
-                    {phase === "restarting"
-                      ? "重启中..."
-                      : phase === "installing"
-                        ? "安装中..."
-                        : updating
-                          ? "下载中..."
-                          : "立即更新"}
-                  </span>
-                </button>
+                />
               </div>
             </div>
           </div>

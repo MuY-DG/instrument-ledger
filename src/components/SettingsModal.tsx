@@ -10,6 +10,7 @@ import {
   ArrowRight,
   BellRing,
   Camera,
+  Check,
   CheckCircle2,
   ChevronDown,
   CloudDownload,
@@ -25,17 +26,25 @@ import {
   Loader2,
   Lock,
   MonitorDown,
+  Palette,
   Power,
   RefreshCw,
   RotateCcw,
   Save,
   Settings,
   ShieldCheck,
+  Shuffle,
   Trash2,
   User,
   X,
 } from "lucide-react";
 import { api, clearMediaCache } from "@/lib/api";
+import {
+  ACCOUNT_BG_PRESETS,
+  QUICK_SHOWCASE_IDS,
+  isGrainMeshId,
+  type AccountBgId,
+} from "@/lib/accountBackgrounds";
 import { formatFileSize, getTodayStr } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { isMacPlatform } from "@/components/AuthLockModals";
@@ -51,6 +60,12 @@ import {
 } from "@/lib/motion";
 import { Collapsible, ModalShell } from "@/components/ui/MotionPrimitives";
 import { PrecisionSelect, PrecisionSwitch } from "@/components/ui/FormControls";
+import {
+  ActionStatusButton,
+  CopyButton,
+  HoldConfirmButton,
+  useActionStatus,
+} from "@/components/ui/InteractiveControls";
 import type {
   AppSettings,
   CloseBehavior,
@@ -74,6 +89,8 @@ interface SettingsModalProps {
   initialTab?: SettingsTab;
   isAdmin: boolean;
   adminSessionExpiresAt?: string | null;
+  accountBg: AccountBgId;
+  onAccountBgChange: (next: AccountBgId) => void;
   settings: AppSettings;
   availableUpdate?: UpdateCheckResult | null;
   updatingApp?: boolean;
@@ -99,20 +116,12 @@ function formatPublishDate(raw: string): string {
   return m ? m[1] : "";
 }
 
-function formatSessionBadge(expiresAt?: string | null): string {
-  if (!expiresAt) return "本次有效";
-  const diffMs = new Date(expiresAt).getTime() - Date.now();
-  if (!Number.isFinite(diffMs) || diffMs <= 0) return "已过期";
-  const hours = diffMs / (60 * 60 * 1000);
-  if (hours < 24) return `剩 ${Math.max(1, Math.ceil(hours))} 小时`;
-  return `剩 ${Math.ceil(hours / 24)} 天`;
-}
-
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   openModal,
   initialTab = "account",
   isAdmin,
-  adminSessionExpiresAt = null,
+  accountBg,
+  onAccountBgChange,
   settings,
   availableUpdate = null,
   updatingApp = false,
@@ -146,9 +155,25 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [updateProxyUrl, setUpdateProxyUrl] = useState(settings.updateProxyUrl);
   const [logoPreview, setLogoPreview] = useState("");
   const [savingGeneral, setSavingGeneral] = useState(false);
+  const {
+    status: generalSaveStatus,
+    setStatus: setGeneralSaveStatus,
+    setTransientSuccess: setGeneralSaveSuccess,
+  } = useActionStatus(1400);
+  const {
+    status: backupStatus,
+    setStatus: setBackupStatus,
+    setTransientSuccess: setBackupSuccess,
+  } = useActionStatus(1500);
+  const {
+    status: checkUpdateStatus,
+    setStatus: setCheckUpdateStatus,
+    setTransientSuccess: setCheckUpdateSuccess,
+  } = useActionStatus(1500);
 
   // Account showcase & edit state
   const [avatarPreview, setAvatarPreview] = useState("");
+  const [showBgPicker, setShowBgPicker] = useState(false);
   const [editingProfile, setEditingProfile] = useState(false);
   const [profileUsername, setProfileUsername] = useState(settings.adminUsername);
   const [profileTitle, setProfileTitle] = useState(settings.adminTitle || "系统管理员");
@@ -198,6 +223,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           : "window"
       );
       setEditingProfile(false);
+      setShowBgPicker(false);
       setEditingPassword(false);
       setOldPassword("");
       setNewPassword("");
@@ -276,6 +302,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleSaveGeneral = async (e?: React.FormEvent) => {
     e?.preventDefault();
     setSavingGeneral(true);
+    setGeneralSaveStatus("loading");
     try {
       const updated = await api.updateSettings({
         docCode,
@@ -287,8 +314,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         updateProxyUrl,
       });
       onSettingsChanged(updated);
+      setGeneralSaveSuccess();
       onNotify("系统配置已保存", "success");
     } catch (err) {
+      setGeneralSaveStatus("idle");
       onNotify(String(err), "error");
     } finally {
       setSavingGeneral(false);
@@ -422,13 +451,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     });
     if (!dest) return;
     setBackingUp(true);
+    setBackupStatus("loading");
     try {
       const res = await api.createLocalBackup(dest);
+      setBackupSuccess();
       onNotify(
         `备份成功！共打包 ${res.instrumentCount} 台设备、${res.reportCount} 份报告（${formatFileSize(res.sizeBytes)}）`,
         "success"
       );
     } catch (err) {
+      setBackupStatus("idle");
       onNotify(String(err), "error");
     } finally {
       setBackingUp(false);
@@ -455,8 +487,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     window.setTimeout(() => resetPwdRef.current?.focus(), 100);
   };
 
-  const handleConfirmResetApp = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleConfirmResetApp = async (e?: React.FormEvent) => {
+    e?.preventDefault();
     if (resettingApp) return;
     if (!resetPassword) {
       setResetError("请输入当前管理员密码以确认初始化");
@@ -493,7 +525,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const confirmed = await confirmDialog({
       title: "还原备份",
       description: "将用备份包覆盖当前全部台账、位置照片与校验报告，确定继续？",
+      confirmText: "按住还原",
       destructive: true,
+      holdToConfirm: true,
     });
     if (!confirmed) return;
 
@@ -516,18 +550,21 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
+    setCheckUpdateStatus("loading");
     setUpdateError("");
     setUpdateResult(null);
     try {
       const res = await api.checkForUpdates(githubRepo, updateProxyUrl);
       setUpdateResult(res);
       onUpdateDetected?.(res);
+      setCheckUpdateSuccess();
       if (res.hasUpdate) {
         setShowSourceConfig(false);
       } else {
         onNotify(`当前已是最新版本 v${res.currentVersion}`, "success");
       }
     } catch (err) {
+      setCheckUpdateStatus("idle");
       setUpdateError(String(err));
     } finally {
       setCheckingUpdate(false);
@@ -595,7 +632,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     const ok = await confirmDialog({
       title: "关闭应用锁",
       description: "关闭后将清除当前 PIN 码，之后可随时重新开启。",
+      confirmText: "按住关闭",
       destructive: true,
+      holdToConfirm: true,
     });
     if (!ok) return;
     setDisablingLock(true);
@@ -702,18 +741,51 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   >
                 {tab === "account" && isAdmin && (
                   <div className="space-y-4">
-                    {/* Profile Showcase Hero Card with Cover Background */}
+                    {/* Profile Showcase Hero Card with Switchable Grainy Mesh Cover Background */}
                     <div className="rounded-2xl border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#141418] shadow-surface overflow-hidden">
-                      {/* Architectural Cover Banner */}
-                      <div className="relative h-32 overflow-hidden bg-gradient-to-br from-slate-100 via-indigo-50/90 to-sky-100/80 dark:from-[#161829] dark:via-[#11121a] dark:to-[#1b1730] border-b border-zinc-200/70 dark:border-white/[0.07]">
-                        <div className="absolute inset-0 bg-precision-grid-light dark:bg-precision-grid pointer-events-none" />
-                        <div className="absolute -top-12 -left-10 h-40 w-40 rounded-full bg-indigo-400/20 dark:bg-indigo-500/20 blur-3xl pointer-events-none" />
-                        <div className="absolute -bottom-14 right-8 h-44 w-44 rounded-full bg-sky-400/20 dark:bg-sky-500/15 blur-3xl pointer-events-none" />
+                      {/* Switchable Cover Banner */}
+                      <div className="relative h-36 overflow-hidden border-b border-zinc-200/70 dark:border-white/[0.07]">
+                        <AnimatePresence mode="sync" initial={false}>
+                          {isGrainMeshId(accountBg) ? (
+                            <motion.div
+                              key={`cover-${accountBg}`}
+                              data-av={accountBg}
+                              initial={{ opacity: 0, scale: 1.04 }}
+                              animate={{ opacity: 1, scale: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.36, ease: EASE_PRECISION }}
+                              className="absolute inset-0"
+                            />
+                          ) : (
+                            <motion.div
+                              key="cover-default"
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              exit={{ opacity: 0 }}
+                              transition={{ duration: 0.3, ease: EASE_PRECISION }}
+                              className="absolute inset-0 bg-gradient-to-br from-slate-100 via-indigo-50/90 to-sky-100/80 dark:from-[#161829] dark:via-[#11121a] dark:to-[#1b1730]"
+                            >
+                              <div className="absolute inset-0 bg-precision-grid-light dark:bg-precision-grid pointer-events-none" />
+                              <div className="absolute -top-12 -left-10 h-40 w-40 rounded-full bg-indigo-400/20 dark:bg-indigo-500/20 blur-3xl pointer-events-none" />
+                              <div className="absolute -bottom-14 right-8 h-44 w-44 rounded-full bg-sky-400/20 dark:bg-sky-500/15 blur-3xl pointer-events-none" />
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+
+                        {/* Subtle bottom rim depth for avatar overlap & controls */}
+                        {isGrainMeshId(accountBg) && (
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/22 via-transparent to-black/10" />
+                        )}
 
                         {/* Subtle Precision Dial Watermark */}
                         <svg
                           viewBox="0 0 180 180"
-                          className="absolute -right-8 -top-8 h-44 w-44 text-zinc-900/[0.05] dark:text-white/[0.06] pointer-events-none"
+                          className={cn(
+                            "absolute -right-8 -top-8 h-44 w-44 pointer-events-none transition-colors duration-300",
+                            isGrainMeshId(accountBg)
+                              ? "text-white/[0.16]"
+                              : "text-zinc-900/[0.05] dark:text-white/[0.06]"
+                          )}
                           fill="none"
                         >
                           <circle cx="90" cy="90" r="76" stroke="currentColor" strokeWidth="1" />
@@ -731,21 +803,76 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </svg>
 
                         {/* Session Status Pill */}
-                        <div className="absolute top-3.5 right-4 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/80 dark:bg-white/[0.08] backdrop-blur-md border border-zinc-200/80 dark:border-white/[0.1] text-[11px] font-medium text-zinc-700 dark:text-zinc-200 shadow-hairline">
+                        <div className="absolute top-3.5 right-4 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-white/85 dark:bg-zinc-950/65 backdrop-blur-md border border-white/60 dark:border-white/[0.14] text-[11px] font-medium text-zinc-800 dark:text-zinc-100 shadow-hairline">
                           <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                          <span>在线 · {formatSessionBadge(adminSessionExpiresAt)}</span>
+                          <span>在线</span>
+                        </div>
+
+                        {/* Quick Grainy-Orb Background Switcher Pill (bottom-right of cover) */}
+                        <div className="absolute bottom-3 right-4 flex items-center gap-2">
+                          <div className="inline-flex items-center gap-1.5 pl-1.5 pr-1.5 py-1 rounded-full bg-white/85 dark:bg-zinc-950/65 backdrop-blur-md border border-white/60 dark:border-white/[0.14] shadow-tactile">
+                            <div className="flex items-center -space-x-1.5">
+                              {QUICK_SHOWCASE_IDS.map((presetId) => {
+                                const active = accountBg === presetId;
+                                const meta = ACCOUNT_BG_PRESETS.find((p) => p.id === presetId);
+                                return (
+                                  <motion.button
+                                    key={presetId}
+                                    type="button"
+                                    whileHover={{ scale: 1.18, zIndex: 20 }}
+                                    whileTap={{ scale: 0.92 }}
+                                    transition={SPRING_SNAPPY}
+                                    onClick={() => onAccountBgChange(presetId)}
+                                    title={meta ? `切换背景：${meta.name}` : "切换背景"}
+                                    aria-label={meta ? `切换背景：${meta.name}` : "切换背景"}
+                                    className={cn(
+                                      "relative h-5 w-5 rounded-full p-[1.5px] bg-white dark:bg-zinc-900 shadow-sm focus:outline-none",
+                                      active && "ring-2 ring-zinc-900 dark:ring-white z-10"
+                                    )}
+                                  >
+                                    <span
+                                      data-av={presetId}
+                                      className="block h-full w-full rounded-full"
+                                    />
+                                  </motion.button>
+                                );
+                              })}
+                            </div>
+
+                            <motion.button
+                              type="button"
+                              whileTap={TAP_SCALE_SUBTLE}
+                              transition={SPRING_SNAPPY}
+                              onClick={() => setShowBgPicker((v) => !v)}
+                              className={cn(
+                                "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10.5px] font-medium transition-colors",
+                                showBgPicker
+                                  ? "bg-zinc-900 text-white dark:bg-white dark:text-zinc-950"
+                                  : "text-zinc-700 dark:text-zinc-200 hover:bg-zinc-900/[0.07] dark:hover:bg-white/[0.12]"
+                              )}
+                              title="展开全部 12 款磨砂噪点渐变背景"
+                            >
+                              <Palette className="h-3 w-3" />
+                              <span>背景</span>
+                            </motion.button>
+                          </div>
                         </div>
                       </div>
 
                       {/* Avatar + Identity Bar */}
                       <div className="px-5 pb-5">
                         <div className="flex items-end justify-between gap-3 -mt-10">
-                          {/* Avatar with Upload Overlay */}
+                          {/* Avatar with Upload Overlay (falls back to matching grainy mesh orb) */}
                           <div className="relative group shrink-0">
                             <button
                               type="button"
                               onClick={handleUploadAvatar}
                               title="更换头像"
+                              data-av={
+                                !avatarPreview && isGrainMeshId(accountBg)
+                                  ? accountBg
+                                  : undefined
+                              }
                               className="relative h-20 w-20 rounded-full ring-4 ring-white dark:ring-[#141418] shadow-elevated overflow-hidden bg-gradient-to-br from-zinc-900 to-zinc-700 dark:from-indigo-500 dark:to-sky-500 text-white flex items-center justify-center focus:outline-none"
                             >
                               {avatarPreview ? (
@@ -755,7 +882,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   className="h-full w-full object-cover"
                                 />
                               ) : (
-                                <span className="text-2xl font-semibold uppercase tracking-tight">
+                                <span className="text-2xl font-semibold uppercase tracking-tight drop-shadow-[0_1px_4px_rgba(0,0,0,0.28)]">
                                   {(settings.adminUsername || "A").slice(0, 1)}
                                 </span>
                               )}
@@ -773,20 +900,22 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </button>
                           </div>
 
-                          {!editingProfile && (
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setProfileUsername(settings.adminUsername);
-                                setProfileTitle(settings.adminTitle || "系统管理员");
-                                setEditingProfile(true);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
-                            >
-                              <Edit3 className="h-3.5 w-3.5" />
-                              <span>编辑资料</span>
-                            </button>
-                          )}
+                          <div className="flex items-center gap-2">
+                            {!editingProfile && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setProfileUsername(settings.adminUsername);
+                                  setProfileTitle(settings.adminTitle || "系统管理员");
+                                  setEditingProfile(true);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                                <span>编辑资料</span>
+                              </button>
+                            )}
+                          </div>
                         </div>
 
                         {/* Displayed Name & Admin Title Badge */}
@@ -799,6 +928,93 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <span>{settings.adminTitle || "系统管理员"}</span>
                           </span>
                         </div>
+
+                        {/* Expandable 12-Palette Grainy Mesh Background Picker */}
+                        <Collapsible open={showBgPicker}>
+                          <div className="mt-4 pt-4 border-t border-zinc-200/80 dark:border-white/[0.08] space-y-3">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-200">
+                                <Palette className="h-3.5 w-3.5 text-indigo-500" />
+                                <span>账号磨砂渐变背景</span>
+                                <span className="text-[11px] text-zinc-400 dark:text-zinc-500 font-normal">
+                                  ·{" "}
+                                  {ACCOUNT_BG_PRESETS.find((p) => p.id === accountBg)?.name ||
+                                    "默认"}
+                                </span>
+                              </div>
+                              <motion.button
+                                type="button"
+                                whileTap={TAP_SCALE}
+                                transition={SPRING_SNAPPY}
+                                onClick={() => {
+                                  const meshes = ACCOUNT_BG_PRESETS.filter(
+                                    (p) => p.isGrainMesh && p.id !== accountBg
+                                  );
+                                  const pick =
+                                    meshes[Math.floor(Math.random() * meshes.length)];
+                                  if (pick) onAccountBgChange(pick.id);
+                                }}
+                                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition-colors"
+                              >
+                                <Shuffle className="h-3 w-3" />
+                                <span>随机一款</span>
+                              </motion.button>
+                            </div>
+
+                            <div className="grid grid-cols-5 sm:grid-cols-7 gap-2">
+                              {ACCOUNT_BG_PRESETS.map((preset) => {
+                                const active = accountBg === preset.id;
+                                return (
+                                  <motion.button
+                                    key={preset.id}
+                                    type="button"
+                                    whileHover={{ y: -2, scale: 1.03 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    transition={SPRING_SNAPPY}
+                                    onClick={() => onAccountBgChange(preset.id)}
+                                    className="group relative flex flex-col items-center gap-1.5 p-1.5 rounded-xl hover:bg-zinc-100/80 dark:hover:bg-white/[0.05] transition-colors focus:outline-none"
+                                  >
+                                    <div className="relative h-9 w-9 rounded-full p-[2px]">
+                                      {active && (
+                                        <motion.span
+                                          layoutId="account-bg-active-ring"
+                                          transition={SPRING_SNAPPY}
+                                          className="absolute inset-0 rounded-full ring-2 ring-zinc-900 dark:ring-white"
+                                        />
+                                      )}
+                                      {preset.isGrainMesh ? (
+                                        <span
+                                          data-av={preset.id}
+                                          className="relative flex h-full w-full rounded-full items-center justify-center shadow-sm"
+                                        >
+                                          {active && (
+                                            <Check className="h-3.5 w-3.5 text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.45)] stroke-[2.6]" />
+                                          )}
+                                        </span>
+                                      ) : (
+                                        <span className="relative flex h-full w-full rounded-full items-center justify-center bg-gradient-to-br from-slate-100 via-indigo-50 to-sky-100 dark:from-[#161829] dark:to-[#1b1730] border border-zinc-200 dark:border-white/15 bg-precision-grid-light">
+                                          {active && (
+                                            <Check className="h-3.5 w-3.5 text-zinc-900 dark:text-white stroke-[2.6]" />
+                                          )}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <span
+                                      className={cn(
+                                        "text-[10px] leading-none truncate max-w-full",
+                                        active
+                                          ? "font-semibold text-zinc-950 dark:text-white"
+                                          : "text-zinc-500 dark:text-zinc-400"
+                                      )}
+                                    >
+                                      {preset.name}
+                                    </span>
+                                  </motion.button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </Collapsible>
 
                         {/* Expandable Profile Edit Form */}
                         <AnimatePresence initial={false}>
@@ -1110,14 +1326,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     </div>
 
                     <div className="flex justify-end">
-                      <button
+                      <ActionStatusButton
                         type="submit"
+                        size="sm"
+                        status={generalSaveStatus}
                         disabled={savingGeneral}
-                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
-                      >
-                        <Save className="h-3.5 w-3.5" />
-                        <span>{savingGeneral ? "保存中..." : "保存"}</span>
-                      </button>
+                        idleLabel="保存"
+                        loadingLabel="保存中..."
+                        successLabel="已保存"
+                        idleIcon={<Save className="h-3.5 w-3.5" />}
+                      />
                     </div>
                   </form>
                 )}
@@ -1408,8 +1626,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           打开目录
                         </button>
                       </div>
-                      <div className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 break-all bg-white dark:bg-[#0d0d10] px-3 py-2 rounded-lg border border-zinc-200/80 dark:border-white/[0.07]">
-                        {dirInfo?.dataDir || "加载中..."}
+                      <div className="flex items-center justify-between gap-2 bg-white dark:bg-[#0d0d10] px-3 py-2 rounded-lg border border-zinc-200/80 dark:border-white/[0.07]">
+                        <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 break-all">
+                          {dirInfo?.dataDir || "加载中..."}
+                        </span>
+                        {dirInfo?.dataDir && (
+                          <CopyButton
+                            text={dirInfo.dataDir}
+                            ariaLabel="复制本地数据目录路径"
+                            onCopied={() => onNotify("已复制数据目录路径", "success")}
+                            className="shrink-0"
+                          />
+                        )}
                       </div>
                       <div className="flex gap-6 text-xs text-zinc-600 dark:text-zinc-400 pt-1 font-mono tabular-nums">
                         <span>
@@ -1440,14 +1668,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <InfoTip content="将数据库、位置照片及校验报告打包为单个 .zip 文件，便于归档与迁移。" />
                           </div>
                         </div>
-                        <button
-                          type="button"
+                        <ActionStatusButton
+                          size="sm"
+                          status={backupStatus}
                           disabled={backingUp}
+                          idleLabel="导出"
+                          loadingLabel="备份中..."
+                          successLabel="已导出"
+                          idleIcon={<Archive className="h-3.5 w-3.5" />}
                           onClick={handleBackup}
-                          className="w-full py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold transition"
-                        >
-                          {backingUp ? "备份中..." : "导出"}
-                        </button>
+                          className="w-full"
+                        />
                       </div>
 
                       <div className="p-4 rounded-xl border border-zinc-200/90 dark:border-white/[0.08] bg-zinc-50/40 dark:bg-white/[0.02] flex flex-col justify-between gap-4">
@@ -1549,10 +1780,20 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </div>
                         </div>
 
-                        <div className="text-[11px] font-mono text-zinc-600 dark:text-zinc-300 break-all bg-zinc-50 dark:bg-[#0d0d10] px-2.5 py-1.5 rounded-lg border border-zinc-200/80 dark:border-white/[0.06]">
-                          {resetBackupDir ||
-                            defaultDownloadsDir ||
-                            "系统默认下载目录 (Downloads)"}
+                        <div className="flex items-center justify-between gap-2 bg-zinc-50 dark:bg-[#0d0d10] px-2.5 py-1.5 rounded-lg border border-zinc-200/80 dark:border-white/[0.06]">
+                          <span className="text-[11px] font-mono text-zinc-600 dark:text-zinc-300 break-all">
+                            {resetBackupDir ||
+                              defaultDownloadsDir ||
+                              "系统默认下载目录 (Downloads)"}
+                          </span>
+                          {(resetBackupDir || defaultDownloadsDir) && (
+                            <CopyButton
+                              text={resetBackupDir || defaultDownloadsDir}
+                              ariaLabel="复制强制备份目录路径"
+                              onCopied={() => onNotify("已复制备份目录路径", "success")}
+                              className="shrink-0"
+                            />
+                          )}
                         </div>
                       </div>
 
@@ -1602,17 +1843,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </div>
                         </div>
                       </div>
-                      <button
-                        type="button"
+                      <ActionStatusButton
+                        size="sm"
+                        status={checkUpdateStatus}
                         disabled={checkingUpdate || updatingApp}
+                        idleLabel="检查更新"
+                        loadingLabel="检查中..."
+                        successLabel="检查完成"
+                        idleIcon={<RefreshCw className="h-3.5 w-3.5" />}
                         onClick={handleCheckUpdate}
-                        className="inline-flex items-center gap-2 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition shrink-0"
-                      >
-                        <RefreshCw
-                          className={`h-3.5 w-3.5 ${checkingUpdate ? "animate-spin" : ""}`}
-                        />
-                        <span>{checkingUpdate ? "检查中..." : "检查更新"}</span>
-                      </button>
+                        className="shrink-0"
+                      />
                     </div>
 
                     {/* Error Notice */}
@@ -1836,13 +2077,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               </div>
                             </div>
                             <div className="flex justify-end">
-                              <button
-                                type="button"
+                              <ActionStatusButton
+                                size="sm"
+                                variant="secondary"
+                                status={generalSaveStatus}
+                                disabled={savingGeneral}
+                                idleLabel="保存"
+                                loadingLabel="保存中..."
+                                successLabel="已保存"
+                                idleIcon={<Save className="h-3.5 w-3.5" />}
                                 onClick={() => handleSaveGeneral()}
-                                className="btn-tactile px-3.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] hover:bg-zinc-50 dark:hover:bg-white/[0.06] shadow-tactile text-zinc-800 dark:text-zinc-200 text-xs font-medium"
-                              >
-                                保存
-                              </button>
+                              />
                             </div>
                           </div>
                         </Collapsible>
@@ -1892,7 +2137,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           )}
         </div>
 
-        <form onSubmit={handleConfirmResetApp} className="p-6 space-y-4">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+          }}
+          className="p-6 space-y-4"
+        >
           <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-white/[0.03] border border-zinc-200/85 dark:border-white/[0.08] space-y-1.5 text-xs">
             <div className="font-medium text-zinc-800 dark:text-zinc-200">
               强制备份将保存至：
@@ -1946,31 +2196,36 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-end gap-2 pt-1">
-            <motion.button
-              type="button"
-              disabled={resettingApp}
-              whileTap={resettingApp ? undefined : TAP_SCALE}
-              transition={SPRING_SNAPPY}
-              onClick={() => setResetDialogOpen(false)}
-              className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] disabled:opacity-50 transition-colors"
-            >
-              取消
-            </motion.button>
-            <motion.button
-              type="submit"
-              disabled={resettingApp || !resetPassword}
-              whileTap={resettingApp || !resetPassword ? undefined : TAP_SCALE}
-              transition={SPRING_SNAPPY}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-semibold shadow-tactile-primary transition-colors"
-            >
-              {resettingApp ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <RotateCcw className="h-3.5 w-3.5" />
-              )}
-              <span>{resettingApp ? "正在备份并初始化..." : "强制备份并初始化"}</span>
-            </motion.button>
+          <div className="flex items-center justify-between gap-2 pt-1">
+            <span className="text-[10.5px] text-zinc-400 dark:text-zinc-500 select-none">
+              高危操作：输入密码后长按确认
+            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <motion.button
+                type="button"
+                disabled={resettingApp}
+                whileTap={resettingApp ? undefined : TAP_SCALE}
+                transition={SPRING_SNAPPY}
+                onClick={() => setResetDialogOpen(false)}
+                className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] disabled:opacity-50 transition-colors"
+              >
+                取消
+              </motion.button>
+              <HoldConfirmButton
+                disabled={resettingApp || !resetPassword}
+                loading={resettingApp}
+                loadingLabel="正在备份并初始化..."
+                idleLabel="按住备份并初始化"
+                holdingLabel="继续按住确认重置..."
+                completedLabel="开始执行"
+                holdDurationMs={1080}
+                icon={<RotateCcw className="h-3.5 w-3.5" />}
+                onConfirm={() => {
+                  void handleConfirmResetApp();
+                }}
+                className="py-2"
+              />
+            </div>
           </div>
         </form>
       </ModalShell>

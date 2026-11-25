@@ -6,6 +6,7 @@ import { getThresholdVisuals } from "@/lib/thresholdColors";
 import { cn } from "@/lib/utils";
 import { LocationThumb } from "@/components/LocationThumb";
 import { StatusBadge } from "@/components/StatusBadge";
+import { CopyButton } from "@/components/ui/InteractiveControls";
 import type { CategoryTab, Instrument } from "@/types";
 
 const ROW_HEIGHT = 66;
@@ -170,11 +171,20 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
 
         {/* Serial No & Spec */}
         <div role="cell" className="py-2.5 px-3 min-w-0 overflow-hidden">
-          <div
-            className="font-mono tabular-nums text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate"
-            title={inst.serialNo}
-          >
-            {inst.serialNo || "—"}
+          <div className="flex items-center gap-1 min-w-0">
+            <div
+              className="font-mono tabular-nums text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate"
+              title={inst.serialNo}
+            >
+              {inst.serialNo || "—"}
+            </div>
+            {inst.serialNo && inst.serialNo !== "/" && inst.serialNo !== "-" && (
+              <CopyButton
+                text={inst.serialNo}
+                ariaLabel={`复制编号 ${inst.serialNo}`}
+                className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity shrink-0"
+              />
+            )}
           </div>
           <div
             className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 truncate"

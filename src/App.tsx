@@ -5,8 +5,8 @@ import { AnimatePresence, motion } from "motion/react";
 import { Toaster, toast } from "sonner";
 import {
   ArrowUpDown,
-  BellRing,
   CalendarClock,
+  Check,
   ChevronDown,
   ChevronRight,
   CloudDownload,
@@ -15,15 +15,17 @@ import {
   FileSpreadsheet,
   Gauge,
   Layers,
+  Loader2,
   Lock,
   LogIn,
   LogOut,
   Moon,
+  PanelLeftClose,
+  PanelLeftOpen,
   Plus,
   Printer,
   Search,
   Settings,
-  ShieldCheck,
   SlidersHorizontal,
   Sun,
   Upload,
@@ -73,16 +75,30 @@ import { InfoTip } from "@/components/InfoTip";
 import {
   EASE_PRECISION,
   POPOVER_MOTION,
+  SPRING_SMOOTH,
   SPRING_SNAPPY,
   TAP_SCALE,
   TAP_SCALE_ICON,
   TAP_SCALE_SUBTLE,
 } from "@/lib/motion";
-import {
-  SlidingNumber,
-  SpotlightSurface,
-} from "@/components/ui/MotionPrimitives";
+import { SlidingNumber } from "@/components/ui/MotionPrimitives";
 import { PrecisionSelect, SearchField } from "@/components/ui/FormControls";
+import { ComplianceMeterCard } from "@/components/ComplianceMeterCard";
+import {
+  MorphTooltip,
+  MorphTooltipProvider,
+} from "@/components/ui/MorphTooltip";
+import {
+  AnimatedBellIcon,
+  KeycapBadge,
+  useActionStatus,
+} from "@/components/ui/InteractiveControls";
+import {
+  isGrainMeshId,
+  loadAccountBg,
+  saveAccountBg,
+  type AccountBgId,
+} from "@/lib/accountBackgrounds";
 import type {
   AppSettings,
   AuthStatus,
@@ -126,6 +142,7 @@ const DEFAULT_SETTINGS: AppSettings = {
 
 const THEME_KEY = "instrument_ledger_theme";
 const PAGE_SIZE_KEY = "instrument_ledger_page_size";
+const SIDEBAR_COLLAPSED_KEY = "instrument_ledger_sidebar_collapsed";
 const ALERT_MUTED_DATE_KEY = "instrument_ledger_alert_muted_date";
 const ALERT_LAST_SHOWN_DATE_KEY = "instrument_ledger_alert_last_shown_date";
 const ALERT_LAST_SHOWN_TS_KEY = "instrument_ledger_alert_last_shown_ts";
@@ -157,17 +174,6 @@ function loadInitialTheme(): "light" | "dark" {
   return "light";
 }
 
-function formatAdminSessionRemaining(expiresAt?: string | null): string {
-  if (!expiresAt) return "本次有效";
-  const diffMs = new Date(expiresAt).getTime() - Date.now();
-  if (!Number.isFinite(diffMs) || diffMs <= 0) return "已过期";
-  const hours = diffMs / (60 * 60 * 1000);
-  if (hours < 24) {
-    return `剩 ${Math.max(1, Math.ceil(hours))} 小时`;
-  }
-  return `剩 ${Math.ceil(hours / 24)} 天`;
-}
-
 export default function App() {
   const [booting, setBooting] = useState(true);
   const [instruments, setInstruments] = useState<Instrument[]>([]);
@@ -188,8 +194,31 @@ export default function App() {
   const authRef = useRef(auth);
   authRef.current = auth;
 
-  // Theme (Precision Light / Obsidian Dark)
+  // Theme (Precision Light / Obsidian Dark) & Collapsible Sidebar
   const [theme, setTheme] = useState<"light" | "dark">(loadInitialTheme);
+  const [accountBg, setAccountBg] = useState<AccountBgId>(loadAccountBg);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
+    () => readStorage(SIDEBAR_COLLAPSED_KEY) === "1"
+  );
+
+  const handleAccountBgChange = useCallback((next: AccountBgId) => {
+    setAccountBg(next);
+    saveAccountBg(next);
+  }, []);
+  const [bellHovered, setBellHovered] = useState(false);
+  const {
+    status: exportStatus,
+    setStatus: setExportStatus,
+    setTransientSuccess: setExportSuccess,
+  } = useActionStatus(1600);
+
+  const toggleSidebar = useCallback(() => {
+    setSidebarCollapsed((prev) => {
+      const next = !prev;
+      writeStorage(SIDEBAR_COLLAPSED_KEY, next ? "1" : "");
+      return next;
+    });
+  }, []);
 
   // Navigation & Filters
   const [activeTab, setActiveTab] = useState<CategoryTab>("gauge");
@@ -364,7 +393,7 @@ export default function App() {
     }
   }, [notify]);
 
-  // Global keyboard shortcuts: Cmd/Ctrl + L (Lock), Cmd/Ctrl + K (Command Palette)
+  // Global keyboard shortcuts: Cmd/Ctrl + L (Lock), Cmd/Ctrl + K (Command Palette), Cmd/Ctrl + B (Sidebar)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!auth.isInitialized || auth.isLocked) return;
@@ -374,11 +403,14 @@ export default function App() {
       } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         setCommandOpen((prev) => !prev);
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault();
+        toggleSidebar();
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [auth.isInitialized, auth.isLocked, handleLock]);
+  }, [auth.isInitialized, auth.isLocked, handleLock, toggleSidebar]);
 
   // Independent auto-lock idle timer whenever App Lock is enabled
   useEffect(() => {
@@ -747,6 +779,8 @@ export default function App() {
 
     const tierSegments = descThresholds.map((t) => ({
       id: t.id,
+      label: t.label,
+      days: t.days,
       color: t.color,
       count: tierCountMap.get(t.id) || 0,
     }));
@@ -963,6 +997,13 @@ export default function App() {
   }, []);
 
   const handleLogout = async () => {
+    const ok = await confirmDialog({
+      title: "退出管理员登录",
+      description: "退出后将切换为只读浏览视图，新增、编辑设备或修改系统设置需重新登录。",
+      confirmText: "退出登录",
+      cancelText: "取消",
+    });
+    if (!ok) return;
     try {
       const st = await api.adminLogout();
       setAuth(st);
@@ -989,7 +1030,9 @@ export default function App() {
       const ok = await confirmDialog({
         title: "删除设备",
         description: `确定删除「${inst.name}」${inst.serialNo ? `（${inst.serialNo}）` : ""}？将同时清理位置照片及 ${inst.reportCount} 份报告，不可恢复。`,
+        confirmText: "按住删除",
         destructive: true,
+        holdToConfirm: true,
       });
       if (!ok) return;
       try {
@@ -1020,6 +1063,7 @@ export default function App() {
       });
       if (!dest) return;
 
+      setExportStatus("loading");
       let logoPayload: { mime: string; base64: string } | null = null;
       if (settings.companyLogoPath) {
         try {
@@ -1033,8 +1077,10 @@ export default function App() {
       const bytes = await exportJsskExcel(list, settings, logoPayload);
       const b64 = uint8ArrayToBase64(bytes);
       await api.writeExternalFileBase64(dest, b64);
+      setExportSuccess();
       notify(`Excel 台账已导出（共 ${list.length} 条记录）`, "success");
     } catch (err) {
+      setExportStatus("idle");
       notify(`导出 Excel 失败：${String(err)}`, "error");
     }
   };
@@ -1154,6 +1200,7 @@ export default function App() {
   }
 
   return (
+    <MorphTooltipProvider>
     <div className="h-screen w-screen overflow-hidden bg-[#f7f7f5] dark:bg-[#09090b] text-zinc-950 dark:text-zinc-50 flex flex-col">
       {/* First-Launch Intro Animation & Gradual Account Setup */}
       <AnimatePresence>
@@ -1178,80 +1225,132 @@ export default function App() {
           transition={{ duration: 0.32, ease: EASE_PRECISION }}
           className="flex-1 flex min-h-0 no-print"
         >
-          {/* Left Desktop Navigation Sidebar */}
-          <aside className="w-[248px] shrink-0 bg-[#f4f5f7] dark:bg-[#0d0d10] border-r border-zinc-200/85 dark:border-white/[0.07] flex flex-col select-none">
-            {/* Brand Identity */}
-            <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
-              {logoDataUrl ? (
-                <img
-                  src={logoDataUrl}
-                  alt="Logo"
-                  className="h-8 max-w-[84px] object-contain rounded-lg border border-zinc-200 dark:border-white/10 bg-white px-1.5 py-0.5 shrink-0 shadow-hairline"
-                />
-              ) : (
-                <div className="h-8 w-8 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shadow-tactile-primary shrink-0">
-                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
-                    <circle
-                      cx="12"
-                      cy="12"
-                      r="8.5"
-                      stroke="currentColor"
-                      strokeWidth="1.75"
-                      opacity="0.35"
-                    />
-                    <path
-                      d="M12 3.5A8.5 8.5 0 0 1 20.5 12"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d="M12 12L16.5 7.5"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    />
-                    <circle cx="12" cy="12" r="1.75" fill="currentColor" />
-                  </svg>
-                </div>
+          {/* Left Collapsible Desktop Navigation Sidebar */}
+          <motion.aside
+            initial={false}
+            animate={{ width: sidebarCollapsed ? 64 : 248 }}
+            transition={SPRING_SMOOTH}
+            className="shrink-0 bg-[#f4f5f7] dark:bg-[#0d0d10] border-r border-zinc-200/85 dark:border-white/[0.07] flex flex-col select-none overflow-hidden"
+          >
+            {/* Brand Identity & Collapse Trigger */}
+            <div
+              className={cn(
+                "pt-4 pb-3 flex items-center gap-2",
+                sidebarCollapsed ? "px-2 justify-center flex-col gap-2" : "px-4 justify-between"
               )}
-              <div className="min-w-0 flex-1">
-                <div className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 truncate tracking-tight">
-                  {settings.docTitle || "监视与测量管理台账"}
-                </div>
-                <div className="text-[10.5px] font-mono text-zinc-500 dark:text-zinc-500 truncate">
-                  {settings.docCode} · Ver.{settings.docVersion}
-                </div>
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                {logoDataUrl ? (
+                  <img
+                    src={logoDataUrl}
+                    alt="Logo"
+                    className={cn(
+                      "object-contain rounded-lg border border-zinc-200 dark:border-white/10 bg-white shrink-0 shadow-hairline",
+                      sidebarCollapsed ? "h-8 w-8 p-0.5" : "h-8 max-w-[84px] px-1.5 py-0.5"
+                    )}
+                  />
+                ) : (
+                  <div className="h-8 w-8 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shadow-tactile-primary shrink-0">
+                    <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="8.5"
+                        stroke="currentColor"
+                        strokeWidth="1.75"
+                        opacity="0.35"
+                      />
+                      <path
+                        d="M12 3.5A8.5 8.5 0 0 1 20.5 12"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                      <path
+                        d="M12 12L16.5 7.5"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      />
+                      <circle cx="12" cy="12" r="1.75" fill="currentColor" />
+                    </svg>
+                  </div>
+                )}
+                {!sidebarCollapsed && (
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 truncate tracking-tight">
+                      {settings.docTitle || "监视与测量管理台账"}
+                    </div>
+                    <div className="text-[10.5px] font-mono text-zinc-500 dark:text-zinc-500 truncate">
+                      {settings.docCode} · Ver.{settings.docVersion}
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {!sidebarCollapsed && (
+                <MorphTooltip content="折叠侧边栏 (⌘B)" placement="right">
+                  <motion.button
+                    type="button"
+                    whileTap={TAP_SCALE_ICON}
+                    transition={SPRING_SNAPPY}
+                    onClick={toggleSidebar}
+                    aria-label="折叠侧边栏"
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] transition-colors shrink-0"
+                  >
+                    <PanelLeftClose className="h-3.5 w-3.5" />
+                  </motion.button>
+                </MorphTooltip>
+              )}
             </div>
 
             {/* Command Palette Quick Trigger */}
-            <div className="px-3 pb-3">
-              <motion.button
-                type="button"
-                whileTap={TAP_SCALE_SUBTLE}
-                transition={SPRING_SNAPPY}
-                onClick={() => setCommandOpen(true)}
-                className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-white/[0.04] hover:bg-white/95 dark:hover:bg-white/[0.07] border border-zinc-200/95 hover:border-zinc-300 dark:border-white/[0.08] shadow-tactile flex items-center justify-between text-xs text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <Search className="h-3.5 w-3.5" />
-                  <span>快速检索...</span>
-                </span>
-                <kbd className="px-1.5 py-0.5 rounded-md bg-zinc-100/90 dark:bg-white/[0.06] border border-zinc-200/80 dark:border-white/[0.08] text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-[0_1px_0_rgba(15,23,42,0.05)]">
-                  ⌘K
-                </kbd>
-              </motion.button>
+            <div className={cn("pb-3", sidebarCollapsed ? "px-2 flex justify-center" : "px-3")}>
+              {sidebarCollapsed ? (
+                <MorphTooltip content="快速检索与命令 (⌘K)" placement="right">
+                  <motion.button
+                    type="button"
+                    whileTap={TAP_SCALE_ICON}
+                    transition={SPRING_SNAPPY}
+                    onClick={() => setCommandOpen(true)}
+                    aria-label="快速检索"
+                    className="h-9 w-9 rounded-lg bg-white dark:bg-white/[0.04] hover:bg-white/95 dark:hover:bg-white/[0.07] border border-zinc-200/95 hover:border-zinc-300 dark:border-white/[0.08] shadow-tactile flex items-center justify-center text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white transition-colors"
+                  >
+                    <Search className="h-3.5 w-3.5" />
+                  </motion.button>
+                </MorphTooltip>
+              ) : (
+                <motion.button
+                  type="button"
+                  whileTap={TAP_SCALE_SUBTLE}
+                  transition={SPRING_SNAPPY}
+                  onClick={() => setCommandOpen(true)}
+                  className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-white/[0.04] hover:bg-white/95 dark:hover:bg-white/[0.07] border border-zinc-200/95 hover:border-zinc-300 dark:border-white/[0.08] shadow-tactile flex items-center justify-between text-xs text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors"
+                >
+                  <span className="inline-flex items-center gap-2">
+                    <Search className="h-3.5 w-3.5" />
+                    <span>快速检索...</span>
+                  </span>
+                  <KeycapBadge>⌘K</KeycapBadge>
+                </motion.button>
+              )}
             </div>
 
             {/* Scrollable Navigation Groups */}
-            <div className="flex-1 overflow-y-auto px-3 space-y-5">
+            <div
+              className={cn(
+                "flex-1 overflow-y-auto overflow-x-hidden space-y-5",
+                sidebarCollapsed ? "px-2" : "px-3"
+              )}
+            >
               {/* Group 1: Ledger Category */}
               <div>
-                <div className="px-2.5 pb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                  台账分类
-                </div>
-                <nav className="space-y-0.5">
+                {!sidebarCollapsed && (
+                  <div className="px-2.5 pb-1.5 text-[10.5px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                    台账分类
+                  </div>
+                )}
+                <nav className={cn("space-y-0.5", sidebarCollapsed && "flex flex-col items-center")}>
                   {(
                     [
                       {
@@ -1276,7 +1375,7 @@ export default function App() {
                   ).map((item) => {
                     const active = activeTab === item.id;
                     const Icon = item.icon;
-                    return (
+                    const btn = (
                       <motion.button
                         key={item.id}
                         type="button"
@@ -1286,8 +1385,12 @@ export default function App() {
                           setActiveTab(item.id);
                           setDeptFilter("all");
                         }}
+                        aria-label={item.label}
                         className={cn(
-                          "relative w-full px-2.5 py-2 rounded-lg text-xs font-medium flex items-center justify-between transition-colors",
+                          "relative rounded-lg text-xs font-medium flex items-center transition-colors",
+                          sidebarCollapsed
+                            ? "h-9 w-9 justify-center"
+                            : "w-full px-2.5 py-2 justify-between",
                           active
                             ? "text-zinc-950 dark:text-white"
                             : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-white/[0.04]"
@@ -1309,18 +1412,32 @@ export default function App() {
                                 : "text-zinc-400 dark:text-zinc-500"
                             )}
                           />
-                          <span>{item.label}</span>
+                          {!sidebarCollapsed && <span>{item.label}</span>}
                         </span>
-                        <SlidingNumber
-                          value={item.count}
-                          className={cn(
-                            "relative z-10 font-mono text-[11px]",
-                            active
-                              ? "text-zinc-700 dark:text-zinc-200 font-semibold"
-                              : "text-zinc-400 dark:text-zinc-500"
-                          )}
-                        />
+                        {!sidebarCollapsed && (
+                          <SlidingNumber
+                            value={item.count}
+                            className={cn(
+                              "relative z-10 font-mono text-[11px]",
+                              active
+                                ? "text-zinc-700 dark:text-zinc-200 font-semibold"
+                                : "text-zinc-400 dark:text-zinc-500"
+                            )}
+                          />
+                        )}
                       </motion.button>
+                    );
+
+                    return sidebarCollapsed ? (
+                      <MorphTooltip
+                        key={item.id}
+                        placement="right"
+                        content={`${item.label} · ${item.count}`}
+                      >
+                        {btn}
+                      </MorphTooltip>
+                    ) : (
+                      btn
                     );
                   })}
                 </nav>
@@ -1328,18 +1445,22 @@ export default function App() {
 
               {/* Group 2: Precision Status Smart Views (Spring layoutId Pill) */}
               <div>
-                <div className="px-2.5 pb-1.5 flex items-center justify-between text-[10.5px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-                  <span>效期状态</span>
-                  <button
-                    type="button"
-                    onClick={() => openSettingsTab("alerts")}
-                    className="font-mono normal-case text-[10px] hover:text-zinc-700 dark:hover:text-zinc-200 transition"
-                    title="点击配置多级到期预警天数与颜色"
-                  >
-                    预警 ≤{maxWarningDays}d
-                  </button>
-                </div>
-                <nav className="space-y-0.5">
+                {sidebarCollapsed ? (
+                  <div className="mx-auto mb-2 h-px w-6 bg-zinc-200/90 dark:bg-white/[0.08]" />
+                ) : (
+                  <div className="px-2.5 pb-1.5 flex items-center justify-between text-[10.5px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                    <span>效期状态</span>
+                    <button
+                      type="button"
+                      onClick={() => openSettingsTab("alerts")}
+                      className="font-mono normal-case text-[10px] hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+                      title="点击配置多级到期预警天数与颜色"
+                    >
+                      预警 ≤{maxWarningDays}d
+                    </button>
+                  </div>
+                )}
+                <nav className={cn("space-y-0.5", sidebarCollapsed && "flex flex-col items-center")}>
                   {(
                     [
                       {
@@ -1380,15 +1501,19 @@ export default function App() {
                     ] as const
                   ).map((st) => {
                     const active = statusFilter === st.id;
-                    return (
+                    const btn = (
                       <motion.button
                         key={st.id}
                         type="button"
                         whileTap={TAP_SCALE_SUBTLE}
                         transition={SPRING_SNAPPY}
                         onClick={() => handleSelectStatusFilter(st.id)}
+                        aria-label={`${st.label} (${st.count})`}
                         className={cn(
-                          "relative w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors",
+                          "relative rounded-lg text-xs flex items-center transition-colors",
+                          sidebarCollapsed
+                            ? "h-8 w-9 justify-center"
+                            : "w-full px-2.5 py-1.5 justify-between",
                           active
                             ? "text-zinc-950 dark:text-white font-medium"
                             : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/45 dark:hover:bg-white/[0.04]"
@@ -1402,280 +1527,471 @@ export default function App() {
                           />
                         )}
                         <span className="relative z-10 inline-flex items-center gap-2.5">
-                          <span className={cn("h-1.5 w-1.5 rounded-full", st.dot)} />
-                          <span>{st.label}</span>
+                          <span
+                            className={cn(
+                              "rounded-full",
+                              sidebarCollapsed ? "h-2 w-2" : "h-1.5 w-1.5",
+                              st.dot
+                            )}
+                          />
+                          {!sidebarCollapsed && <span>{st.label}</span>}
                         </span>
-                        <span
-                          className={cn(
-                            "relative z-10 font-mono tabular-nums text-[11px]",
-                            st.id === "expired" && st.count > 0
-                              ? "px-1.5 py-0.2 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold"
-                              : st.id === "warning" && st.count > 0
-                                ? "px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 font-semibold"
-                                : "text-zinc-400 dark:text-zinc-500"
-                          )}
-                        >
-                          <SlidingNumber value={st.count} />
-                        </span>
+                        {!sidebarCollapsed ? (
+                          <span
+                            className={cn(
+                              "relative z-10 font-mono tabular-nums text-[11px]",
+                              st.id === "expired" && st.count > 0
+                                ? "px-1.5 py-0.2 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold"
+                                : st.id === "warning" && st.count > 0
+                                  ? "px-1.5 py-0.2 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-300 font-semibold"
+                                  : "text-zinc-400 dark:text-zinc-500"
+                            )}
+                          >
+                            <SlidingNumber value={st.count} />
+                          </span>
+                        ) : st.alert ? (
+                          <span
+                            className={cn(
+                              "relative z-10 ml-1 text-[9.5px] font-mono tabular-nums font-semibold",
+                              st.id === "expired"
+                                ? "text-rose-600 dark:text-rose-400"
+                                : "text-amber-600 dark:text-amber-300"
+                            )}
+                          >
+                            {st.count > 99 ? "99+" : st.count}
+                          </span>
+                        ) : null}
                       </motion.button>
+                    );
+
+                    return sidebarCollapsed ? (
+                      <MorphTooltip
+                        key={st.id}
+                        placement="right"
+                        content={`${st.label} · ${st.count} 台`}
+                      >
+                        {btn}
+                      </MorphTooltip>
+                    ) : (
+                      btn
                     );
                   })}
                 </nav>
               </div>
             </div>
 
-            {/* Minimalist Compliance Overview Widget with Subtle Daylight Spotlight */}
-            <div className="px-3 pb-3">
-              <SpotlightSurface
-                spotlightColor="rgba(79, 70, 229, 0.065)"
-                radius={170}
-                className="p-3 rounded-xl bg-white/90 dark:bg-white/[0.03] border border-zinc-200/85 dark:border-white/[0.07] shadow-tactile space-y-2.5"
-              >
-                <div className="flex items-baseline justify-between">
-                  <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
-                    在控设备合规率
-                  </span>
-                  <SlidingNumber
-                    value={stats.compliancePct}
-                    suffix="%"
-                    className="text-sm font-semibold font-mono text-zinc-900 dark:text-white"
-                  />
-                </div>
-
-                {/* Hairline Multi-Segment Compliance Bar */}
-                <div className="h-1.5 w-full rounded-full bg-zinc-200/80 dark:bg-white/[0.07] overflow-hidden flex gap-0.5">
-                  {stats.controlled > 0 ? (
-                    <>
-                      {stats.valid > 0 && (
-                        <motion.div
-                          initial={false}
-                          animate={{
-                            width: `${(stats.valid / stats.controlled) * 100}%`,
-                          }}
-                          transition={{ duration: 0.5, ease: EASE_PRECISION }}
-                          className="h-full bg-emerald-500 rounded-full"
-                        />
-                      )}
-                      {stats.tierSegments.map((seg) =>
-                        seg.count > 0 ? (
-                          <motion.div
-                            key={seg.id}
-                            initial={false}
-                            animate={{
-                              width: `${(seg.count / stats.controlled) * 100}%`,
-                            }}
-                            transition={{ duration: 0.5, ease: EASE_PRECISION }}
-                            className="h-full rounded-full"
-                            style={{ backgroundColor: seg.color }}
-                          />
-                        ) : null
-                      )}
-                      {stats.expired > 0 && (
-                        <motion.div
-                          initial={false}
-                          animate={{
-                            width: `${(stats.expired / stats.controlled) * 100}%`,
-                          }}
-                          transition={{ duration: 0.5, ease: EASE_PRECISION }}
-                          className="h-full bg-rose-500 rounded-full"
-                        />
-                      )}
-                    </>
-                  ) : (
-                    <div className="h-full w-full bg-zinc-300/60 dark:bg-zinc-700/50 rounded-full" />
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between text-[10.5px] font-mono tabular-nums text-zinc-400 dark:text-zinc-500">
-                  <span>受控 {stats.controlled}</span>
-                  <span>
-                    {stats.expired > 0 ? `${stats.expired} 台待复校` : "效期状态良好"}
-                  </span>
-                </div>
-              </SpotlightSurface>
-            </div>
+            {/* Interactive Expandable Compliance Meter (Storage Meter style) */}
+            <ComplianceMeterCard
+              collapsed={sidebarCollapsed}
+              controlled={stats.controlled}
+              compliancePct={stats.compliancePct}
+              valid={stats.valid}
+              expired={stats.expired}
+              tierSegments={stats.tierSegments}
+              onFilterStatus={handleSelectStatusFilter}
+              onFilterExpiry={handleSelectExpiryFilter}
+            />
 
             {/* Sidebar Bottom Account & Utility Rail */}
-            <div className="p-3 border-t border-zinc-200/80 dark:border-white/[0.07] space-y-2">
-              {auth.isAdmin ? (
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => openSettingsTab("account")}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      openSettingsTab("account");
-                    }
-                  }}
-                  title="账号"
-                  className="btn-tactile px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50/90 dark:bg-white/[0.04] dark:hover:bg-white/[0.07] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile flex items-center justify-between gap-2 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2 min-w-0">
-                    {avatarDataUrl ? (
-                      <img
-                        src={avatarDataUrl}
-                        alt="头像"
-                        className="h-7 w-7 rounded-full object-cover border border-zinc-200 dark:border-white/15 shrink-0"
-                      />
-                    ) : (
-                      <div className="h-7 w-7 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 flex items-center justify-center text-[11px] font-semibold uppercase shrink-0">
-                        {auth.username.slice(0, 1) || "A"}
-                      </div>
-                    )}
-                    <div className="min-w-0">
-                      <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                        {auth.username}
-                      </div>
-                      <div className="text-[10px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1 min-w-0">
-                        <ShieldCheck className="h-2.5 w-2.5 shrink-0" />
-                        <span className="truncate">
-                          {settings.adminTitle || "系统管理员"} · {formatAdminSessionRemaining(auth.adminSessionExpiresAt)}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                  <motion.button
-                    type="button"
-                    whileTap={TAP_SCALE_ICON}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleLogout();
-                    }}
-                    className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition"
-                    title="退出登录"
-                  >
-                    <LogOut className="h-3.5 w-3.5" />
-                  </motion.button>
-                </div>
-              ) : (
-                <motion.button
-                  type="button"
-                  whileTap={TAP_SCALE}
-                  transition={SPRING_SNAPPY}
-                  onClick={() => setLoginModalOpen(true)}
-                  className="btn-sheen w-full px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium inline-flex items-center justify-center gap-1.5 shadow-tactile-primary transition-colors"
-                >
-                  <LogIn className="h-3.5 w-3.5" />
-                  <span>管理员登录</span>
-                </motion.button>
+            <div
+              className={cn(
+                "border-t border-zinc-200/80 dark:border-white/[0.07] space-y-2",
+                sidebarCollapsed ? "p-2 flex flex-col items-center" : "p-3"
               )}
-
-              {/* Compact Sidebar Update Banner when New Version is Available */}
-              <AnimatePresence>
-                {availableUpdate?.hasUpdate && (
-                  <motion.button
-                    key="sidebar-update-banner"
-                    type="button"
-                    initial={{ opacity: 0, y: 6 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: 6 }}
-                    whileTap={TAP_SCALE_SUBTLE}
-                    onClick={() => setUpdatePopupOpen(true)}
-                    className="w-full px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-zinc-200/90 dark:border-white/[0.1] shadow-tactile flex items-center justify-between gap-2 text-left transition"
-                    title="点击查看并一键安装新版本"
-                  >
-                    <span className="flex items-center gap-2 min-w-0">
-                      <span className="relative flex h-2 w-2 shrink-0">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
-                      </span>
-                      <span className="text-[11.5px] font-medium text-zinc-800 dark:text-zinc-100 truncate">
-                        新版本{" "}
-                        <span className="font-mono font-semibold text-zinc-950 dark:text-white">
-                          v{availableUpdate.latestVersion}
-                        </span>
-                      </span>
-                    </span>
-                    <span className="inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-sky-600 dark:text-sky-400 shrink-0">
-                      <span>{updatingApp ? "更新中" : "更新"}</span>
-                      <ChevronRight className="h-3 w-3" />
-                    </span>
-                  </motion.button>
-                )}
-              </AnimatePresence>
-
-              {/* Compact Utility Controls */}
-              <div className="grid grid-cols-4 gap-1">
-                <motion.button
-                  type="button"
-                  whileTap={TAP_SCALE_ICON}
-                  transition={SPRING_SNAPPY}
-                  onClick={handleLock}
-                  className="relative py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
-                  title={
-                    auth.appLockEnabled
-                      ? "立即锁定应用 (⌘L)"
-                      : "开启并设置独立应用锁 (⌘L)"
-                  }
-                >
-                  <Lock className="h-3.5 w-3.5" />
-                  {auth.appLockEnabled && (
-                    <span className="absolute top-1.5 right-3 h-1.5 w-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400" />
-                  )}
-                </motion.button>
-                <motion.button
-                  type="button"
-                  whileTap={TAP_SCALE_ICON}
-                  transition={SPRING_SNAPPY}
-                  onClick={() => openSettingsTab(auth.isAdmin ? "general" : "window")}
-                  className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
-                  title={auth.isAdmin ? "系统设置与安全配置" : "窗口托盘与软件设置"}
-                >
-                  <Settings className="h-3.5 w-3.5" />
-                </motion.button>
-                <motion.button
-                  type="button"
-                  whileTap={TAP_SCALE_ICON}
-                  transition={SPRING_SNAPPY}
-                  onClick={() =>
-                    availableUpdate?.hasUpdate
-                      ? setUpdatePopupOpen((v) => !v)
-                      : openSettingsTab("update")
-                  }
-                  className="relative py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
-                  title={
-                    availableUpdate?.hasUpdate
-                      ? `发现新版本 v${availableUpdate.latestVersion}，点击查看`
-                      : "检查软件更新"
-                  }
-                >
-                  <CloudDownload className="h-3.5 w-3.5" />
-                  {availableUpdate?.hasUpdate && (
-                    <span className="absolute top-1 right-2.5 flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
-                      <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500 ring-2 ring-zinc-50 dark:ring-[#0c0c0f]" />
-                    </span>
-                  )}
-                </motion.button>
-                <motion.button
-                  type="button"
-                  whileTap={TAP_SCALE_ICON}
-                  transition={SPRING_SNAPPY}
-                  onClick={toggleTheme}
-                  className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors overflow-hidden"
-                  title={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
-                >
-                  <AnimatePresence mode="wait" initial={false}>
-                    <motion.span
-                      key={theme}
-                      initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
-                      animate={{ opacity: 1, rotate: 0, scale: 1 }}
-                      exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
-                      transition={{ duration: 0.18, ease: EASE_PRECISION }}
-                      className="flex items-center justify-center"
+            >
+              {sidebarCollapsed ? (
+                <>
+                  {auth.isAdmin ? (
+                    <MorphTooltip
+                      placement="right"
+                      content={auth.username}
                     >
-                      {theme === "dark" ? (
-                        <Sun className="h-3.5 w-3.5" />
-                      ) : (
-                        <Moon className="h-3.5 w-3.5" />
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={() => openSettingsTab("account")}
+                        data-av={
+                          !avatarDataUrl && isGrainMeshId(accountBg)
+                            ? accountBg
+                            : undefined
+                        }
+                        className="h-9 w-9 rounded-xl bg-white dark:bg-white/[0.05] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile flex items-center justify-center overflow-hidden"
+                      >
+                        {avatarDataUrl ? (
+                          <img
+                            src={avatarDataUrl}
+                            alt="头像"
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <span
+                            className={cn(
+                              "text-xs font-semibold uppercase",
+                              isGrainMeshId(accountBg)
+                                ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+                                : "text-emerald-700 dark:text-emerald-400"
+                            )}
+                          >
+                            {auth.username.slice(0, 1) || "A"}
+                          </span>
+                        )}
+                      </motion.button>
+                    </MorphTooltip>
+                  ) : (
+                    <MorphTooltip placement="right" content="管理员登录">
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={() => setLoginModalOpen(true)}
+                        className="h-9 w-9 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 flex items-center justify-center shadow-tactile-primary transition-colors"
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                      </motion.button>
+                    </MorphTooltip>
+                  )}
+
+                  <div className="flex flex-col items-center gap-1 w-full">
+                    <MorphTooltip placement="right" content="展开侧边栏 (⌘B)">
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={toggleSidebar}
+                        aria-label="展开侧边栏"
+                        className="h-8 w-9 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
+                      >
+                        <PanelLeftOpen className="h-3.5 w-3.5" />
+                      </motion.button>
+                    </MorphTooltip>
+
+                    <MorphTooltip
+                      placement="right"
+                      content={
+                        auth.appLockEnabled
+                          ? "立即锁定应用 (⌘L)"
+                          : "开启并设置独立应用锁 (⌘L)"
+                      }
+                    >
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={handleLock}
+                        className="relative h-8 w-9 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
+                      >
+                        <Lock className="h-3.5 w-3.5" />
+                        {auth.appLockEnabled && (
+                          <span className="absolute top-1.5 right-2 h-1.5 w-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400" />
+                        )}
+                      </motion.button>
+                    </MorphTooltip>
+
+                    <MorphTooltip
+                      placement="right"
+                      content={auth.isAdmin ? "系统设置与安全配置" : "窗口托盘与软件设置"}
+                    >
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={() => openSettingsTab(auth.isAdmin ? "general" : "window")}
+                        className="h-8 w-9 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                      </motion.button>
+                    </MorphTooltip>
+
+                    <MorphTooltip
+                      placement="right"
+                      content={
+                        availableUpdate?.hasUpdate
+                          ? `发现新版本 v${availableUpdate.latestVersion}，点击查看`
+                          : "检查软件更新"
+                      }
+                    >
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={() =>
+                          availableUpdate?.hasUpdate
+                            ? setUpdatePopupOpen((v) => !v)
+                            : openSettingsTab("update")
+                        }
+                        className="relative h-8 w-9 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
+                      >
+                        <CloudDownload className="h-3.5 w-3.5" />
+                        {availableUpdate?.hasUpdate && (
+                          <span className="absolute top-1 right-1.5 flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500 ring-2 ring-zinc-50 dark:ring-[#0c0c0f]" />
+                          </span>
+                        )}
+                      </motion.button>
+                    </MorphTooltip>
+
+                    <MorphTooltip
+                      placement="right"
+                      content={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
+                    >
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={toggleTheme}
+                        className="h-8 w-9 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors overflow-hidden"
+                      >
+                        <AnimatePresence mode="wait" initial={false}>
+                          <motion.span
+                            key={theme}
+                            initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
+                            animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                            exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
+                            transition={{ duration: 0.18, ease: EASE_PRECISION }}
+                            className="flex items-center justify-center"
+                          >
+                            {theme === "dark" ? (
+                              <Sun className="h-3.5 w-3.5" />
+                            ) : (
+                              <Moon className="h-3.5 w-3.5" />
+                            )}
+                          </motion.span>
+                        </AnimatePresence>
+                      </motion.button>
+                    </MorphTooltip>
+                  </div>
+                </>
+              ) : (
+                <>
+                  {auth.isAdmin ? (
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openSettingsTab("account")}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openSettingsTab("account");
+                        }
+                      }}
+                      title="账号与背景设置"
+                      className="btn-tactile relative overflow-hidden px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50/90 dark:bg-white/[0.04] dark:hover:bg-white/[0.07] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile flex items-center justify-between gap-2 cursor-pointer"
+                    >
+                      {/* Subtle grainy mesh ambient tint matching selected account cover */}
+                      {isGrainMeshId(accountBg) && (
+                        <>
+                          <span
+                            aria-hidden="true"
+                            data-av={accountBg}
+                            className="pointer-events-none absolute inset-0 opacity-[0.14] dark:opacity-[0.22]"
+                          />
+                          <span
+                            aria-hidden="true"
+                            data-av={accountBg}
+                            className="pointer-events-none absolute inset-y-0 left-0 w-[3px]"
+                          />
+                        </>
                       )}
-                    </motion.span>
+                      <div className="relative z-10 flex items-center gap-2 min-w-0">
+                        {avatarDataUrl ? (
+                          <img
+                            src={avatarDataUrl}
+                            alt="头像"
+                            className="h-7 w-7 rounded-full object-cover border border-white/80 dark:border-white/20 shadow-sm shrink-0"
+                          />
+                        ) : (
+                          <div
+                            data-av={isGrainMeshId(accountBg) ? accountBg : undefined}
+                            className={cn(
+                              "h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold uppercase shrink-0",
+                              isGrainMeshId(accountBg)
+                                ? "text-white ring-1 ring-white/50 shadow-sm [text-shadow:0_1px_2px_rgba(0,0,0,0.3)]"
+                                : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                            )}
+                          >
+                            {auth.username.slice(0, 1) || "A"}
+                          </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">
+                            {auth.username}
+                          </div>
+                        </div>
+                      </div>
+                      <MorphTooltip content="退出登录" placement="top">
+                        <motion.button
+                          type="button"
+                          whileTap={TAP_SCALE_ICON}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleLogout();
+                          }}
+                          className="relative z-10 p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:text-zinc-300 dark:hover:text-white hover:bg-white/70 dark:hover:bg-white/[0.1] transition"
+                          aria-label="退出登录"
+                        >
+                          <LogOut className="h-3.5 w-3.5" />
+                        </motion.button>
+                      </MorphTooltip>
+                    </div>
+                  ) : (
+                    <motion.button
+                      type="button"
+                      whileTap={TAP_SCALE}
+                      transition={SPRING_SNAPPY}
+                      onClick={() => setLoginModalOpen(true)}
+                      className="btn-sheen w-full px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium inline-flex items-center justify-center gap-1.5 shadow-tactile-primary transition-colors"
+                    >
+                      <LogIn className="h-3.5 w-3.5" />
+                      <span>管理员登录</span>
+                    </motion.button>
+                  )}
+
+                  {/* Compact Sidebar Update Banner when New Version is Available */}
+                  <AnimatePresence>
+                    {availableUpdate?.hasUpdate && (
+                      <motion.button
+                        key="sidebar-update-banner"
+                        type="button"
+                        initial={{ opacity: 0, y: 6 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: 6 }}
+                        whileTap={TAP_SCALE_SUBTLE}
+                        onClick={() => setUpdatePopupOpen(true)}
+                        className="w-full px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-zinc-200/90 dark:border-white/[0.1] shadow-tactile flex items-center justify-between gap-2 text-left transition"
+                        title="点击查看并一键安装新版本"
+                      >
+                        <span className="flex items-center gap-2 min-w-0">
+                          <span className="relative flex h-2 w-2 shrink-0">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
+                          </span>
+                          <span className="text-[11.5px] font-medium text-zinc-800 dark:text-zinc-100 truncate">
+                            新版本{" "}
+                            <span className="font-mono font-semibold text-zinc-950 dark:text-white">
+                              v{availableUpdate.latestVersion}
+                            </span>
+                          </span>
+                        </span>
+                        <span className="inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-sky-600 dark:text-sky-400 shrink-0">
+                          <span>{updatingApp ? "更新中" : "更新"}</span>
+                          <ChevronRight className="h-3 w-3" />
+                        </span>
+                      </motion.button>
+                    )}
                   </AnimatePresence>
-                </motion.button>
-              </div>
+
+                  {/* Compact Utility Controls with Shared Morphing Tooltip */}
+                  <div className="grid grid-cols-4 gap-1">
+                    <MorphTooltip
+                      placement="top"
+                      className="w-full"
+                      content={
+                        auth.appLockEnabled
+                          ? "立即锁定应用 (⌘L)"
+                          : "开启并设置独立应用锁 (⌘L)"
+                      }
+                    >
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={handleLock}
+                        aria-label="锁定应用"
+                        className="relative w-full py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
+                      >
+                        <Lock className="h-3.5 w-3.5" />
+                        {auth.appLockEnabled && (
+                          <span className="absolute top-1.5 right-3 h-1.5 w-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400" />
+                        )}
+                      </motion.button>
+                    </MorphTooltip>
+
+                    <MorphTooltip
+                      placement="top"
+                      className="w-full"
+                      content={auth.isAdmin ? "系统设置与安全配置" : "窗口托盘与软件设置"}
+                    >
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={() => openSettingsTab(auth.isAdmin ? "general" : "window")}
+                        aria-label="设置"
+                        className="w-full py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
+                      >
+                        <Settings className="h-3.5 w-3.5" />
+                      </motion.button>
+                    </MorphTooltip>
+
+                    <MorphTooltip
+                      placement="top"
+                      className="w-full"
+                      content={
+                        availableUpdate?.hasUpdate
+                          ? `发现新版本 v${availableUpdate.latestVersion}，点击查看`
+                          : "检查软件更新"
+                      }
+                    >
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={() =>
+                          availableUpdate?.hasUpdate
+                            ? setUpdatePopupOpen((v) => !v)
+                            : openSettingsTab("update")
+                        }
+                        aria-label="检查更新"
+                        className="relative w-full py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
+                      >
+                        <CloudDownload className="h-3.5 w-3.5" />
+                        {availableUpdate?.hasUpdate && (
+                          <span className="absolute top-1 right-2.5 flex h-2 w-2">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                            <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500 ring-2 ring-zinc-50 dark:ring-[#0c0c0f]" />
+                          </span>
+                        )}
+                      </motion.button>
+                    </MorphTooltip>
+
+                    <MorphTooltip
+                      placement="top"
+                      className="w-full"
+                      content={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
+                    >
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE_ICON}
+                        transition={SPRING_SNAPPY}
+                        onClick={toggleTheme}
+                        aria-label="切换明暗主题"
+                        className="w-full py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors overflow-hidden"
+                      >
+                        <AnimatePresence mode="wait" initial={false}>
+                          <motion.span
+                            key={theme}
+                            initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
+                            animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                            exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
+                            transition={{ duration: 0.18, ease: EASE_PRECISION }}
+                            className="flex items-center justify-center"
+                          >
+                            {theme === "dark" ? (
+                              <Sun className="h-3.5 w-3.5" />
+                            ) : (
+                              <Moon className="h-3.5 w-3.5" />
+                            )}
+                          </motion.span>
+                        </AnimatePresence>
+                      </motion.button>
+                    </MorphTooltip>
+                  </div>
+                </>
+              )}
             </div>
-          </aside>
+          </motion.aside>
 
           {/* Main Workspace Canvas */}
           <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-[#09090b]">
@@ -1766,6 +2082,8 @@ export default function App() {
                       type="button"
                       whileTap={TAP_SCALE}
                       transition={SPRING_SNAPPY}
+                      onMouseEnter={() => setBellHovered(true)}
+                      onMouseLeave={() => setBellHovered(false)}
                       onClick={() => openAlertModal()}
                       style={hasAlerts ? alertVisuals.cssVars : undefined}
                       className={cn(
@@ -1777,7 +2095,11 @@ export default function App() {
                       title="打开设备效期预警弹窗"
                     >
                       <span className="relative flex items-center justify-center">
-                        <BellRing className="h-3.5 w-3.5" />
+                        <AnimatedBellIcon
+                          hasAlerts={hasAlerts}
+                          alertCount={alertSummary.totalAlertCount}
+                          hovered={bellHovered}
+                        />
                         {hasAlerts && (
                           <span
                             className="animate-ping absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full opacity-75"
@@ -1811,25 +2133,65 @@ export default function App() {
                   </motion.button>
                 )}
 
-                {/* Export Menu */}
+                {/* Export Menu with Loading -> Success Micro-Morph */}
                 <div className="relative">
                   <motion.button
                     type="button"
-                    whileTap={TAP_SCALE}
+                    disabled={exportStatus === "loading"}
+                    whileTap={exportStatus === "loading" ? undefined : TAP_SCALE}
                     transition={SPRING_SNAPPY}
                     onClick={(e) => {
                       e.stopPropagation();
                       setExportMenuOpen((v) => !v);
                     }}
                     className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-zinc-700 dark:text-zinc-200 text-xs font-medium transition-all",
-                      exportMenuOpen
-                        ? "border-zinc-400 dark:border-white/25 ring-[3px] ring-zinc-900/[0.06] dark:ring-white/[0.08]"
-                        : "border-zinc-200/95 dark:border-white/[0.09]"
+                      "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border shadow-tactile text-xs font-medium transition-all",
+                      exportStatus === "success"
+                        ? "bg-emerald-500/10 dark:bg-emerald-500/15 border-emerald-500/40 text-emerald-700 dark:text-emerald-300"
+                        : exportMenuOpen
+                          ? "bg-white dark:bg-white/[0.03] border-zinc-400 dark:border-white/25 ring-[3px] ring-zinc-900/[0.06] dark:ring-white/[0.08] text-zinc-700 dark:text-zinc-200"
+                          : "bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] border-zinc-200/95 dark:border-white/[0.09] text-zinc-700 dark:text-zinc-200"
                     )}
                   >
-                    <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
-                    <span>导出</span>
+                    <AnimatePresence mode="wait" initial={false}>
+                      {exportStatus === "loading" ? (
+                        <motion.span
+                          key="exp-load"
+                          initial={{ opacity: 0, scale: 0.8 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          transition={{ duration: 0.14 }}
+                          className="inline-flex items-center gap-1.5"
+                        >
+                          <Loader2 className="h-3.5 w-3.5 animate-spin text-emerald-600 dark:text-emerald-400" />
+                          <span>导出中...</span>
+                        </motion.span>
+                      ) : exportStatus === "success" ? (
+                        <motion.span
+                          key="exp-ok"
+                          initial={{ opacity: 0, scale: 0.75 }}
+                          animate={{ opacity: 1, scale: 1 }}
+                          exit={{ opacity: 0, scale: 0.8 }}
+                          transition={SPRING_SNAPPY}
+                          className="inline-flex items-center gap-1.5"
+                        >
+                          <Check className="h-3.5 w-3.5 stroke-[2.5]" />
+                          <span>已导出</span>
+                        </motion.span>
+                      ) : (
+                        <motion.span
+                          key="exp-idle"
+                          initial={{ opacity: 0 }}
+                          animate={{ opacity: 1 }}
+                          exit={{ opacity: 0 }}
+                          transition={{ duration: 0.12 }}
+                          className="inline-flex items-center gap-1.5"
+                        >
+                          <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
+                          <span>导出</span>
+                        </motion.span>
+                      )}
+                    </AnimatePresence>
                     <motion.span
                       animate={{ rotate: exportMenuOpen ? 180 : 0 }}
                       transition={SPRING_SNAPPY}
@@ -2008,13 +2370,20 @@ export default function App() {
                     transition={SPRING_SNAPPY}
                     onClick={() => handleSelectExpiryFilter("all")}
                     className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
+                      "relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
                       expiryFilter === "all"
-                        ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 border-zinc-900 dark:border-white shadow-tactile-primary"
+                        ? "text-white dark:text-zinc-950 border-transparent"
                         : "bg-white dark:bg-white/[0.03] border-zinc-200/95 dark:border-white/[0.08] shadow-tactile text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-300 dark:hover:border-white/[0.15]"
                     )}
                   >
-                    <span>全部</span>
+                    {expiryFilter === "all" && (
+                      <motion.span
+                        layoutId="expiry-filter-pill"
+                        transition={SPRING_SNAPPY}
+                        className="absolute inset-0 rounded-full bg-zinc-900 dark:bg-white shadow-tactile-primary"
+                      />
+                    )}
+                    <span className="relative z-10">全部</span>
                   </motion.button>
 
                   {descThresholds.map((tier) => {
@@ -2030,30 +2399,35 @@ export default function App() {
                         onClick={() =>
                           handleSelectExpiryFilter(active ? "all" : tier.days)
                         }
-                        style={{
-                          ...visuals.cssVars,
-                          borderColor: active ? visuals.hex : undefined,
-                        }}
+                        style={visuals.cssVars}
                         className={cn(
-                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
+                          "relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
                           active
-                            ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] shadow-tactile"
+                            ? "border-transparent text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]"
                             : "bg-white dark:bg-white/[0.03] border-zinc-200/95 dark:border-white/[0.08] shadow-tactile text-zinc-600 dark:text-zinc-300 hover:bg-[var(--tier-bg)] dark:hover:bg-[var(--tier-bg-dark)]"
                         )}
                         title={`筛选未来 ${tier.days} 天内到期的设备（${tier.label}）`}
                       >
+                        {active && (
+                          <motion.span
+                            layoutId="expiry-filter-pill"
+                            transition={SPRING_SNAPPY}
+                            style={{ borderColor: visuals.hex }}
+                            className="absolute inset-0 rounded-full border bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] shadow-tactile"
+                          />
+                        )}
                         <span
-                          className="h-1.5 w-1.5 rounded-full shrink-0"
+                          className="relative z-10 h-1.5 w-1.5 rounded-full shrink-0"
                           style={{
                             backgroundColor: visuals.hex,
                             boxShadow: active ? visuals.glow : undefined,
                           }}
                         />
-                        <span>{tier.days}天内</span>
+                        <span className="relative z-10">{tier.days}天内</span>
                         <SlidingNumber
                           value={count}
                           className={cn(
-                            "font-mono text-[10.5px]",
+                            "relative z-10 font-mono text-[10.5px]",
                             active
                               ? "font-semibold"
                               : count > 0
@@ -2075,19 +2449,26 @@ export default function App() {
                       )
                     }
                     className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
+                      "relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
                       expiryFilter === "expired"
-                        ? "bg-rose-500/[0.12] dark:bg-rose-500/[0.18] text-rose-700 dark:text-rose-300 border-rose-500 shadow-tactile"
+                        ? "border-transparent text-rose-700 dark:text-rose-300"
                         : "bg-white dark:bg-white/[0.03] border-zinc-200/95 dark:border-white/[0.08] shadow-tactile text-zinc-600 dark:text-zinc-300 hover:bg-rose-500/[0.07] hover:border-rose-300 dark:hover:border-rose-500/40"
                     )}
                     title="筛选已超过下次检验日期的设备"
                   >
-                    <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
-                    <span>已超期</span>
+                    {expiryFilter === "expired" && (
+                      <motion.span
+                        layoutId="expiry-filter-pill"
+                        transition={SPRING_SNAPPY}
+                        className="absolute inset-0 rounded-full border border-rose-500 bg-rose-500/[0.12] dark:bg-rose-500/[0.18] shadow-tactile"
+                      />
+                    )}
+                    <span className="relative z-10 h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+                    <span className="relative z-10">已超期</span>
                     <SlidingNumber
                       value={expiryFilterCounts.expired}
                       className={cn(
-                        "font-mono text-[10.5px]",
+                        "relative z-10 font-mono text-[10.5px]",
                         expiryFilterCounts.expired > 0
                           ? "text-rose-600 dark:text-rose-400 font-semibold"
                           : "text-zinc-300 dark:text-zinc-600"
@@ -2217,9 +2598,18 @@ export default function App() {
                 />
 
                 <div className="hidden xl:flex items-center gap-2.5 pl-2.5 border-l border-zinc-200/80 dark:border-white/[0.07]">
-                  <span>⌘K 检索</span>
-                  <span className="text-zinc-300 dark:text-zinc-700">·</span>
-                  <span>⌘L 锁屏</span>
+                  <span className="inline-flex items-center gap-1">
+                    <KeycapBadge onClick={() => setCommandOpen(true)}>⌘K</KeycapBadge>
+                    <span>检索</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <KeycapBadge onClick={handleLock}>⌘L</KeycapBadge>
+                    <span>锁屏</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1">
+                    <KeycapBadge onClick={toggleSidebar}>⌘B</KeycapBadge>
+                    <span>侧栏</span>
+                  </span>
                 </div>
               </div>
             </footer>
@@ -2334,6 +2724,8 @@ export default function App() {
         initialTab={settingsInitialTab}
         isAdmin={auth.isAdmin}
         adminSessionExpiresAt={auth.adminSessionExpiresAt}
+        accountBg={accountBg}
+        onAccountBgChange={handleAccountBgChange}
         settings={settings}
         availableUpdate={availableUpdate}
         updatingApp={updatingApp}
@@ -2462,5 +2854,6 @@ export default function App() {
         }}
       />
     </div>
+    </MorphTooltipProvider>
   );
 }

@@ -24,6 +24,13 @@ import {
 } from "@/lib/motion";
 import { Collapsible } from "@/components/ui/MotionPrimitives";
 import { PrecisionSelect, PrecisionSwitch } from "@/components/ui/FormControls";
+import {
+  ActionStatusButton,
+  CopyButton,
+  NumberStepper,
+  PrecisionFileDropZone,
+  useActionStatus,
+} from "@/components/ui/InteractiveControls";
 import type {
   CalibrationType,
   Instrument,
@@ -90,6 +97,12 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
 
   const [showExtended, setShowExtended] = useState(true);
   const [saving, setSaving] = useState(false);
+  const {
+    status: saveStatus,
+    setStatus: setSaveStatus,
+    setTransientSuccess: setSaveSuccess,
+    reset: resetSaveStatus,
+  } = useActionStatus(950);
 
   const departments = useMemo(() => {
     const set = new Set<string>();
@@ -106,6 +119,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
 
   useEffect(() => {
     if (!openDrawer) return;
+    resetSaveStatus();
     setNewPhotoPath(null);
     setNewPhotoBase64(null);
     setNewPhotoName(null);
@@ -197,28 +211,19 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
     [exemptCalibration, nextCalDate, remark, warningThresholds]
   );
 
-  const handlePickPhoto = async () => {
-    const picked = await open({
-      multiple: false,
-      title: "选择仪器存放位置照片",
-      filters: [{ name: "图片文件", extensions: ["png", "jpg", "jpeg", "webp", "bmp"] }],
-    });
-    if (typeof picked === "string" && picked) {
-      try {
-        const payload = await api.readExternalFileBase64(picked);
-        setNewPhotoPath(picked);
-        setNewPhotoBase64(`data:${payload.mime};base64,${payload.base64}`);
-        setNewPhotoName(payload.fileName);
-        setRemovePhoto(false);
-      } catch (err) {
-        onNotify(String(err), "error");
-      }
+  const applyPhotoFromPath = async (picked: string) => {
+    try {
+      const payload = await api.readExternalFileBase64(picked);
+      setNewPhotoPath(picked);
+      setNewPhotoBase64(`data:${payload.mime};base64,${payload.base64}`);
+      setNewPhotoName(payload.fileName);
+      setRemovePhoto(false);
+    } catch (err) {
+      onNotify(String(err), "error");
     }
   };
 
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const applyPhotoFromFile = (file: File) => {
     const reader = new FileReader();
     reader.onload = () => {
       setNewPhotoPath(null);
@@ -227,6 +232,23 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
       setRemovePhoto(false);
     };
     reader.readAsDataURL(file);
+  };
+
+  const handlePickPhoto = async () => {
+    const picked = await open({
+      multiple: false,
+      title: "选择仪器存放位置照片",
+      filters: [{ name: "图片文件", extensions: ["png", "jpg", "jpeg", "webp", "bmp"] }],
+    });
+    if (typeof picked === "string" && picked) {
+      await applyPhotoFromPath(picked);
+    }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    applyPhotoFromFile(file);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -238,6 +260,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
     }
 
     setSaving(true);
+    setSaveStatus("loading");
     try {
       const payload: InstrumentInput = {
         category,
@@ -275,9 +298,13 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
         saved = await api.createInstrument(payload);
         onNotify("新增设备记录成功", "success");
       }
+      setSaveSuccess();
       onSaved(saved);
-      onClose();
+      window.setTimeout(() => {
+        onClose();
+      }, 360);
     } catch (err) {
+      setSaveStatus("idle");
       onNotify(String(err), "error");
     } finally {
       setSaving(false);
@@ -418,9 +445,18 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      出厂 / 管理编号
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                        出厂 / 管理编号
+                      </label>
+                      {readOnly && serialNo.trim() && (
+                        <CopyButton
+                          text={serialNo}
+                          ariaLabel="复制编号"
+                          onCopied={() => onNotify(`已复制编号 ${serialNo}`, "success")}
+                        />
+                      )}
+                    </div>
                     <input
                       type="text"
                       disabled={readOnly}
@@ -441,9 +477,18 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
 
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      规格型号
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                        规格型号
+                      </label>
+                      {readOnly && modelSpec.trim() && (
+                        <CopyButton
+                          text={modelSpec}
+                          ariaLabel="复制规格型号"
+                          onCopied={() => onNotify("已复制规格型号", "success")}
+                        />
+                      )}
+                    </div>
                     <input
                       type="text"
                       disabled={readOnly}
@@ -455,9 +500,18 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                   </div>
 
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      存放位置
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                        存放位置
+                      </label>
+                      {readOnly && location.trim() && (
+                        <CopyButton
+                          text={location}
+                          ariaLabel="复制存放位置"
+                          onCopied={() => onNotify("已复制存放位置", "success")}
+                        />
+                      )}
+                    </div>
                     <input
                       type="text"
                       disabled={readOnly}
@@ -534,17 +588,19 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                     <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                       检定周期（月）
                     </label>
-                    <input
-                      type="number"
+                    <NumberStepper
+                      value={calCycleMonths || 1}
                       min={1}
                       max={120}
+                      suffix="月"
+                      size="md"
+                      ariaLabel="检定周期"
                       disabled={readOnly || exemptCalibration}
-                      value={calCycleMonths}
-                      onChange={(e) => {
-                        setCalCycleMonths(Number(e.target.value) || 0);
+                      onChange={(next) => {
+                        setCalCycleMonths(next);
                         setManualNextOverride(false);
                       }}
-                      className={`${INPUT_CLS} font-mono`}
+                      className="w-full"
                     />
                     {!readOnly && !exemptCalibration && (
                       <div className="flex gap-1 mt-1.5">
@@ -635,19 +691,37 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                   )}
 
                   {!readOnly ? (
-                    <div className="flex-1">
-                      <div className="flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={handlePickPhoto}
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-white/[0.05] border border-zinc-200 dark:border-white/[0.1] hover:bg-zinc-50 dark:hover:bg-white/[0.09] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
-                        >
-                          <Upload className="h-3.5 w-3.5" />
-                          <span>{currentDisplayPhoto ? "更换" : "上传图片"}</span>
-                        </button>
+                    <div className="flex-1 space-y-2">
+                      <PrecisionFileDropZone
+                        active={openDrawer && !readOnly}
+                        compact
+                        iconKind="image"
+                        acceptedExtensions={["png", "jpg", "jpeg", "webp", "bmp"]}
+                        selectedFileName={newPhotoName || undefined}
+                        idleTitle={currentDisplayPhoto ? "拖入新图或点击更换" : "拖入位置照片或点击上传"}
+                        idleSubtitle="支持 PNG / JPG / WebP"
+                        onPickClick={handlePickPhoto}
+                        onDropPaths={(paths) => {
+                          if (paths[0]) void applyPhotoFromPath(paths[0]);
+                        }}
+                        onDropFiles={(files) => {
+                          if (files[0]) applyPhotoFromFile(files[0]);
+                        }}
+                        onClear={
+                          newPhotoName
+                            ? () => {
+                                setNewPhotoPath(null);
+                                setNewPhotoBase64(null);
+                                setNewPhotoName(null);
+                              }
+                            : undefined
+                        }
+                      />
 
-                        <label className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/[0.08] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-xs text-zinc-500 dark:text-zinc-400 cursor-pointer transition">
-                          <span>文件选择</span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <label className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-white dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/[0.08] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-[11px] text-zinc-500 dark:text-zinc-400 cursor-pointer transition">
+                          <Upload className="h-3 w-3" />
+                          <span>浏览器选择</span>
                           <input
                             type="file"
                             accept="image/*"
@@ -665,10 +739,10 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                               setNewPhotoName(null);
                               setRemovePhoto(true);
                             }}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition"
+                            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            <span>移除</span>
+                            <Trash2 className="h-3 w-3" />
+                            <span>移除图片</span>
                           </button>
                         )}
                       </div>
@@ -778,9 +852,18 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                         />
                       </div>
                       <div>
-                        <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                          联系电话
-                        </label>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                            联系电话
+                          </label>
+                          {readOnly && contactPhone.trim() && (
+                            <CopyButton
+                              text={contactPhone}
+                              ariaLabel="复制联系电话"
+                              onCopied={() => onNotify("已复制联系电话", "success")}
+                            />
+                          )}
+                        </div>
                         <input
                           type="text"
                           disabled={readOnly}
@@ -821,17 +904,17 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                 {readOnly ? "关闭" : "取消"}
               </motion.button>
               {!readOnly && (
-                <motion.button
-                  type="button"
+                <ActionStatusButton
+                  status={saveStatus}
                   disabled={saving}
-                  whileTap={saving ? undefined : TAP_SCALE}
-                  transition={SPRING_SNAPPY}
-                  onClick={handleSubmit}
-                  className="btn-sheen inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
-                >
-                  <Save className="h-3.5 w-3.5" />
-                  <span>{saving ? "保存中..." : "保存"}</span>
-                </motion.button>
+                  idleLabel="保存"
+                  loadingLabel="保存中..."
+                  successLabel="已保存"
+                  idleIcon={<Save className="h-3.5 w-3.5" />}
+                  onClick={(e) => {
+                    void handleSubmit(e);
+                  }}
+                />
               )}
             </div>
           </motion.div>

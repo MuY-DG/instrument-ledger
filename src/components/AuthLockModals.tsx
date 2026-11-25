@@ -38,7 +38,32 @@ export function isMacPlatform(): boolean {
 
 /* ============================================================================
  * Shared Tactile N-Slot PIN Input
+ * Ported damped-harmonic spring engine (OTP code merge -> green Verified pill)
  * ========================================================================== */
+
+interface SpringState {
+  x: number;
+  v: number;
+  t: number;
+  k: number;
+  c: number;
+}
+
+const createSpring = (x: number, k = 400, c = 30): SpringState => ({
+  x,
+  v: 0,
+  t: x,
+  k,
+  c,
+});
+
+const stepSpring = (s: SpringState, dt: number) => {
+  const a = -s.k * (s.x - s.t) - s.c * s.v;
+  s.v += a * dt;
+  s.x += s.v * dt;
+};
+
+const clampNum = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 
 interface PinSlotInputProps {
   length: number;
@@ -47,11 +72,20 @@ interface PinSlotInputProps {
   onComplete?: (pin: string) => void;
   disabled?: boolean;
   hasError?: boolean;
+  /** Triggers the OTP merge -> green pill verification success animation */
+  verified?: boolean;
+  verifiedLabel?: string;
   showDigits?: boolean;
   autoFocus?: boolean;
   focusNonce?: number;
   size?: "md" | "lg";
   inputRef?: React.MutableRefObject<HTMLInputElement | null>;
+}
+
+interface BoxSpringPack {
+  y: SpringState;
+  o: SpringState;
+  a: SpringState;
 }
 
 const PinSlotInput: React.FC<PinSlotInputProps> = ({
@@ -61,6 +95,8 @@ const PinSlotInput: React.FC<PinSlotInputProps> = ({
   onComplete,
   disabled = false,
   hasError = false,
+  verified = false,
+  verifiedLabel = "已解锁",
   showDigits = false,
   autoFocus = false,
   focusNonce = 0,
@@ -69,18 +105,253 @@ const PinSlotInput: React.FC<PinSlotInputProps> = ({
 }) => {
   const internalRef = useRef<HTMLInputElement | null>(null);
   const inputRef = externalRef ?? internalRef;
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const boxRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const ringRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const activeFillRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const greenFillRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const glyphRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const caretRefs = useRef<Array<HTMLSpanElement | null>>([]);
+  const glowRef = useRef<HTMLDivElement | null>(null);
+  const okRef = useRef<HTMLDivElement | null>(null);
+  const checkPathRef = useRef<SVGPathElement | null>(null);
+
   const [focused, setFocused] = useState(false);
 
+  // Physics state refs (updated at 60-120fps without React re-renders)
+  const springsRef = useRef<BoxSpringPack[]>([]);
+  const mergeSpringRef = useRef<SpringState>(createSpring(0, 260, 24));
+  const greenSpringRef = useRef<SpringState>(createSpring(0, 220, 28));
+  const prevValueRef = useRef<string>("");
+  const propsRef = useRef({
+    length,
+    value,
+    focused,
+    disabled,
+    hasError,
+    verified,
+    size,
+  });
+  propsRef.current = { length, value, focused, disabled, hasError, verified, size };
+
+  // Ensure box spring array matches length
+  if (springsRef.current.length !== length) {
+    springsRef.current = Array.from({ length }, (_, idx) => {
+      const hasChar = Boolean(value[idx]);
+      return {
+        y: createSpring(0, 520, 16),
+        o: createSpring(hasChar ? 1 : 0, 400, 28),
+        a: createSpring(0, 300, 26),
+      };
+    });
+    prevValueRef.current = value;
+  }
+
+  // Trigger bouncy drop-in when new digits land, or fade out when cleared
   useEffect(() => {
-    if (!autoFocus || disabled) return;
+    const prev = prevValueRef.current;
+    const packs = springsRef.current;
+    for (let i = 0; i < length; i++) {
+      const pack = packs[i];
+      if (!pack) continue;
+      const c = value[i] || "";
+      const p = prev[i] || "";
+      if (c && c !== p) {
+        pack.y.x = -14;
+        pack.y.v = 0;
+        pack.y.t = 0;
+        pack.o.x = 0;
+        pack.o.v = 0;
+        pack.o.t = 1;
+      } else if (!c) {
+        pack.o.t = 0;
+      }
+    }
+    prevValueRef.current = value;
+  }, [value, length]);
+
+  // Trigger DesignBookmark OTP merge -> green pill verification sequence
+  useEffect(() => {
+    if (!verified) {
+      mergeSpringRef.current = createSpring(0, 260, 24);
+      greenSpringRef.current = createSpring(0, 220, 28);
+      return;
+    }
+    const tMerge = window.setTimeout(() => {
+      mergeSpringRef.current.t = 1;
+    }, 120);
+    const tGreen = window.setTimeout(() => {
+      greenSpringRef.current.t = 1;
+    }, 360);
+    return () => {
+      window.clearTimeout(tMerge);
+      window.clearTimeout(tGreen);
+    };
+  }, [verified]);
+
+  useEffect(() => {
+    if (!autoFocus || disabled || verified) return;
     const t = window.setTimeout(() => {
       inputRef.current?.focus();
     }, 60);
     return () => window.clearTimeout(t);
-  }, [autoFocus, disabled, focusNonce, length, inputRef]);
+  }, [autoFocus, disabled, verified, focusNonce, length, inputRef]);
+
+  // 4-substep damped harmonic spring render loop (with synchronous initial layout before paint)
+  useEffect(() => {
+    let rafId = 0;
+    let lastTs = performance.now();
+    let clock = 0;
+
+    const applyDom = () => {
+      const cur = propsRef.current;
+      const N = cur.length;
+      const val = cur.value;
+      const packs = springsRef.current;
+      const M = mergeSpringRef.current;
+      const G = greenSpringRef.current;
+
+      const container = containerRef.current;
+      if (!container) return;
+
+      const W = container.offsetWidth || (cur.size === "lg" ? 312 : 264);
+      const gap0 = cur.size === "lg" ? 10 : 8;
+      const maxBw = cur.size === "lg" ? 50 : 42;
+      const baseRadius = cur.size === "lg" ? 14 : 12;
+      const bw = Math.min(maxBw, (W - gap0 * (N - 1)) / N);
+
+      const m = clampNum(M.x, 0, 1);
+      const g = clampNum(G.x, 0, 1);
+      const gap = gap0 * (1 - m);
+      const total = bw * N + gap * (N - 1);
+      const left0 = (W - total) / 2;
+      const innerR = baseRadius * (1 - m);
+
+      for (let i = 0; i < N; i++) {
+        const b = packs[i];
+        const el = boxRefs.current[i];
+        if (!b || !el) continue;
+
+        const left = left0 + i * (bw + gap);
+        const overlap = i < N - 1 ? gap0 * m + (m > 0.01 ? 2.5 * m : 0) : 0;
+        const width = bw + overlap;
+
+        el.style.left = `${left.toFixed(2)}px`;
+        el.style.width = `${width.toFixed(2)}px`;
+        el.style.borderRadius =
+          i === 0
+            ? `${baseRadius}px ${innerR.toFixed(2)}px ${innerR.toFixed(2)}px ${baseRadius}px`
+            : i === N - 1
+              ? `${innerR.toFixed(2)}px ${baseRadius}px ${baseRadius}px ${innerR.toFixed(2)}px`
+              : `${innerR.toFixed(2)}px`;
+
+        // Fade individual slot inset hairline border completely to 0 as boxes fuse (zero vertical seam lines)
+        const ringEl = ringRefs.current[i];
+        if (ringEl) {
+          const ringOpacity = clampNum(1 - Math.max(m * 1.45, g * 1.6), 0, 1);
+          ringEl.style.opacity = ringOpacity.toFixed(3);
+        }
+
+        const a = clampNum(b.a.x, 0, 1);
+        const activeFill = activeFillRefs.current[i];
+        if (activeFill) {
+          activeFill.style.opacity = g > 0.01 ? "0" : a.toFixed(3);
+        }
+
+        const greenFill = greenFillRefs.current[i];
+        if (greenFill) {
+          greenFill.style.opacity = g.toFixed(3);
+        }
+
+        const glyph = glyphRefs.current[i];
+        if (glyph) {
+          const o = clampNum(b.o.x, 0, 1) * clampNum(1 - g * 1.55, 0, 1);
+          glyph.style.opacity = o.toFixed(3);
+          glyph.style.transform = `translateY(${b.y.x.toFixed(2)}px)`;
+        }
+
+        const caret = caretRefs.current[i];
+        if (caret) {
+          const showCaret =
+            a > 0.5 &&
+            !val[i] &&
+            !cur.verified &&
+            !cur.hasError &&
+            (clock * 1.8) % 2 < 1.2;
+          caret.style.opacity = showCaret ? "1" : "0";
+        }
+      }
+
+      const glow = glowRef.current;
+      if (glow) {
+        glow.style.left = `${left0.toFixed(2)}px`;
+        glow.style.width = `${total.toFixed(2)}px`;
+        glow.style.borderRadius = `${baseRadius}px`;
+        glow.style.opacity = g.toFixed(3);
+      }
+
+      const ok = okRef.current;
+      if (ok) {
+        const okOpacity = clampNum(g * 1.6 - 0.5, 0, 1);
+        ok.style.opacity = okOpacity.toFixed(3);
+        ok.style.transform = `translateY(${((1 - g) * 8).toFixed(2)}px)`;
+      }
+
+      const checkPath = checkPathRef.current;
+      if (checkPath) {
+        const drawProgress = clampNum((g - 0.34) / 0.62, 0, 1);
+        checkPath.style.strokeDashoffset = `${(24 * (1 - drawProgress)).toFixed(2)}`;
+      }
+    };
+
+    // Position all boxes immediately on mount
+    applyDom();
+
+    const frame = (now: number) => {
+      const rawDt = Math.min(0.05, Math.max(0.001, (now - lastTs) / 1000));
+      lastTs = now;
+      clock += rawDt;
+
+      const cur = propsRef.current;
+      const N = cur.length;
+      const val = cur.value;
+      const activeIdx = Math.min(val.length, N - 1);
+      const packs = springsRef.current;
+      const M = mergeSpringRef.current;
+      const G = greenSpringRef.current;
+
+      const subDt = rawDt / 4;
+      for (let sub = 0; sub < 4; sub++) {
+        for (let i = 0; i < N; i++) {
+          const b = packs[i];
+          if (!b) continue;
+          b.a.t =
+            cur.focused &&
+            !cur.disabled &&
+            !cur.verified &&
+            !cur.hasError &&
+            val.length < N &&
+            i === activeIdx
+              ? 1
+              : 0;
+          stepSpring(b.y, subDt);
+          stepSpring(b.o, subDt);
+          stepSpring(b.a, subDt);
+        }
+        stepSpring(M, subDt);
+        stepSpring(G, subDt);
+      }
+
+      applyDom();
+      rafId = window.requestAnimationFrame(frame);
+    };
+
+    rafId = window.requestAnimationFrame(frame);
+    return () => window.cancelAnimationFrame(rafId);
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (disabled) return;
+    if (disabled || verified) return;
     const digits = e.target.value.replace(/\D/g, "").slice(0, length);
     onChange(digits);
     if (digits.length === length && onComplete) {
@@ -90,11 +361,20 @@ const PinSlotInput: React.FC<PinSlotInputProps> = ({
 
   const slots = useMemo(() => Array.from({ length }, (_, idx) => idx), [length]);
   const activeIdx = Math.min(value.length, length - 1);
+  const boxHeightCls = size === "lg" ? "h-[56px]" : "h-[44px]";
 
   return (
-    <div
-      className="relative flex items-center justify-center gap-2.5 cursor-text"
-      onClick={() => inputRef.current?.focus()}
+    <motion.div
+      ref={containerRef}
+      animate={hasError ? { x: [0, -7, 7, -5, 5, -2, 0] } : { x: 0 }}
+      transition={{ duration: 0.36, ease: EASE_PRECISION }}
+      className={cn(
+        "relative w-full mx-auto cursor-text select-none",
+        boxHeightCls
+      )}
+      onClick={() => {
+        if (!disabled && !verified) inputRef.current?.focus();
+      }}
     >
       <input
         ref={inputRef}
@@ -103,65 +383,157 @@ const PinSlotInput: React.FC<PinSlotInputProps> = ({
         pattern="[0-9]*"
         autoComplete="one-time-code"
         value={value}
-        disabled={disabled}
+        disabled={disabled || verified}
         onChange={handleChange}
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         aria-label={`输入 ${length} 位数字 PIN 码`}
-        className="absolute inset-0 w-full h-full opacity-0 cursor-text z-10"
+        className="absolute inset-0 w-full h-full opacity-0 caret-transparent text-transparent select-none cursor-text z-20"
+      />
+
+      {/* Seamless unified emerald pill & ambient glow once merged */}
+      <div
+        ref={glowRef}
+        aria-hidden="true"
+        style={{ opacity: 0, backgroundColor: "#34d17a" }}
+        className={cn(
+          "pointer-events-none absolute top-0 shadow-[0_12px_30px_-8px_rgba(52,209,122,0.52)]",
+          boxHeightCls
+        )}
       />
 
       {slots.map((idx) => {
         const char = value[idx] || "";
         const filled = char !== "";
-        const isCurrent = focused && !disabled && idx === activeIdx && value.length < length;
+        const isCurrent =
+          focused && !disabled && !verified && !hasError && idx === activeIdx && value.length < length;
 
         return (
           <div
             key={idx}
+            ref={(el) => {
+              boxRefs.current[idx] = el;
+            }}
             className={cn(
-              "relative rounded-xl border flex items-center justify-center font-mono transition-all duration-150 select-none",
-              size === "lg" ? "h-[54px] w-12 text-lg" : "h-11 w-10 text-base",
+              "absolute top-0 flex items-center justify-center font-mono overflow-hidden will-change-[transform,width,left]",
+              boxHeightCls,
+              size === "lg" ? "text-xl" : "text-base",
               hasError
-                ? "border-rose-500/70 bg-rose-500/[0.06] dark:bg-rose-500/[0.1] ring-2 ring-rose-500/15"
+                ? "bg-rose-50 dark:bg-[#2a151c]"
                 : isCurrent
-                  ? "border-zinc-900 dark:border-indigo-400 bg-white dark:bg-white/[0.08] ring-2 ring-zinc-900/10 dark:ring-indigo-400/20 shadow-sm"
+                  ? "bg-white dark:bg-[#1e1e25] shadow-sm"
                   : filled
-                    ? "border-zinc-300 dark:border-white/[0.2] bg-white dark:bg-white/[0.06]"
-                    : "border-zinc-200/90 dark:border-white/[0.1] bg-zinc-50/90 dark:bg-white/[0.03]",
-              disabled && "opacity-60"
+                    ? "bg-white dark:bg-[#1c1c23]"
+                    : "bg-zinc-50 dark:bg-[#17171d]",
+              disabled && !verified && "opacity-60"
             )}
           >
-            {filled ? (
-              showDigits ? (
-                <motion.span
-                  key={`d-${idx}-${char}`}
-                  initial={{ scale: 0.75, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ duration: 0.14 }}
-                  className="font-semibold text-zinc-900 dark:text-white"
-                >
-                  {char}
-                </motion.span>
-              ) : (
-                <motion.span
-                  key={`dot-${idx}`}
-                  initial={{ scale: 0.35, opacity: 0 }}
-                  animate={{ scale: 1, opacity: 1 }}
-                  transition={{ type: "spring", stiffness: 520, damping: 28 }}
-                  className={cn(
-                    "rounded-full bg-zinc-900 dark:bg-white",
-                    size === "lg" ? "h-2.5 w-2.5" : "h-2 w-2"
-                  )}
-                />
-              )
-            ) : isCurrent ? (
-              <span className="h-5 w-0.5 rounded-full bg-zinc-900/75 dark:bg-indigo-300 animate-pulse" />
-            ) : null}
+            {/* Inset hairline border overlay (fades cleanly to 0 on merge -> zero vertical seams) */}
+            <span
+              ref={(el) => {
+                ringRefs.current[idx] = el;
+              }}
+              aria-hidden="true"
+              className={cn(
+                "pointer-events-none absolute inset-0 rounded-[inherit] ring-1 ring-inset transition-colors duration-150",
+                hasError
+                  ? "ring-rose-500/80"
+                  : isCurrent
+                    ? "ring-[1.5px] ring-zinc-900/75 dark:ring-indigo-400/85"
+                    : filled
+                      ? "ring-zinc-300/95 dark:ring-white/[0.16]"
+                      : "ring-zinc-200/95 dark:ring-white/[0.1]"
+              )}
+            />
+
+            {/* Active slot soft tint layer */}
+            <span
+              ref={(el) => {
+                activeFillRefs.current[idx] = el;
+              }}
+              aria-hidden="true"
+              style={{ opacity: 0 }}
+              className="pointer-events-none absolute inset-0 rounded-[inherit] bg-zinc-900/[0.045] dark:bg-white/[0.09]"
+            />
+
+            {/* Verification success emerald flood layer (#34d17a) */}
+            <span
+              ref={(el) => {
+                greenFillRefs.current[idx] = el;
+              }}
+              aria-hidden="true"
+              style={{ opacity: 0, backgroundColor: "#34d17a" }}
+              className="pointer-events-none absolute inset-0 rounded-[inherit]"
+            />
+
+            {/* Bouncy digit / masked dot */}
+            <span
+              ref={(el) => {
+                glyphRefs.current[idx] = el;
+              }}
+              style={{ opacity: filled ? 1 : 0 }}
+              className="relative z-10 flex items-center justify-center will-change-[transform,opacity]"
+            >
+              {filled ? (
+                showDigits ? (
+                  <span className="font-semibold text-zinc-950 dark:text-white tabular-nums">
+                    {char}
+                  </span>
+                ) : (
+                  <span
+                    className={cn(
+                      "rounded-full bg-zinc-900 dark:bg-white",
+                      size === "lg" ? "h-2.5 w-2.5" : "h-2 w-2"
+                    )}
+                  />
+                )
+              ) : null}
+            </span>
+
+            {/* Crisp blinking caret (strictly empty active slot, instant off once typed) */}
+            <span
+              ref={(el) => {
+                caretRefs.current[idx] = el;
+              }}
+              aria-hidden="true"
+              style={{ opacity: 0 }}
+              className={cn(
+                "pointer-events-none absolute z-10 w-[2px] rounded-full bg-zinc-900/85 dark:bg-indigo-300",
+                size === "lg" ? "h-6" : "h-5"
+              )}
+            />
           </div>
         );
       })}
-    </div>
+
+      {/* Fused green pill verification overlay (Checkmark + Verified label) */}
+      <div
+        ref={okRef}
+        aria-live="polite"
+        style={{ opacity: 0, color: "#04140a" }}
+        className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center gap-2 font-semibold tracking-tight will-change-[transform,opacity]"
+      >
+        <svg
+          viewBox="0 0 24 24"
+          className={size === "lg" ? "h-5 w-5" : "h-4 w-4"}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.7"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <path
+            ref={checkPathRef}
+            d="M5 12.5l4.5 4.5L19 7.5"
+            strokeDasharray="24"
+            strokeDashoffset="24"
+          />
+        </svg>
+        <span className={size === "lg" ? "text-[15px]" : "text-xs"}>
+          {verifiedLabel}
+        </span>
+      </div>
+    </motion.div>
   );
 };
 
@@ -704,6 +1076,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
   const [error, setError] = useState("");
   const [shaking, setShaking] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [unlockedSuccess, setUnlockedSuccess] = useState(false);
   const [clock, setClock] = useState("");
   const [dateLabel, setDateLabel] = useState("");
 
@@ -715,9 +1088,22 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
 
   const pinRef = useRef<HTMLInputElement | null>(null);
   const adminInputRef = useRef<HTMLInputElement | null>(null);
+  const unlockTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (unlockTimerRef.current !== null) {
+        window.clearTimeout(unlockTimerRef.current);
+      }
+    };
+  }, []);
 
   useEffect(() => {
     if (!locked) return;
+    if (unlockTimerRef.current !== null) {
+      window.clearTimeout(unlockTimerRef.current);
+      unlockTimerRef.current = null;
+    }
     setView("pin");
     setPin("");
     setAdminPassword("");
@@ -725,6 +1111,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
     setRecoveryAction("unlock_only");
     setError("");
     setVerifying(false);
+    setUnlockedSuccess(false);
 
     const tick = () => {
       const now = new Date();
@@ -776,20 +1163,27 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
   };
 
   const handlePinComplete = async (completedPin: string) => {
-    if (verifying) return;
+    if (verifying || unlockedSuccess) return;
     setVerifying(true);
     setError("");
     try {
       const status = await api.unlockApp(completedPin);
-      setPin("");
-      onUnlocked(status, false);
+      setVerifying(false);
+      setUnlockedSuccess(true);
+      // Keep overlay visible while the OTP merge -> green "已解锁" pill animation plays out,
+      // even though backend emits `auth-status-changed` (`isLocked: false`) immediately.
+      unlockTimerRef.current = window.setTimeout(() => {
+        unlockTimerRef.current = null;
+        setPin("");
+        setUnlockedSuccess(false);
+        onUnlocked(status, false);
+      }, 1320);
     } catch (err) {
       setError(String(err));
       triggerShake();
       setPin("");
-      window.setTimeout(() => pinRef.current?.focus(), 60);
-    } finally {
       setVerifying(false);
+      window.setTimeout(() => pinRef.current?.focus(), 60);
     }
   };
 
@@ -824,14 +1218,18 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
     }
   };
 
+  // Keep overlay mounted during active PIN verification & success merge animation
+  // so backend `auth-status-changed` (`isLocked: false`) does not unmount it prematurely.
+  const overlayVisible = locked || verifying || unlockedSuccess;
+
   return (
     <AnimatePresence>
-      {locked && (
+      {overlayVisible && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.24, ease: EASE_PRECISION }}
+          transition={{ duration: 0.28, ease: EASE_PRECISION }}
           className="fixed inset-0 z-[100] bg-[#f4f5f8]/[0.86] dark:bg-[#09090b]/[0.88] backdrop-blur-2xl flex flex-col items-center justify-center p-6 select-none no-print overflow-hidden"
         >
           {/* Adaptive Architectural Grid */}
@@ -860,13 +1258,20 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
             transition={{ delay: 0.05, duration: 0.3 }}
             className="absolute top-6 inset-x-0 flex justify-center pointer-events-none"
           >
-            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-white/[0.05] border border-zinc-200/90 dark:border-white/[0.09] shadow-hairline text-[11.5px] text-zinc-600 dark:text-zinc-300">
-              <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400" />
+            <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/80 dark:bg-white/[0.05] border border-zinc-200/90 dark:border-white/[0.09] shadow-hairline text-[11.5px] text-zinc-600 dark:text-zinc-300 transition-colors">
+              <span
+                className={cn(
+                  "h-1.5 w-1.5 rounded-full transition-colors duration-300",
+                  unlockedSuccess
+                    ? "bg-emerald-500"
+                    : "bg-indigo-500 dark:bg-indigo-400"
+                )}
+              />
               <span className="font-medium text-zinc-900 dark:text-zinc-100">
                 {docTitle || "监视与测量管理台账"}
               </span>
               <span className="text-zinc-300 dark:text-zinc-600">·</span>
-              <span>已锁定</span>
+              <span>{unlockedSuccess ? "已解锁" : "已锁定"}</span>
             </div>
           </motion.div>
 
@@ -900,7 +1305,14 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
             )}
           >
             {/* Specular Top Accent Hairline */}
-            <div className="absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent via-indigo-500/45 dark:via-indigo-400/55 to-transparent" />
+            <div
+              className={cn(
+                "absolute top-0 inset-x-0 h-px bg-gradient-to-r from-transparent to-transparent transition-all duration-300",
+                unlockedSuccess
+                  ? "via-emerald-500/75 dark:via-emerald-400/75"
+                  : "via-indigo-500/45 dark:via-indigo-400/55"
+              )}
+            />
 
             <AnimatePresence mode="wait">
               {view === "pin" ? (
@@ -913,15 +1325,59 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                   className="p-7"
                 >
                   <div className="flex flex-col items-center text-center mb-6">
-                    <div className="h-11 w-11 rounded-2xl bg-zinc-900/[0.05] dark:bg-white/[0.07] border border-zinc-200/90 dark:border-white/[0.1] flex items-center justify-center mb-3.5 text-zinc-800 dark:text-zinc-100">
-                      {verifying ? (
-                        <Loader2 className="h-[18px] w-[18px] animate-spin text-indigo-500 dark:text-indigo-400" />
-                      ) : (
-                        <Lock className="h-[18px] w-[18px]" />
+                    <motion.div
+                      animate={
+                        unlockedSuccess
+                          ? { scale: [1, 1.08, 1] }
+                          : { scale: 1 }
+                      }
+                      transition={SPRING_SNAPPY}
+                      className={cn(
+                        "h-11 w-11 rounded-2xl border flex items-center justify-center mb-3.5 transition-colors duration-300",
+                        unlockedSuccess
+                          ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-600 dark:text-emerald-400"
+                          : "bg-zinc-900/[0.05] dark:bg-white/[0.07] border-zinc-200/90 dark:border-white/[0.1] text-zinc-800 dark:text-zinc-100"
                       )}
-                    </div>
+                    >
+                      <AnimatePresence mode="wait" initial={false}>
+                        {unlockedSuccess ? (
+                          <motion.span
+                            key="icon-unlocked"
+                            initial={{ scale: 0.5, rotate: -18, opacity: 0 }}
+                            animate={{ scale: 1, rotate: 0, opacity: 1 }}
+                            exit={{ scale: 0.5, opacity: 0 }}
+                            transition={SPRING_SNAPPY}
+                            className="flex items-center justify-center"
+                          >
+                            <Unlock className="h-[18px] w-[18px]" />
+                          </motion.span>
+                        ) : verifying ? (
+                          <motion.span
+                            key="icon-verifying"
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            exit={{ opacity: 0 }}
+                            className="flex items-center justify-center"
+                          >
+                            <Loader2 className="h-[18px] w-[18px] animate-spin text-indigo-500 dark:text-indigo-400" />
+                          </motion.span>
+                        ) : (
+                          <motion.span
+                            key="icon-locked"
+                            initial={{ scale: 0.85, opacity: 0 }}
+                            animate={{ scale: 1, opacity: 1 }}
+                            exit={{ scale: 0.85, opacity: 0 }}
+                            className="flex items-center justify-center"
+                          >
+                            <Lock className="h-[18px] w-[18px]" />
+                          </motion.span>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
                     <h2 className="text-[15px] font-semibold text-zinc-950 dark:text-white tracking-tight">
-                      输入 {effectivePinLen} 位 PIN 码
+                      {unlockedSuccess
+                        ? "验证通过"
+                        : `输入 ${effectivePinLen} 位 PIN 码`}
                     </h2>
                   </div>
 
@@ -935,6 +1391,8 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                       }}
                       onComplete={handlePinComplete}
                       disabled={verifying}
+                      verified={unlockedSuccess}
+                      verifiedLabel="已解锁"
                       hasError={Boolean(error)}
                       autoFocus={locked && view === "pin"}
                       focusNonce={focusNonce}
@@ -945,7 +1403,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
 
                   {/* Reserved status slot to prevent layout shift */}
                   <div className="h-6 mt-2.5 flex items-center justify-center">
-                    {verifying ? (
+                    {unlockedSuccess ? null : verifying ? (
                       <span className="text-xs text-indigo-600 dark:text-indigo-400 font-medium">
                         验证中...
                       </span>
@@ -959,11 +1417,12 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                   <div className="mt-3 pt-4 border-t border-zinc-200/80 dark:border-white/[0.08] flex justify-center">
                     <button
                       type="button"
+                      disabled={unlockedSuccess}
                       onClick={() => {
                         setView("recovery");
                         setError("");
                       }}
-                      className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 transition"
+                      className="inline-flex items-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-zinc-100 disabled:opacity-35 transition"
                     >
                       <KeyRound className="h-3.5 w-3.5" />
                       <span>管理员密码解锁</span>
