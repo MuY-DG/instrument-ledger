@@ -707,7 +707,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           当前安装版本
                         </div>
                         <div className="text-lg font-semibold font-mono tabular-nums text-zinc-950 dark:text-white mt-0.5">
-                          v{dirInfo?.appVersion || "1.1.0"}
+                          v{dirInfo?.appVersion || "1.1.1"}
                         </div>
                       </div>
                       <button

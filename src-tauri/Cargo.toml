@@ -1,6 +1,6 @@
 [package]
 name = "instrument-ledger"
-version = "1.1.0"
+version = "1.1.1"
 description = "监视与测量设备管理台账 (JSSK-MPR-170)"
 authors = ["JSSK Quality Team"]
 edition = "2021"
