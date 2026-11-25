@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "发布标签版本号（例如 v1.2.1；留空则仅构建 macOS & Windows 安装包产物，不创建 Release）"
+        description: "发布标签版本号（例如 v1.3.0；留空则仅构建 macOS & Windows 安装包产物，不创建 Release）"
         required: false
         default: ""
       draft:
@@ -170,28 +170,41 @@ jobs:
           echo "Publishing Release for tag: ${TAG}"
           ls -lh release-assets/
 
+          # actions/checkout@v4 overwrites refs/tags/${TAG} with the peeled commit SHA;
+          # force-fetch the tag ref so annotated tag messages remain intact.
+          git fetch --force origin "refs/tags/${TAG}:refs/tags/${TAG}" || true
+
           python3 - <<'PY'
           import glob
           import json
           import os
+          import re
           import subprocess
-          import textwrap
           from datetime import datetime, timezone
 
           repo = os.environ["GH_REPO"]
           tag = os.environ["TAG"]
           version = tag.lstrip("vV")
 
-          def run_git(*args):
+          def run_cmd(*args):
               res = subprocess.run(
-                  ["git", *args],
+                  list(args),
                   capture_output=True,
                   text=True,
               )
               return res.returncode, res.stdout.strip()
 
-          def build_changelog(current_tag: str) -> str:
-              # 1) Prefer annotated git tag message when present
+          def run_git(*args):
+              return run_cmd("git", *args)
+
+          def is_placeholder_tag_message(msg: str) -> bool:
+              stripped = msg.strip()
+              if not stripped:
+                  return True
+              return bool(re.fullmatch(r"Release\s+v?\d+(?:\.\d+)*", stripped, flags=re.IGNORECASE))
+
+          def read_annotated_tag_message(current_tag: str) -> str:
+              # 1) Read from local git annotated tag object
               rc, obj_type = run_git("cat-file", "-t", f"refs/tags/{current_tag}")
               if rc == 0 and obj_type == "tag":
                   rc_msg, tag_msg = run_git(
@@ -199,31 +212,110 @@ jobs:
                       "--format=%(contents)",
                       f"refs/tags/{current_tag}",
                   )
-                  if rc_msg == 0 and tag_msg.strip():
+                  if rc_msg == 0 and not is_placeholder_tag_message(tag_msg):
                       return tag_msg.strip()
 
-              # 2) Fallback to commits since previous v* tag
-              rc_tags, tags_out = run_git("tag", "--sort=-v:refname", "v*")
+              # 2) Fallback to GitHub Git Data API in case checkout stripped tag annotations
+              rc_ref, ref_json = run_cmd("gh", "api", f"repos/{repo}/git/ref/tags/{current_tag}")
+              if rc_ref == 0 and ref_json:
+                  try:
+                      ref_obj = json.loads(ref_json).get("object", {})
+                      if ref_obj.get("type") == "tag" and ref_obj.get("sha"):
+                          rc_tag, tag_json = run_cmd(
+                              "gh", "api", f"repos/{repo}/git/tags/{ref_obj['sha']}"
+                          )
+                          if rc_tag == 0 and tag_json:
+                              msg = (json.loads(tag_json).get("message") or "").strip()
+                              if not is_placeholder_tag_message(msg):
+                                  return msg
+                  except Exception:
+                      pass
+
+              return ""
+
+          def find_previous_tag(current_tag: str, target_ref: str):
+              # Prefer closest reachable ancestor v* tag
+              rc_desc, desc_tag = run_git(
+                  "describe", "--tags", "--abbrev=0", "--match", "v*", f"{target_ref}^"
+              )
+              if rc_desc == 0 and desc_tag and desc_tag != current_tag:
+                  return desc_tag
+
+              # Fallback to descending version tag list
+              rc_tags, tags_out = run_git("tag", "--list", "--sort=-v:refname", "v*")
               all_tags = [t.strip() for t in tags_out.splitlines() if t.strip()] if rc_tags == 0 else []
-              prev_tag = None
+              if current_tag in all_tags:
+                  idx = all_tags.index(current_tag)
+                  if idx + 1 < len(all_tags):
+                      return all_tags[idx + 1]
+                  return None
               for t in all_tags:
                   if t != current_tag:
-                      prev_tag = t
-                      break
+                      return t
+              return None
 
-              target_ref = f"refs/tags/{current_tag}" if run_git("rev-parse", "--verify", f"refs/tags/{current_tag}")[0] == 0 else "HEAD"
+          def categorize_commits(subjects: list[str]) -> str:
+              features = []
+              improvements = []
+              fixes = []
+
+              cc_re = re.compile(r"^([a-zA-Z]+)(?:\(([^)]*)\))?!?:\s*(.+)$")
+              for raw in subjects:
+                  line = raw.strip()
+                  if not line:
+                      continue
+                  m = cc_re.match(line)
+                  if m:
+                      ctype = m.group(1).lower()
+                      scope = (m.group(2) or "").lower()
+                      desc = m.group(3).strip()
+                      if ctype == "chore" and "release" in scope:
+                          continue
+                      if ctype == "feat":
+                          features.append(desc)
+                      elif ctype == "fix":
+                          fixes.append(desc)
+                      else:
+                          improvements.append(desc)
+                  else:
+                      improvements.append(line)
+
+              sections = []
+              if features:
+                  sections.append("### 新功能\n\n" + "\n".join(f"- {item}" for item in features))
+              if improvements:
+                  sections.append("### 改进\n\n" + "\n".join(f"- {item}" for item in improvements))
+              if fixes:
+                  sections.append("### 修复\n\n" + "\n".join(f"- {item}" for item in fixes))
+              return "\n\n".join(sections)
+
+          def build_changelog(current_tag: str) -> str:
+              # 1) Prefer annotated git tag message when present
+              tag_msg = read_annotated_tag_message(current_tag)
+              if tag_msg:
+                  return tag_msg
+
+              # 2) Fallback to commits since previous v* tag, grouped like ### 新功能 / ### 改进 / ### 修复
+              target_ref = (
+                  f"refs/tags/{current_tag}"
+                  if run_git("rev-parse", "--verify", f"refs/tags/{current_tag}")[0] == 0
+                  else "HEAD"
+              )
+              prev_tag = find_previous_tag(current_tag, target_ref)
               rev_range = f"{prev_tag}..{target_ref}" if prev_tag else target_ref
-              rc_log, log_out = run_git("log", "--no-merges", "--pretty=format:- %s", rev_range)
+              rc_log, log_out = run_git("log", "--no-merges", "--pretty=format:%s", rev_range)
               if rc_log == 0 and log_out.strip():
-                  return log_out.strip()
+                  grouped = categorize_commits(log_out.splitlines())
+                  if grouped:
+                      return grouped
 
-              return f"- InstrumentLedger {current_tag} 常规体验优化与稳定性提升。"
+              return "### 改进\n\n- 常规体验优化与稳定性提升"
 
           changelog = build_changelog(tag)
           if changelog.lstrip().startswith("#"):
               changelog_section = changelog
           else:
-              changelog_section = f"## 本次更新内容\n\n{changelog}"
+              changelog_section = f"### 改进\n\n{changelog}"
 
           mac_tar = sorted(glob.glob("release-assets/*.app.tar.gz"))
           mac_sig = sorted(glob.glob("release-assets/*.app.tar.gz.sig"))
@@ -244,14 +336,10 @@ jobs:
               win_sig_val = f.read().strip()
 
           base_url = f"https://github.com/{repo}/releases/download/{tag}"
-          updater_notes = (
-              f"{changelog_section}\n\n"
-              "> 覆盖升级不会影响本地 SQLite 台账数据库、位置照片与校验报告附件，更新完成后将自动重启。"
-          )
 
           manifest = {
               "version": version,
-              "notes": updater_notes,
+              "notes": changelog_section,
               "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
               "platforms": {
                   "darwin-aarch64": {
@@ -277,21 +365,7 @@ jobs:
               json.dump(manifest, f, ensure_ascii=False, indent=2)
               f.write("\n")
 
-          guide_section = textwrap.dedent("""\
-          ## 安装包下载说明
-
-          - **macOS（Apple Silicon M 系列 & Intel 通用）**：下载 `*_universal.dmg`，双击挂载后将应用拖入「应用程序」文件夹。
-            > 若首次打开提示「无法验证开发者」或「已损坏」（个人自构建未签名），可在终端执行一次 `xattr -cr /Applications/InstrumentLedger.app` 后正常启动。
-          - **Windows（64 位）**：下载 `*_x64-setup.exe` 安装包直接双击安装（覆盖升级不会清除本地 SQLite 数据库、位置照片与校验报告附件）。
-
-          ## 首次启动与无感自动更新说明
-
-          - 软件无默认账号或初始密码，安装后首次打开将播放启动动画并引导初始化本机管理员账号。
-          - 已接入 Tauri 官方 `tauri-plugin-updater` 与 Ed25519 签名校验：启动时后台静默检测新版本，发现更新后侧边栏亮起红点并从右侧滑入更新弹窗，点击「立即更新并重启」即可自动下载、验签替换本体并重启。
-          - 默认预填更新源 `MuY-DG/instrument-ledger` 并内置多节点国内加速代理兜底池（`gh-proxy.com` / `ghfast.top` / `gh-proxy.org` / `cdn.gh-proxy.org` / `edgeone.gh-proxy.org` / GitHub 直连），版本检测与安装包下载均支持自动择优与异常切换，管理员可在「设置 → 检查更新」中随时自定义或留空。
-          """).strip()
-
-          release_notes = f"{changelog_section}\n\n{guide_section}\n"
+          release_notes = f"{changelog_section}\n"
 
           with open("release-notes.md", "w", encoding="utf-8") as f:
               f.write(release_notes)

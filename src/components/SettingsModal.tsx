@@ -1845,7 +1845,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <span className="text-lg font-semibold font-mono tabular-nums text-zinc-950 dark:text-white leading-none">
-                              v{dirInfo?.appVersion || "1.2.1"}
+                              v{dirInfo?.appVersion || "1.3.0"}
                             </span>
                             {updateResult?.hasUpdate ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-[11px] font-medium text-sky-700 dark:text-sky-300">
