@@ -8,13 +8,20 @@ import {
   Search,
   X,
 } from "lucide-react";
-import { getTodayStr, summarizeExpiryAlerts } from "@/lib/status";
+import {
+  getTodayStr,
+  summarizeExpiryAlerts,
+  type ExpiryAlertSummary,
+} from "@/lib/status";
 import {
   getThresholdVisuals,
   sortThresholdsDesc,
 } from "@/lib/thresholdColors";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
+import { EASE_PRECISION, SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
+import { ModalShell, SlidingNumber } from "@/components/ui/MotionPrimitives";
+import { PrecisionCheckbox, SearchField } from "@/components/ui/FormControls";
 import type { AppSettings, ExpiryFilter, Instrument } from "@/types";
 
 type TierSelection = "all" | "expired" | string; // string = threshold.id
@@ -23,6 +30,7 @@ interface ExpiryAlertModalProps {
   open: boolean;
   instruments: Instrument[];
   settings: AppSettings;
+  precomputedSummary?: ExpiryAlertSummary;
   mutedToday: boolean;
   onToggleMuteToday: (muted: boolean) => void;
   onClose: () => void;
@@ -34,6 +42,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
   open,
   instruments,
   settings,
+  precomputedSummary,
   mutedToday,
   onToggleMuteToday,
   onClose,
@@ -58,10 +67,19 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
-  const summary = useMemo(
-    () => summarizeExpiryAlerts(instruments, settings.warningThresholds),
-    [instruments, settings.warningThresholds]
-  );
+  const summary = useMemo(() => {
+    if (precomputedSummary) return precomputedSummary;
+    if (!open) {
+      return {
+        expired: [],
+        tiers: [],
+        allAlertItems: [],
+        totalAlertCount: 0,
+        highestSeverityColor: null,
+      };
+    }
+    return summarizeExpiryAlerts(instruments, settings.warningThresholds);
+  }, [precomputedSummary, open, instruments, settings.warningThresholds]);
 
   const descThresholds = useMemo(
     () => sortThresholdsDesc(settings.warningThresholds),
@@ -131,24 +149,11 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
   const accentVisuals = getThresholdVisuals(accentColor);
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 bg-zinc-950/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 no-print"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 12 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: 8 }}
-            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full max-w-4xl max-h-[85vh] bg-white dark:bg-[#111114] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      panelClassName="w-full max-w-4xl max-h-[85vh] flex flex-col"
+    >
             {/* Top Severity Accent Hairline */}
             <div
               className="h-[2.5px] w-full shrink-0"
@@ -165,7 +170,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
               <div className="flex items-center gap-3 min-w-0">
                 <div
                   style={accentVisuals.cssVars}
-                  className="h-9 w-9 rounded-xl border flex items-center justify-center shrink-0 bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] border-[var(--tier-border)] dark:border-[var(--tier-border-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]"
+                  className="h-9 w-9 rounded-xl border flex items-center justify-center shrink-0 bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] border-[var(--tier-border)] dark:border-[var(--tier-border-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] shadow-hairline"
                 >
                   {summary.totalAlertCount > 0 ? (
                     <BellRing className="h-4 w-4" />
@@ -193,7 +198,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] transition shrink-0"
+                className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] shrink-0"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -205,14 +210,16 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
               <div className="px-6 py-4 border-b border-zinc-200/75 dark:border-white/[0.07] bg-zinc-50/40 dark:bg-white/[0.01] space-y-3 shrink-0">
                 <div className="flex items-stretch gap-2 overflow-x-auto pb-0.5">
                   {/* All Alerts Card */}
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={() => setSelectedTier("all")}
                     className={cn(
-                      "min-w-[104px] px-3 py-2.5 rounded-xl border text-left transition shrink-0",
+                      "min-w-[104px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0",
                       selectedTier === "all"
-                        ? "border-zinc-900 dark:border-white bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 shadow-hairline"
-                        : "border-zinc-200/90 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] hover:border-zinc-300 dark:hover:border-white/[0.15]"
+                        ? "border-zinc-900 dark:border-white bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 shadow-tactile-primary"
+                        : "border-zinc-200/95 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] shadow-tactile hover:border-zinc-300 dark:hover:border-white/[0.15]"
                     )}
                   >
                     <div
@@ -225,20 +232,22 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                     >
                       全部预警
                     </div>
-                    <div className="mt-1 text-lg font-semibold font-mono tabular-nums leading-none">
-                      {summary.totalAlertCount}
+                    <div className="mt-1 text-lg font-semibold font-mono leading-none">
+                      <SlidingNumber value={summary.totalAlertCount} />
                     </div>
-                  </button>
+                  </motion.button>
 
                   {/* Expired Card */}
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={() => setSelectedTier("expired")}
                     className={cn(
-                      "min-w-[112px] px-3 py-2.5 rounded-xl border text-left transition shrink-0",
+                      "min-w-[112px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0",
                       selectedTier === "expired"
-                        ? "border-rose-500 bg-rose-500/[0.12] dark:bg-rose-500/[0.18] ring-1 ring-rose-500/40"
-                        : "border-zinc-200/90 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] hover:border-rose-300 dark:hover:border-rose-500/35"
+                        ? "border-rose-500 bg-rose-500/[0.12] dark:bg-rose-500/[0.18] ring-1 ring-rose-500/35 shadow-tactile"
+                        : "border-zinc-200/95 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] shadow-tactile hover:border-rose-300 dark:hover:border-rose-500/35"
                     )}
                   >
                     <div className="flex items-center gap-1.5 text-[11px] font-medium text-rose-600 dark:text-rose-400">
@@ -246,31 +255,34 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                       <span>已超期</span>
                     </div>
                     <div className="mt-1 flex items-baseline gap-1">
-                      <span className="text-lg font-semibold font-mono tabular-nums leading-none text-zinc-950 dark:text-white">
-                        {summary.expired.length}
-                      </span>
+                      <SlidingNumber
+                        value={summary.expired.length}
+                        className="text-lg font-semibold font-mono leading-none text-zinc-950 dark:text-white"
+                      />
                       <span className="text-[10.5px] text-zinc-400">台</span>
                     </div>
-                  </button>
+                  </motion.button>
 
                   {/* Dynamic Configured Threshold Tier Cards (Most urgent -> Widest) */}
                   {summary.tiers.map((group) => {
                     const visuals = getThresholdVisuals(group.threshold.color);
                     const active = selectedTier === group.threshold.id;
                     return (
-                      <button
+                      <motion.button
                         key={group.threshold.id}
                         type="button"
+                        whileTap={TAP_SCALE}
+                        transition={SPRING_SNAPPY}
                         onClick={() => setSelectedTier(group.threshold.id)}
                         style={{
                           ...visuals.cssVars,
                           borderColor: active ? visuals.hex : undefined,
                         }}
                         className={cn(
-                          "min-w-[120px] px-3 py-2.5 rounded-xl border text-left transition shrink-0",
+                          "min-w-[120px] px-3 py-2.5 rounded-xl border text-left transition-colors shrink-0 shadow-tactile",
                           active
-                            ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] shadow-hairline"
-                            : "border-zinc-200/90 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] hover:bg-[var(--tier-bg)] dark:hover:bg-[var(--tier-bg-dark)]"
+                            ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)]"
+                            : "border-zinc-200/95 dark:border-white/[0.08] bg-white dark:bg-white/[0.03] hover:bg-[var(--tier-bg)] dark:hover:bg-[var(--tier-bg-dark)]"
                         )}
                       >
                         <div className="flex items-center gap-1.5 text-[11px] font-medium text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]">
@@ -287,46 +299,43 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                         </div>
                         <div className="mt-1 flex items-baseline justify-between gap-2">
                           <div className="flex items-baseline gap-1">
-                            <span className="text-lg font-semibold font-mono tabular-nums leading-none text-zinc-950 dark:text-white">
-                              {group.items.length}
-                            </span>
+                            <SlidingNumber
+                              value={group.items.length}
+                              className="text-lg font-semibold font-mono leading-none text-zinc-950 dark:text-white"
+                            />
                             <span className="text-[10.5px] text-zinc-400">台</span>
                           </div>
                           <span className="text-[10px] font-mono text-zinc-400 dark:text-zinc-500">
                             ≤{group.threshold.days}d
                           </span>
                         </div>
-                      </button>
+                      </motion.button>
                     );
                   })}
                 </div>
 
                 {/* Quick Search within Alerts */}
                 {summary.totalAlertCount > 5 && (
-                  <div className="relative max-w-xs">
-                    <Search className="h-3.5 w-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={searchText}
-                      onChange={(e) => setSearchText(e.target.value)}
-                      placeholder="搜索名称、编号、部门..."
-                      className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
-                    />
-                    {searchText && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchText("")}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </div>
+                  <SearchField
+                    value={searchText}
+                    onChange={setSearchText}
+                    placeholder="搜索名称、编号、部门..."
+                    icon={<Search className="h-3.5 w-3.5" />}
+                    className="max-w-xs"
+                  />
                 )}
               </div>
 
               {/* Alert Instrument List */}
               <div className="flex-1 overflow-y-auto px-6 py-3">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={selectedTier}
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.16, ease: EASE_PRECISION }}
+                  >
                 {summary.totalAlertCount === 0 ? (
                   <div className="py-12 text-center space-y-2.5">
                     <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center mx-auto">
@@ -423,7 +432,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                                 onClose();
                                 onSelectInstrument(instrument);
                               }}
-                              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition"
+                              className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/[0.08]"
                               title="查看设备档案"
                             >
                               <Eye className="h-3.5 w-3.5" />
@@ -434,44 +443,47 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                     })}
                   </div>
                 )}
+                  </motion.div>
+                </AnimatePresence>
               </div>
 
               {/* Footer */}
               <div className="px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex flex-wrap items-center justify-between gap-3 shrink-0">
-                <label className="inline-flex items-center gap-2 cursor-pointer select-none text-xs text-zinc-600 dark:text-zinc-400">
-                  <input
-                    type="checkbox"
-                    checked={mutedToday}
-                    onChange={(e) => onToggleMuteToday(e.target.checked)}
-                    className="rounded border-zinc-300 dark:border-zinc-700 text-zinc-900 focus:ring-indigo-500"
-                  />
-                  <span>今日不再提醒</span>
-                </label>
+                <PrecisionCheckbox
+                  checked={mutedToday}
+                  onChange={onToggleMuteToday}
+                  label={
+                    <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                      今日不再提醒
+                    </span>
+                  }
+                />
 
                 <div className="flex items-center gap-2">
                   {summary.totalAlertCount > 0 && (
-                    <button
+                    <motion.button
                       type="button"
+                      whileTap={TAP_SCALE}
+                      transition={SPRING_SNAPPY}
                       onClick={handleJumpToList}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200/90 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
                     >
                       <Filter className="h-3.5 w-3.5 text-zinc-400" />
                       <span>{jumpButtonLabel}</span>
-                    </button>
+                    </motion.button>
                   )}
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={onClose}
-                    className="px-4 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                    className="px-4 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                   >
                     确定
-                  </button>
+                  </motion.button>
                 </div>
               </div>
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </ModalShell>
   );
 };

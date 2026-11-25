@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion } from "motion/react";
@@ -11,10 +11,8 @@ import {
   ChevronRight,
   CloudDownload,
   Download,
-  Edit3,
   Eye,
   FileSpreadsheet,
-  FileText,
   Gauge,
   Layers,
   Lock,
@@ -28,16 +26,15 @@ import {
   ShieldCheck,
   SlidersHorizontal,
   Sun,
-  Trash2,
   Upload,
   Wrench,
   X,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, clearMediaCache } from "@/lib/api";
 import { exportJsskExcel, uint8ArrayToBase64 } from "@/lib/excel";
 import {
-  calTypeLabel,
-  getInstrumentStatus,
+  buildInstrumentStatusMap,
+  formatFileSize,
   getTodayStr,
   summarizeExpiryAlerts,
 } from "@/lib/status";
@@ -49,8 +46,7 @@ import {
 } from "@/lib/thresholdColors";
 import { cn } from "@/lib/utils";
 import { OnboardingSetup } from "@/components/OnboardingSetup";
-import { StatusBadge } from "@/components/StatusBadge";
-import { LocationThumb } from "@/components/LocationThumb";
+import { VirtualInstrumentTable } from "@/components/VirtualInstrumentTable";
 import { ImageLightbox } from "@/components/ImageLightbox";
 import { ReportModal } from "@/components/ReportModal";
 import { InstrumentDrawer } from "@/components/InstrumentDrawer";
@@ -68,12 +64,26 @@ import { UpdateBannerToast } from "@/components/UpdateBannerToast";
 import { ExpiryAlertModal } from "@/components/ExpiryAlertModal";
 import { ConfirmDialogHost, confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
+import {
+  EASE_PRECISION,
+  POPOVER_MOTION,
+  SPRING_SNAPPY,
+  TAP_SCALE,
+  TAP_SCALE_ICON,
+  TAP_SCALE_SUBTLE,
+} from "@/lib/motion";
+import {
+  SlidingNumber,
+  SpotlightSurface,
+} from "@/components/ui/MotionPrimitives";
+import { PrecisionSelect, SearchField } from "@/components/ui/FormControls";
 import type {
   AppSettings,
   AuthStatus,
   CategoryTab,
   ExpiryFilter,
   Instrument,
+  ResetAppResult,
   SortMode,
   StatusFilter,
   UpdateCheckResult,
@@ -214,6 +224,19 @@ export default function App() {
   const [windowFocusNonce, setWindowFocusNonce] = useState(0);
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [printMounted, setPrintMounted] = useState(false);
+
+  // Mount PrintLedgerView strictly on demand (eliminates hundreds of hidden DOM nodes)
+  useEffect(() => {
+    const onBeforePrint = () => setPrintMounted(true);
+    const onAfterPrint = () => setPrintMounted(false);
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint);
+    return () => {
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+    };
+  }, []);
 
   // Silent startup & in-app auto-updater state
   const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null);
@@ -482,6 +505,26 @@ export default function App() {
     [updatingApp, settings.githubRepo, settings.updateProxyUrl, notify]
   );
 
+  // Precompute status and search haystack ONCE per instrument load/threshold change
+  const statusById = useMemo(
+    () => buildInstrumentStatusMap(instruments, settings.warningThresholds),
+    [instruments, settings.warningThresholds]
+  );
+
+  const searchIndexById = useMemo(() => {
+    const map = new Map<number, string>();
+    for (let i = 0; i < instruments.length; i++) {
+      const inst = instruments[i];
+      map.set(
+        inst.id,
+        `${inst.name}\0${inst.serialNo}\0${inst.modelSpec}\0${inst.location}\0${inst.department}\0${inst.remark}\0${inst.supplier}\0${inst.calAgency}\0${inst.contactPerson}`.toLowerCase()
+      );
+    }
+    return map;
+  }, [instruments]);
+
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+
   // Category scoped counts & lists
   const tabCounts = useMemo(() => {
     let gauge = 0;
@@ -518,8 +561,13 @@ export default function App() {
   );
 
   const alertSummary = useMemo(
-    () => summarizeExpiryAlerts(instruments, settings.warningThresholds),
-    [instruments, settings.warningThresholds]
+    () =>
+      summarizeExpiryAlerts(
+        instruments,
+        settings.warningThresholds,
+        statusById
+      ),
+    [instruments, settings.warningThresholds, statusById]
   );
 
   // Reset numeric expiryFilter if that custom threshold was deleted
@@ -668,8 +716,9 @@ export default function App() {
     }
 
     for (const inst of categoryScoped) {
-      const info = getInstrumentStatus(inst, settings.warningThresholds);
-      if (info.status === "valid") valid++;
+      const info = statusById.get(inst.id);
+      if (!info || info.status === "exempt") exempt++;
+      else if (info.status === "valid") valid++;
       else if (info.status === "warning") {
         warning++;
         if (info.matchedThreshold) {
@@ -679,7 +728,6 @@ export default function App() {
           );
         }
       } else if (info.status === "expired") expired++;
-      else exempt++;
     }
 
     const controlled = valid + warning + expired;
@@ -702,7 +750,7 @@ export default function App() {
       compliancePct,
       tierSegments,
     };
-  }, [categoryScoped, settings.warningThresholds, descThresholds]);
+  }, [categoryScoped, statusById, descThresholds]);
 
   // Cumulative counts for list expiry filter pills (0 <= daysRemaining <= threshold.days)
   const expiryFilterCounts = useMemo(() => {
@@ -712,8 +760,8 @@ export default function App() {
       byDays[t.days] = 0;
     }
     for (const inst of categoryScoped) {
-      const st = getInstrumentStatus(inst, settings.warningThresholds);
-      if (st.daysRemaining === null) continue;
+      const st = statusById.get(inst.id);
+      if (!st || st.daysRemaining === null) continue;
       if (st.daysRemaining < 0) {
         expired++;
       } else {
@@ -725,23 +773,25 @@ export default function App() {
       }
     }
     return { expired, byDays };
-  }, [categoryScoped, settings.warningThresholds, descThresholds]);
+  }, [categoryScoped, statusById, descThresholds]);
 
-  // Filtered and sorted rows
+  // Filtered and sorted rows (O(1) precomputed status & search haystack lookup)
   const filteredInstruments = useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = deferredSearchQuery.trim().toLowerCase();
     const list = categoryScoped.filter((inst) => {
-      const st = getInstrumentStatus(inst, settings.warningThresholds);
+      const st = statusById.get(inst.id);
+      const status = st?.status ?? "exempt";
+      const daysRemaining = st?.daysRemaining ?? null;
 
-      if (statusFilter !== "all" && st.status !== statusFilter) return false;
+      if (statusFilter !== "all" && status !== statusFilter) return false;
 
       if (expiryFilter === "expired") {
-        if (st.status !== "expired") return false;
+        if (status !== "expired") return false;
       } else if (typeof expiryFilter === "number") {
         if (
-          st.daysRemaining === null ||
-          st.daysRemaining < 0 ||
-          st.daysRemaining > expiryFilter
+          daysRemaining === null ||
+          daysRemaining < 0 ||
+          daysRemaining > expiryFilter
         ) {
           return false;
         }
@@ -758,19 +808,7 @@ export default function App() {
       }
 
       if (q) {
-        const hay = [
-          inst.name,
-          inst.serialNo,
-          inst.modelSpec,
-          inst.location,
-          inst.department,
-          inst.remark,
-          inst.supplier,
-          inst.calAgency,
-          inst.contactPerson,
-        ]
-          .join(" ")
-          .toLowerCase();
+        const hay = searchIndexById.get(inst.id) || "";
         if (!hay.includes(q)) return false;
       }
 
@@ -779,10 +817,8 @@ export default function App() {
 
     if (sortMode === "expiry") {
       return [...list].sort((a, b) => {
-        const sa = getInstrumentStatus(a, settings.warningThresholds);
-        const sb = getInstrumentStatus(b, settings.warningThresholds);
-        const da = sa.daysRemaining ?? Number.MAX_SAFE_INTEGER;
-        const db = sb.daysRemaining ?? Number.MAX_SAFE_INTEGER;
+        const da = statusById.get(a.id)?.daysRemaining ?? Number.MAX_SAFE_INTEGER;
+        const db = statusById.get(b.id)?.daysRemaining ?? Number.MAX_SAFE_INTEGER;
         return da - db;
       });
     }
@@ -792,14 +828,66 @@ export default function App() {
     return list;
   }, [
     categoryScoped,
+    statusById,
+    searchIndexById,
     statusFilter,
     expiryFilter,
     deptFilter,
     calTypeFilter,
-    searchQuery,
+    deferredSearchQuery,
     sortMode,
-    settings.warningThresholds,
   ]);
+
+  const deferredFilteredInstruments = useDeferredValue(filteredInstruments);
+
+  const handleAppReset = useCallback((res: ResetAppResult) => {
+    clearMediaCache();
+    setSettingsModalOpen(false);
+    setDrawerOpen(false);
+    setEditingInstrument(null);
+    setAlertModalOpen(false);
+    setCommandOpen(false);
+    setImportModalOpen(false);
+    setReportInstrument(null);
+    setLightboxState(null);
+    setUpdatePopupOpen(false);
+    setLoginModalOpen(false);
+    setClosePromptOpen(false);
+    setInstruments([]);
+    setInstrumentsLoaded(false);
+    setLogoDataUrl("");
+    setAvatarDataUrl("");
+    setSettings(DEFAULT_SETTINGS);
+    setActiveTab("gauge");
+    setStatusFilter("all");
+    setExpiryFilter("all");
+    setDeptFilter("all");
+    setCalTypeFilter("all");
+    setSearchQuery("");
+    setSortMode("seq");
+    writeStorage(ALERT_MUTED_DATE_KEY, "");
+    writeStorage(ALERT_LAST_SHOWN_DATE_KEY, "");
+    writeStorage(ALERT_LAST_SHOWN_TS_KEY, "");
+    setMutedToday(false);
+    startupAlertCheckedRef.current = false;
+    startupUpdateCheckedRef.current = false;
+    setAuth(res.auth);
+
+    const fileName = res.backup.path.split(/[/\\]/).pop() || res.backup.path;
+    toast.success(
+      `已自动备份（${res.backup.instrumentCount} 台设备 · ${formatFileSize(res.backup.sizeBytes)}）并完成初始化`,
+      {
+        description: `备份文件：${fileName}`,
+        duration: 9000,
+        action: {
+          label: "打开备份目录",
+          onClick: () => {
+            api.openFolderPath(res.backup.path).catch(() => {});
+          },
+        },
+      }
+    );
+  }, []);
 
   const handleLogout = async () => {
     try {
@@ -823,21 +911,24 @@ export default function App() {
     }
   };
 
-  const handleDelete = async (inst: Instrument) => {
-    const ok = await confirmDialog({
-      title: "删除设备",
-      description: `确定删除「${inst.name}」${inst.serialNo ? `（${inst.serialNo}）` : ""}？将同时清理位置照片及 ${inst.reportCount} 份报告，不可恢复。`,
-      destructive: true,
-    });
-    if (!ok) return;
-    try {
-      await api.deleteInstrument(inst.id);
-      setInstruments((prev) => prev.filter((i) => i.id !== inst.id));
-      notify("设备记录已删除", "success");
-    } catch (err) {
-      notify(String(err), "error");
-    }
-  };
+  const handleDelete = useCallback(
+    async (inst: Instrument) => {
+      const ok = await confirmDialog({
+        title: "删除设备",
+        description: `确定删除「${inst.name}」${inst.serialNo ? `（${inst.serialNo}）` : ""}？将同时清理位置照片及 ${inst.reportCount} 份报告，不可恢复。`,
+        destructive: true,
+      });
+      if (!ok) return;
+      try {
+        await api.deleteInstrument(inst.id);
+        setInstruments((prev) => prev.filter((i) => i.id !== inst.id));
+        notify("设备记录已删除", "success");
+      } catch (err) {
+        notify(String(err), "error");
+      }
+    },
+    [notify]
+  );
 
   const handleExportExcel = async (onlyFiltered: boolean) => {
     setExportMenuOpen(false);
@@ -875,25 +966,44 @@ export default function App() {
     }
   };
 
-  const handlePrint = () => window.print();
+  const handlePrint = useCallback(() => {
+    setPrintMounted(true);
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.print();
+      });
+    });
+  }, []);
 
-  const openCreateDrawer = () => {
+  const openCreateDrawer = useCallback(() => {
     setEditingInstrument(null);
     setDrawerMode("create");
     setDrawerOpen(true);
-  };
+  }, []);
 
-  const openEditDrawer = (inst: Instrument) => {
+  const openEditDrawer = useCallback((inst: Instrument) => {
     setEditingInstrument(inst);
     setDrawerMode("edit");
     setDrawerOpen(true);
-  };
+  }, []);
 
-  const openViewDrawer = (inst: Instrument) => {
+  const openViewDrawer = useCallback((inst: Instrument) => {
     setEditingInstrument(inst);
     setDrawerMode("view");
     setDrawerOpen(true);
-  };
+  }, []);
+
+  const handleOpenPhotoLightbox = useCallback((inst: Instrument) => {
+    setLightboxState({
+      photoPath: inst.photoPath,
+      title: `${inst.name} ${inst.serialNo ? `(${inst.serialNo})` : ""}`,
+      subtitle: inst.location || "未登记存放位置",
+    });
+  }, []);
+
+  const handleOpenReportModal = useCallback((inst: Instrument) => {
+    setReportInstrument(inst);
+  }, []);
 
   const openSettingsTab = (tab: SettingsTab) => {
     setSettingsInitialTab(tab);
@@ -959,15 +1069,19 @@ export default function App() {
     exempt: { label: "免校归档", dot: "bg-zinc-400" },
   };
 
-  // Prevent flashing main UI before initial auth status loads
+  // Prevent flashing main UI before initial auth status loads (adaptive luminous light / obsidian dark)
   if (booting) {
     return (
-      <div className="h-screen w-screen bg-[#09090b] flex items-center justify-center" />
+      <div className="h-screen w-screen bg-[#f7f7f5] dark:bg-[#09090b] flex items-center justify-center">
+        <div className="h-10 w-10 rounded-2xl bg-white dark:bg-white/[0.06] border border-zinc-200/80 dark:border-white/[0.08] shadow-tactile flex items-center justify-center animate-pulse">
+          <div className="h-2.5 w-2.5 rounded-full bg-indigo-500/80" />
+        </div>
+      </div>
     );
   }
 
   return (
-    <div className="h-screen w-screen overflow-hidden bg-[#fafafa] dark:bg-[#09090b] text-zinc-950 dark:text-zinc-50 flex flex-col">
+    <div className="h-screen w-screen overflow-hidden bg-[#f7f7f5] dark:bg-[#09090b] text-zinc-950 dark:text-zinc-50 flex flex-col">
       {/* First-Launch Intro Animation & Gradual Account Setup */}
       <AnimatePresence>
         {!auth.isInitialized && (
@@ -986,23 +1100,23 @@ export default function App() {
       {/* Main Desktop Shell (Hidden during print) */}
       {auth.isInitialized && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.4 }}
+          initial={{ opacity: 0, scale: 0.994 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.32, ease: EASE_PRECISION }}
           className="flex-1 flex min-h-0 no-print"
         >
           {/* Left Desktop Navigation Sidebar */}
-          <aside className="w-[248px] shrink-0 bg-[#f5f6f8] dark:bg-[#0d0d10] border-r border-zinc-200/80 dark:border-white/[0.07] flex flex-col select-none">
+          <aside className="w-[248px] shrink-0 bg-[#f4f5f7] dark:bg-[#0d0d10] border-r border-zinc-200/85 dark:border-white/[0.07] flex flex-col select-none">
             {/* Brand Identity */}
             <div className="px-4 pt-4 pb-3 flex items-center gap-2.5">
               {logoDataUrl ? (
                 <img
                   src={logoDataUrl}
                   alt="Logo"
-                  className="h-8 max-w-[84px] object-contain rounded-lg border border-zinc-200 dark:border-white/10 bg-white px-1.5 py-0.5 shrink-0"
+                  className="h-8 max-w-[84px] object-contain rounded-lg border border-zinc-200 dark:border-white/10 bg-white px-1.5 py-0.5 shrink-0 shadow-hairline"
                 />
               ) : (
-                <div className="h-8 w-8 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shadow-hairline shrink-0">
+                <div className="h-8 w-8 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shadow-tactile-primary shrink-0">
                   <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
                     <circle
                       cx="12"
@@ -1040,19 +1154,21 @@ export default function App() {
 
             {/* Command Palette Quick Trigger */}
             <div className="px-3 pb-3">
-              <button
+              <motion.button
                 type="button"
+                whileTap={TAP_SCALE_SUBTLE}
+                transition={SPRING_SNAPPY}
                 onClick={() => setCommandOpen(true)}
-                className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.07] border border-zinc-200/90 dark:border-white/[0.08] shadow-hairline flex items-center justify-between text-xs text-zinc-400 dark:text-zinc-500 transition"
+                className="w-full px-2.5 py-1.5 rounded-lg bg-white dark:bg-white/[0.04] hover:bg-white/95 dark:hover:bg-white/[0.07] border border-zinc-200/95 hover:border-zinc-300 dark:border-white/[0.08] shadow-tactile flex items-center justify-between text-xs text-zinc-400 hover:text-zinc-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors"
               >
                 <span className="inline-flex items-center gap-2">
                   <Search className="h-3.5 w-3.5" />
                   <span>快速检索...</span>
                 </span>
-                <kbd className="px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-white/[0.06] text-[10px] font-mono text-zinc-500 dark:text-zinc-400">
+                <kbd className="px-1.5 py-0.5 rounded-md bg-zinc-100/90 dark:bg-white/[0.06] border border-zinc-200/80 dark:border-white/[0.08] text-[10px] font-mono text-zinc-500 dark:text-zinc-400 shadow-[0_1px_0_rgba(15,23,42,0.05)]">
                   ⌘K
                 </kbd>
-              </button>
+              </motion.button>
             </div>
 
             {/* Scrollable Navigation Groups */}
@@ -1088,9 +1204,11 @@ export default function App() {
                     const active = activeTab === item.id;
                     const Icon = item.icon;
                     return (
-                      <button
+                      <motion.button
                         key={item.id}
                         type="button"
+                        whileTap={TAP_SCALE_SUBTLE}
+                        transition={SPRING_SNAPPY}
                         onClick={() => {
                           setActiveTab(item.id);
                           setDeptFilter("all");
@@ -1105,14 +1223,14 @@ export default function App() {
                         {active && (
                           <motion.span
                             layoutId="sidebar-cat-pill"
-                            transition={{ type: "spring", stiffness: 420, damping: 32 }}
-                            className="absolute inset-0 rounded-lg bg-white dark:bg-white/[0.08] border border-zinc-200/80 dark:border-white/[0.08] shadow-hairline"
+                            transition={SPRING_SNAPPY}
+                            className="absolute inset-0 rounded-lg bg-white dark:bg-white/[0.08] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile"
                           />
                         )}
                         <span className="relative z-10 inline-flex items-center gap-2">
                           <Icon
                             className={cn(
-                              "h-3.5 w-3.5",
+                              "h-3.5 w-3.5 transition-colors",
                               active
                                 ? "text-zinc-900 dark:text-white"
                                 : "text-zinc-400 dark:text-zinc-500"
@@ -1120,23 +1238,22 @@ export default function App() {
                           />
                           <span>{item.label}</span>
                         </span>
-                        <span
+                        <SlidingNumber
+                          value={item.count}
                           className={cn(
-                            "relative z-10 font-mono tabular-nums text-[11px]",
+                            "relative z-10 font-mono text-[11px]",
                             active
                               ? "text-zinc-700 dark:text-zinc-200 font-semibold"
                               : "text-zinc-400 dark:text-zinc-500"
                           )}
-                        >
-                          {item.count}
-                        </span>
-                      </button>
+                        />
+                      </motion.button>
                     );
                   })}
                 </nav>
               </div>
 
-              {/* Group 2: Precision Status Smart Views (Zero Emojis!) */}
+              {/* Group 2: Precision Status Smart Views (Spring layoutId Pill) */}
               <div>
                 <div className="px-2.5 pb-1.5 flex items-center justify-between text-[10.5px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
                   <span>效期状态</span>
@@ -1191,24 +1308,33 @@ export default function App() {
                   ).map((st) => {
                     const active = statusFilter === st.id;
                     return (
-                      <button
+                      <motion.button
                         key={st.id}
                         type="button"
+                        whileTap={TAP_SCALE_SUBTLE}
+                        transition={SPRING_SNAPPY}
                         onClick={() => handleSelectStatusFilter(st.id)}
                         className={cn(
                           "relative w-full px-2.5 py-1.5 rounded-lg text-xs flex items-center justify-between transition-colors",
                           active
-                            ? "text-zinc-950 dark:text-white font-medium bg-zinc-200/75 dark:bg-white/[0.08]"
+                            ? "text-zinc-950 dark:text-white font-medium"
                             : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/45 dark:hover:bg-white/[0.04]"
                         )}
                       >
-                        <span className="inline-flex items-center gap-2.5">
+                        {active && (
+                          <motion.span
+                            layoutId="sidebar-status-pill"
+                            transition={SPRING_SNAPPY}
+                            className="absolute inset-0 rounded-lg bg-white/95 dark:bg-white/[0.08] border border-zinc-200/80 dark:border-white/[0.08] shadow-hairline"
+                          />
+                        )}
+                        <span className="relative z-10 inline-flex items-center gap-2.5">
                           <span className={cn("h-1.5 w-1.5 rounded-full", st.dot)} />
                           <span>{st.label}</span>
                         </span>
                         <span
                           className={cn(
-                            "font-mono tabular-nums text-[11px]",
+                            "relative z-10 font-mono tabular-nums text-[11px]",
                             st.id === "expired" && st.count > 0
                               ? "px-1.5 py-0.2 rounded-full bg-rose-500/15 text-rose-600 dark:text-rose-400 font-semibold"
                               : st.id === "warning" && st.count > 0
@@ -1216,25 +1342,31 @@ export default function App() {
                                 : "text-zinc-400 dark:text-zinc-500"
                           )}
                         >
-                          {st.count}
+                          <SlidingNumber value={st.count} />
                         </span>
-                      </button>
+                      </motion.button>
                     );
                   })}
                 </nav>
               </div>
             </div>
 
-            {/* Minimalist Compliance Overview Widget */}
+            {/* Minimalist Compliance Overview Widget with Subtle Daylight Spotlight */}
             <div className="px-3 pb-3">
-              <div className="p-3 rounded-xl bg-white/80 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/[0.07] space-y-2.5">
+              <SpotlightSurface
+                spotlightColor="rgba(79, 70, 229, 0.065)"
+                radius={170}
+                className="p-3 rounded-xl bg-white/90 dark:bg-white/[0.03] border border-zinc-200/85 dark:border-white/[0.07] shadow-tactile space-y-2.5"
+              >
                 <div className="flex items-baseline justify-between">
                   <span className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
                     在控设备合规率
                   </span>
-                  <span className="text-sm font-semibold font-mono tabular-nums text-zinc-900 dark:text-white">
-                    {stats.compliancePct}%
-                  </span>
+                  <SlidingNumber
+                    value={stats.compliancePct}
+                    suffix="%"
+                    className="text-sm font-semibold font-mono text-zinc-900 dark:text-white"
+                  />
                 </div>
 
                 {/* Hairline Multi-Segment Compliance Bar */}
@@ -1247,7 +1379,7 @@ export default function App() {
                           animate={{
                             width: `${(stats.valid / stats.controlled) * 100}%`,
                           }}
-                          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                          transition={{ duration: 0.5, ease: EASE_PRECISION }}
                           className="h-full bg-emerald-500 rounded-full"
                         />
                       )}
@@ -1259,7 +1391,7 @@ export default function App() {
                             animate={{
                               width: `${(seg.count / stats.controlled) * 100}%`,
                             }}
-                            transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                            transition={{ duration: 0.5, ease: EASE_PRECISION }}
                             className="h-full rounded-full"
                             style={{ backgroundColor: seg.color }}
                           />
@@ -1271,7 +1403,7 @@ export default function App() {
                           animate={{
                             width: `${(stats.expired / stats.controlled) * 100}%`,
                           }}
-                          transition={{ duration: 0.5, ease: [0.16, 1, 0.3, 1] }}
+                          transition={{ duration: 0.5, ease: EASE_PRECISION }}
                           className="h-full bg-rose-500 rounded-full"
                         />
                       )}
@@ -1287,7 +1419,7 @@ export default function App() {
                     {stats.expired > 0 ? `${stats.expired} 台待复校` : "效期状态良好"}
                   </span>
                 </div>
-              </div>
+              </SpotlightSurface>
             </div>
 
             {/* Sidebar Bottom Account & Utility Rail */}
@@ -1304,7 +1436,7 @@ export default function App() {
                     }
                   }}
                   title="账号"
-                  className="px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50 dark:bg-white/[0.04] dark:hover:bg-white/[0.07] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between gap-2 cursor-pointer transition"
+                  className="btn-tactile px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50/90 dark:bg-white/[0.04] dark:hover:bg-white/[0.07] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile flex items-center justify-between gap-2 cursor-pointer"
                 >
                   <div className="flex items-center gap-2 min-w-0">
                     {avatarDataUrl ? (
@@ -1330,8 +1462,9 @@ export default function App() {
                       </div>
                     </div>
                   </div>
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE_ICON}
                     onClick={(e) => {
                       e.stopPropagation();
                       handleLogout();
@@ -1340,17 +1473,19 @@ export default function App() {
                     title="退出登录"
                   >
                     <LogOut className="h-3.5 w-3.5" />
-                  </button>
+                  </motion.button>
                 </div>
               ) : (
-                <button
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE}
+                  transition={SPRING_SNAPPY}
                   onClick={() => setLoginModalOpen(true)}
-                  className="w-full px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium inline-flex items-center justify-center gap-1.5 shadow-hairline transition"
+                  className="btn-sheen w-full px-3 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium inline-flex items-center justify-center gap-1.5 shadow-tactile-primary transition-colors"
                 >
                   <LogIn className="h-3.5 w-3.5" />
                   <span>管理员登录</span>
-                </button>
+                </motion.button>
               )}
 
               {/* Compact Sidebar Update Banner when New Version is Available */}
@@ -1362,8 +1497,9 @@ export default function App() {
                     initial={{ opacity: 0, y: 6 }}
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: 6 }}
+                    whileTap={TAP_SCALE_SUBTLE}
                     onClick={() => setUpdatePopupOpen(true)}
-                    className="w-full px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-zinc-200/90 dark:border-white/[0.1] shadow-hairline flex items-center justify-between gap-2 text-left transition"
+                    className="w-full px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50 dark:bg-white/[0.06] dark:hover:bg-white/[0.1] border border-zinc-200/90 dark:border-white/[0.1] shadow-tactile flex items-center justify-between gap-2 text-left transition"
                     title="点击查看并一键安装新版本"
                   >
                     <span className="flex items-center gap-2 min-w-0">
@@ -1388,10 +1524,12 @@ export default function App() {
 
               {/* Compact Utility Controls */}
               <div className="grid grid-cols-4 gap-1">
-                <button
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE_ICON}
+                  transition={SPRING_SNAPPY}
                   onClick={handleLock}
-                  className="relative py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
+                  className="relative py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
                   title={
                     auth.appLockEnabled
                       ? "立即锁定应用 (⌘L)"
@@ -1402,23 +1540,27 @@ export default function App() {
                   {auth.appLockEnabled && (
                     <span className="absolute top-1.5 right-3 h-1.5 w-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400" />
                   )}
-                </button>
-                <button
+                </motion.button>
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE_ICON}
+                  transition={SPRING_SNAPPY}
                   onClick={() => openSettingsTab(auth.isAdmin ? "general" : "window")}
-                  className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
+                  className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
                   title={auth.isAdmin ? "系统设置与安全配置" : "窗口托盘与软件设置"}
                 >
                   <Settings className="h-3.5 w-3.5" />
-                </button>
-                <button
+                </motion.button>
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE_ICON}
+                  transition={SPRING_SNAPPY}
                   onClick={() =>
                     availableUpdate?.hasUpdate
                       ? setUpdatePopupOpen((v) => !v)
                       : openSettingsTab("update")
                   }
-                  className="relative py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
+                  className="relative py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
                   title={
                     availableUpdate?.hasUpdate
                       ? `发现新版本 v${availableUpdate.latestVersion}，点击查看`
@@ -1432,19 +1574,32 @@ export default function App() {
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500 ring-2 ring-zinc-50 dark:ring-[#0c0c0f]" />
                     </span>
                   )}
-                </button>
-                <button
+                </motion.button>
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE_ICON}
+                  transition={SPRING_SNAPPY}
                   onClick={toggleTheme}
-                  className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
+                  className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors overflow-hidden"
                   title={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
                 >
-                  {theme === "dark" ? (
-                    <Sun className="h-3.5 w-3.5" />
-                  ) : (
-                    <Moon className="h-3.5 w-3.5" />
-                  )}
-                </button>
+                  <AnimatePresence mode="wait" initial={false}>
+                    <motion.span
+                      key={theme}
+                      initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
+                      animate={{ opacity: 1, rotate: 0, scale: 1 }}
+                      exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
+                      transition={{ duration: 0.18, ease: EASE_PRECISION }}
+                      className="flex items-center justify-center"
+                    >
+                      {theme === "dark" ? (
+                        <Sun className="h-3.5 w-3.5" />
+                      ) : (
+                        <Moon className="h-3.5 w-3.5" />
+                      )}
+                    </motion.span>
+                  </AnimatePresence>
+                </motion.button>
               </div>
             </div>
           </aside>
@@ -1452,56 +1607,70 @@ export default function App() {
           {/* Main Workspace Canvas */}
           <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-[#09090b]">
             {/* Minimalist Workspace Header */}
-            <header className="h-14 px-6 border-b border-zinc-200/80 dark:border-white/[0.07] flex items-center justify-between gap-4 shrink-0">
+            <header className="h-14 px-6 border-b border-zinc-200/80 dark:border-white/[0.07] flex items-center justify-between gap-4 shrink-0 bg-white/90 dark:bg-[#09090b]">
               <div className="flex items-center gap-2.5 min-w-0">
                 <h1 className="text-[15px] font-semibold tracking-tight text-zinc-950 dark:text-white truncate">
                   {activeHeading}
                 </h1>
-                <span className="px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-white/[0.06] text-[11px] font-mono tabular-nums font-medium text-zinc-600 dark:text-zinc-300">
-                  {filteredInstruments.length}
+                <span className="px-2 py-0.5 rounded-md bg-zinc-100/95 dark:bg-white/[0.06] border border-zinc-200/60 dark:border-white/[0.06] text-[11px] font-mono font-medium text-zinc-600 dark:text-zinc-300">
+                  <SlidingNumber value={filteredInstruments.length} />
                 </span>
 
-                {statusFilter !== "all" && (
-                  <button
-                    type="button"
-                    onClick={() => handleSelectStatusFilter("all")}
-                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200/80 dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-[11px] text-zinc-700 dark:text-zinc-200 transition"
-                  >
-                    <span
-                      className={cn(
-                        "h-1.5 w-1.5 rounded-full",
-                        statusMeta[statusFilter].dot
-                      )}
-                    />
-                    <span>{statusMeta[statusFilter].label}</span>
-                    <X className="h-3 w-3 text-zinc-400" />
-                  </button>
-                )}
+                <AnimatePresence>
+                  {statusFilter !== "all" && (
+                    <motion.button
+                      key="status-chip"
+                      type="button"
+                      initial={{ opacity: 0, scale: 0.88, x: -4 }}
+                      animate={{ opacity: 1, scale: 1, x: 0 }}
+                      exit={{ opacity: 0, scale: 0.88, x: -4 }}
+                      whileTap={TAP_SCALE}
+                      transition={SPRING_SNAPPY}
+                      onClick={() => handleSelectStatusFilter("all")}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-zinc-100 hover:bg-zinc-200/80 dark:bg-white/[0.07] dark:hover:bg-white/[0.12] text-[11px] text-zinc-700 dark:text-zinc-200 transition-colors"
+                    >
+                      <span
+                        className={cn(
+                          "h-1.5 w-1.5 rounded-full",
+                          statusMeta[statusFilter].dot
+                        )}
+                      />
+                      <span>{statusMeta[statusFilter].label}</span>
+                      <X className="h-3 w-3 text-zinc-400" />
+                    </motion.button>
+                  )}
 
-                {typeof expiryFilter === "number" &&
-                  (() => {
-                    const matched = descThresholds.find(
-                      (t) => t.days === expiryFilter
-                    );
-                    const visuals = getThresholdVisuals(
-                      matched?.color || "#f59e0b"
-                    );
-                    return (
-                      <button
-                        type="button"
-                        onClick={() => handleSelectExpiryFilter("all")}
-                        style={visuals.cssVars}
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] border-[var(--tier-border)] dark:border-[var(--tier-border-dark)] transition"
-                      >
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{ backgroundColor: visuals.hex }}
-                        />
-                        <span>≤{expiryFilter}天到期</span>
-                        <X className="h-3 w-3 opacity-70" />
-                      </button>
-                    );
-                  })()}
+                  {typeof expiryFilter === "number" &&
+                    (() => {
+                      const matched = descThresholds.find(
+                        (t) => t.days === expiryFilter
+                      );
+                      const visuals = getThresholdVisuals(
+                        matched?.color || "#f59e0b"
+                      );
+                      return (
+                        <motion.button
+                          key="expiry-chip"
+                          type="button"
+                          initial={{ opacity: 0, scale: 0.88, x: -4 }}
+                          animate={{ opacity: 1, scale: 1, x: 0 }}
+                          exit={{ opacity: 0, scale: 0.88, x: -4 }}
+                          whileTap={TAP_SCALE}
+                          transition={SPRING_SNAPPY}
+                          onClick={() => handleSelectExpiryFilter("all")}
+                          style={visuals.cssVars}
+                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full border text-[11px] font-medium bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] border-[var(--tier-border)] dark:border-[var(--tier-border-dark)] transition-colors"
+                        >
+                          <span
+                            className="h-1.5 w-1.5 rounded-full"
+                            style={{ backgroundColor: visuals.hex }}
+                          />
+                          <span>≤{expiryFilter}天到期</span>
+                          <X className="h-3 w-3 opacity-70" />
+                        </motion.button>
+                      );
+                    })()}
+                </AnimatePresence>
 
                 {!auth.isAdmin && (
                   <span className="hidden xl:inline-flex items-center gap-1 px-2 py-0.5 rounded-md border border-zinc-200/80 dark:border-white/[0.08] text-[10.5px] text-zinc-400">
@@ -1520,15 +1689,17 @@ export default function App() {
                     alertSummary.highestSeverityColor || "#10b981";
                   const alertVisuals = getThresholdVisuals(alertColor);
                   return (
-                    <button
+                    <motion.button
                       type="button"
+                      whileTap={TAP_SCALE}
+                      transition={SPRING_SNAPPY}
                       onClick={() => openAlertModal()}
                       style={hasAlerts ? alertVisuals.cssVars : undefined}
                       className={cn(
-                        "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition",
+                        "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium shadow-tactile transition-colors",
                         hasAlerts
                           ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] border-[var(--tier-border)] dark:border-[var(--tier-border-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] hover:opacity-90"
-                          : "border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-zinc-700 dark:text-zinc-200"
+                          : "border-zinc-200/95 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-zinc-700 dark:text-zinc-200"
                       )}
                       title="打开设备效期预警弹窗"
                     >
@@ -1547,53 +1718,66 @@ export default function App() {
                           className="px-1.5 py-0.2 rounded-full text-[10.5px] font-mono tabular-nums font-semibold text-white"
                           style={{ backgroundColor: alertColor }}
                         >
-                          {alertSummary.totalAlertCount}
+                          <SlidingNumber value={alertSummary.totalAlertCount} />
                         </span>
                       )}
-                    </button>
+                    </motion.button>
                   );
                 })()}
 
                 {auth.isAdmin && (
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={() => setImportModalOpen(true)}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-zinc-700 dark:text-zinc-200 text-xs font-medium transition"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-zinc-700 dark:text-zinc-200 text-xs font-medium transition-colors"
                   >
                     <Upload className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-400" />
                     <span>导入</span>
-                  </button>
+                  </motion.button>
                 )}
 
                 {/* Export Menu */}
                 <div className="relative">
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={(e) => {
                       e.stopPropagation();
                       setExportMenuOpen((v) => !v);
                     }}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-zinc-700 dark:text-zinc-200 text-xs font-medium transition"
+                    className={cn(
+                      "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-zinc-700 dark:text-zinc-200 text-xs font-medium transition-all",
+                      exportMenuOpen
+                        ? "border-zinc-400 dark:border-white/25 ring-[3px] ring-zinc-900/[0.06] dark:ring-white/[0.08]"
+                        : "border-zinc-200/95 dark:border-white/[0.09]"
+                    )}
                   >
                     <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400" />
                     <span>导出</span>
-                    <ChevronDown className="h-3 w-3 text-zinc-400" />
-                  </button>
+                    <motion.span
+                      animate={{ rotate: exportMenuOpen ? 180 : 0 }}
+                      transition={SPRING_SNAPPY}
+                      className="flex items-center"
+                    >
+                      <ChevronDown className="h-3 w-3 text-zinc-400" />
+                    </motion.span>
+                  </motion.button>
 
                   <AnimatePresence>
                     {exportMenuOpen && (
                       <motion.div
-                        initial={{ opacity: 0, y: 6, scale: 0.97 }}
-                        animate={{ opacity: 1, y: 0, scale: 1 }}
-                        exit={{ opacity: 0, y: 4, scale: 0.97 }}
-                        transition={{ duration: 0.14 }}
+                        {...POPOVER_MOTION}
+                        style={{ transformOrigin: "top right" }}
                         onClick={(e) => e.stopPropagation()}
-                        className="absolute right-0 mt-1.5 w-52 rounded-xl bg-white dark:bg-[#141418] border border-zinc-200/90 dark:border-white/[0.1] shadow-popover py-1.5 z-40"
+                        className="absolute right-0 mt-1.5 w-52 rounded-xl bg-white dark:bg-[#141418] border border-zinc-200/90 dark:border-white/[0.1] shadow-modal-light dark:shadow-popover p-1 z-40"
                       >
                         <button
                           type="button"
                           onClick={() => handleExportExcel(false)}
-                          className="w-full px-3.5 py-2 text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.05] flex items-center justify-between gap-2 transition"
+                          className="w-full px-3 py-2 rounded-lg text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100/90 dark:hover:bg-white/[0.06] flex items-center justify-between gap-2 transition-colors"
                         >
                           <span className="inline-flex items-center gap-2 font-medium">
                             <Download className="h-3.5 w-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
@@ -1604,7 +1788,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={() => handleExportExcel(true)}
-                          className="w-full px-3.5 py-2 text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.05] flex items-center gap-2 transition"
+                          className="w-full px-3 py-2 rounded-lg text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100/90 dark:hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
                         >
                           <Download className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
                           <span className="font-medium">
@@ -1616,95 +1800,91 @@ export default function App() {
                   </AnimatePresence>
                 </div>
 
-                <button
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE}
+                  transition={SPRING_SNAPPY}
                   onClick={handlePrint}
-                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-zinc-700 dark:text-zinc-200 text-xs font-medium transition"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-zinc-700 dark:text-zinc-200 text-xs font-medium transition-colors"
                 >
                   <Printer className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-400" />
                   <span>打印</span>
-                </button>
+                </motion.button>
 
                 {auth.isAdmin && (
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={openCreateDrawer}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium shadow-hairline transition"
+                    className="btn-sheen inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium shadow-tactile-primary transition-colors"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     <span>新增设备</span>
-                  </button>
+                  </motion.button>
                 )}
               </div>
             </header>
 
             {/* Sleek Filter & Sort Strip */}
-            <div className="border-b border-zinc-200/70 dark:border-white/[0.06] bg-zinc-50/50 dark:bg-white/[0.015] shrink-0">
+            <div className="border-b border-zinc-200/75 dark:border-white/[0.06] bg-[#fafaf9] dark:bg-white/[0.015] shrink-0">
               <div className="px-6 py-2.5 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap items-center gap-2 flex-1 min-w-[260px]">
                   {/* Inline Search */}
-                  <div className="relative flex-1 max-w-xs min-w-[200px]">
-                    <Search className="h-3.5 w-3.5 text-zinc-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      placeholder="过滤名称、编号、规格、位置..."
-                      className="w-full pl-8 pr-7 py-1.5 text-xs rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
-                    />
-                    {searchQuery && (
-                      <button
-                        type="button"
-                        onClick={() => setSearchQuery("")}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </button>
-                    )}
-                  </div>
+                  <SearchField
+                    value={searchQuery}
+                    onChange={setSearchQuery}
+                    placeholder="过滤名称、编号、规格、位置..."
+                    icon={<Search className="h-3.5 w-3.5" />}
+                    className="flex-1 max-w-xs min-w-[200px]"
+                  />
 
-                  {/* Department Filter */}
-                  <select
+                  {/* Custom Animated Department Select */}
+                  <PrecisionSelect
                     value={deptFilter}
-                    onChange={(e) => setDeptFilter(e.target.value)}
-                    className="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#121216] text-zinc-700 dark:text-zinc-200 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
-                  >
-                    <option value="all">全部部门</option>
-                    {departmentOptions.map((d) => (
-                      <option key={d} value={d}>
-                        {d}
-                      </option>
-                    ))}
-                    <option value="__empty__">未填部门</option>
-                  </select>
+                    onChange={setDeptFilter}
+                    options={[
+                      { value: "all", label: "全部部门" },
+                      ...departmentOptions.map((d) => ({ value: d, label: d })),
+                      { value: "__empty__", label: "未填部门" },
+                    ]}
+                    className="min-w-[116px]"
+                  />
 
-                  {/* Sort Selector */}
-                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#121216] text-xs text-zinc-600 dark:text-zinc-300">
-                    <ArrowUpDown className="h-3 w-3 text-zinc-400" />
-                    <select
-                      value={sortMode}
-                      onChange={(e) => setSortMode(e.target.value as SortMode)}
-                      className="bg-transparent focus:outline-none text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer"
-                    >
-                      <option value="seq">默认序号</option>
-                      <option value="expiry">到期日优先</option>
-                      <option value="name">名称排序</option>
-                    </select>
-                  </div>
+                  {/* Custom Animated Sort Select */}
+                  <PrecisionSelect
+                    value={sortMode}
+                    onChange={(v) => setSortMode(v as SortMode)}
+                    icon={<ArrowUpDown className="h-3 w-3" />}
+                    options={[
+                      { value: "seq", label: "默认序号" },
+                      { value: "expiry", label: "到期日优先" },
+                      { value: "name", label: "名称排序" },
+                    ]}
+                    className="min-w-[116px]"
+                  />
 
-                  {hasActiveFilters && (
-                    <button
-                      type="button"
-                      onClick={resetAllFilters}
-                      className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 px-2 py-1 rounded-md hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] transition"
-                    >
-                      重置筛选
-                    </button>
-                  )}
+                  <AnimatePresence>
+                    {hasActiveFilters && (
+                      <motion.button
+                        key="reset-filters-btn"
+                        type="button"
+                        initial={{ opacity: 0, scale: 0.9 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        exit={{ opacity: 0, scale: 0.9 }}
+                        whileTap={TAP_SCALE}
+                        transition={SPRING_SNAPPY}
+                        onClick={resetAllFilters}
+                        className="text-[11px] font-medium text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 px-2 py-1 rounded-md hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] transition-colors"
+                      >
+                        重置筛选
+                      </motion.button>
+                    )}
+                  </AnimatePresence>
                 </div>
 
                 {/* Segmented Calibration Method Control */}
-                <div className="inline-flex items-center p-0.5 rounded-lg bg-zinc-200/60 dark:bg-white/[0.05] border border-zinc-200/70 dark:border-white/[0.06]">
+                <div className="inline-flex items-center p-0.5 rounded-lg bg-zinc-200/65 dark:bg-white/[0.05] border border-zinc-200/80 dark:border-white/[0.06]">
                   {(
                     [
                       { id: "all", label: "全部方式" },
@@ -1715,9 +1895,10 @@ export default function App() {
                   ).map((item) => {
                     const active = calTypeFilter === item.id;
                     return (
-                      <button
+                      <motion.button
                         key={item.id}
                         type="button"
+                        whileTap={TAP_SCALE_SUBTLE}
                         onClick={() => setCalTypeFilter(item.id)}
                         className={cn(
                           "relative px-2.5 py-1 rounded-md text-[11.5px] font-medium transition-colors",
@@ -1729,46 +1910,50 @@ export default function App() {
                         {active && (
                           <motion.span
                             layoutId="cal-type-pill"
-                            transition={{ type: "spring", stiffness: 450, damping: 34 }}
-                            className="absolute inset-0 rounded-md bg-white dark:bg-white/[0.11] shadow-hairline"
+                            transition={SPRING_SNAPPY}
+                            className="absolute inset-0 rounded-md bg-white dark:bg-white/[0.11] shadow-tactile"
                           />
                         )}
                         <span className="relative z-10">{item.label}</span>
-                      </button>
+                      </motion.button>
                     );
                   })}
                 </div>
               </div>
 
               {/* Dedicated Expiry Countdown Filter Strip (60d / 30d / 15d / Custom + Expired) */}
-              <div className="px-6 py-2 border-t border-zinc-200/60 dark:border-white/[0.05] flex flex-wrap items-center justify-between gap-2">
+              <div className="px-6 py-2 border-t border-zinc-200/65 dark:border-white/[0.05] flex flex-wrap items-center justify-between gap-2">
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500 mr-1 select-none">
                     <CalendarClock className="h-3.5 w-3.5" />
                     <span>到期筛选</span>
                   </span>
 
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={() => handleSelectExpiryFilter("all")}
                     className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition",
+                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
                       expiryFilter === "all"
-                        ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 border-zinc-900 dark:border-white shadow-hairline"
-                        : "bg-white dark:bg-white/[0.03] border-zinc-200/90 dark:border-white/[0.08] text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-300 dark:hover:border-white/[0.15]"
+                        ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 border-zinc-900 dark:border-white shadow-tactile-primary"
+                        : "bg-white dark:bg-white/[0.03] border-zinc-200/95 dark:border-white/[0.08] shadow-tactile text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:border-zinc-300 dark:hover:border-white/[0.15]"
                     )}
                   >
                     <span>全部</span>
-                  </button>
+                  </motion.button>
 
                   {descThresholds.map((tier) => {
                     const visuals = getThresholdVisuals(tier.color);
                     const active = expiryFilter === tier.days;
                     const count = expiryFilterCounts.byDays[tier.days] ?? 0;
                     return (
-                      <button
+                      <motion.button
                         key={tier.id}
                         type="button"
+                        whileTap={TAP_SCALE}
+                        transition={SPRING_SNAPPY}
                         onClick={() =>
                           handleSelectExpiryFilter(active ? "all" : tier.days)
                         }
@@ -1777,10 +1962,10 @@ export default function App() {
                           borderColor: active ? visuals.hex : undefined,
                         }}
                         className={cn(
-                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition",
+                          "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
                           active
-                            ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] shadow-hairline"
-                            : "bg-white dark:bg-white/[0.03] border-zinc-200/90 dark:border-white/[0.08] text-zinc-600 dark:text-zinc-300 hover:bg-[var(--tier-bg)] dark:hover:bg-[var(--tier-bg-dark)]"
+                            ? "bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] shadow-tactile"
+                            : "bg-white dark:bg-white/[0.03] border-zinc-200/95 dark:border-white/[0.08] shadow-tactile text-zinc-600 dark:text-zinc-300 hover:bg-[var(--tier-bg)] dark:hover:bg-[var(--tier-bg-dark)]"
                         )}
                         title={`筛选未来 ${tier.days} 天内到期的设备（${tier.label}）`}
                       >
@@ -1792,369 +1977,143 @@ export default function App() {
                           }}
                         />
                         <span>{tier.days}天内</span>
-                        <span
+                        <SlidingNumber
+                          value={count}
                           className={cn(
-                            "font-mono tabular-nums text-[10.5px]",
+                            "font-mono text-[10.5px]",
                             active
                               ? "font-semibold"
                               : count > 0
                                 ? "text-zinc-500 dark:text-zinc-400"
                                 : "text-zinc-300 dark:text-zinc-600"
                           )}
-                        >
-                          {count}
-                        </span>
-                      </button>
+                        />
+                      </motion.button>
                     );
                   })}
 
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={() =>
                       handleSelectExpiryFilter(
                         expiryFilter === "expired" ? "all" : "expired"
                       )
                     }
                     className={cn(
-                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition",
+                      "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11.5px] font-medium border transition-colors",
                       expiryFilter === "expired"
-                        ? "bg-rose-500/[0.12] dark:bg-rose-500/[0.18] text-rose-700 dark:text-rose-300 border-rose-500 shadow-hairline"
-                        : "bg-white dark:bg-white/[0.03] border-zinc-200/90 dark:border-white/[0.08] text-zinc-600 dark:text-zinc-300 hover:bg-rose-500/[0.07] hover:border-rose-300 dark:hover:border-rose-500/40"
+                        ? "bg-rose-500/[0.12] dark:bg-rose-500/[0.18] text-rose-700 dark:text-rose-300 border-rose-500 shadow-tactile"
+                        : "bg-white dark:bg-white/[0.03] border-zinc-200/95 dark:border-white/[0.08] shadow-tactile text-zinc-600 dark:text-zinc-300 hover:bg-rose-500/[0.07] hover:border-rose-300 dark:hover:border-rose-500/40"
                     )}
                     title="筛选已超过下次检验日期的设备"
                   >
                     <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
                     <span>已超期</span>
-                    <span
+                    <SlidingNumber
+                      value={expiryFilterCounts.expired}
                       className={cn(
-                        "font-mono tabular-nums text-[10.5px]",
+                        "font-mono text-[10.5px]",
                         expiryFilterCounts.expired > 0
                           ? "text-rose-600 dark:text-rose-400 font-semibold"
                           : "text-zinc-300 dark:text-zinc-600"
                       )}
-                    >
-                      {expiryFilterCounts.expired}
-                    </span>
-                  </button>
+                    />
+                  </motion.button>
                 </div>
 
-                <button
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE}
                   onClick={() => openSettingsTab("alerts")}
-                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] transition shrink-0"
+                  className="inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-medium text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] transition-colors shrink-0"
                   title="预警设置"
                 >
                   <SlidersHorizontal className="h-3 w-3" />
                   <span>预警设置</span>
-                </button>
+                </motion.button>
               </div>
             </div>
 
-            {/* Precision Data Table Area */}
-            <div className="flex-1 overflow-auto">
-              {loading ? (
-                <div className="h-full flex flex-col items-center justify-center gap-2 text-xs text-zinc-400">
-                  <div className="h-5 w-5 rounded-full border-2 border-zinc-300 dark:border-zinc-700 border-t-zinc-900 dark:border-t-white animate-spin" />
-                  <span>加载中...</span>
-                </div>
-              ) : instruments.length === 0 ? (
-                <div className="h-full flex items-center justify-center p-8">
-                  <div className="text-center max-w-sm space-y-4">
-                    <div className="h-12 w-12 rounded-2xl bg-zinc-100 dark:bg-white/[0.05] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-center mx-auto text-zinc-500 dark:text-zinc-400">
-                      <FileSpreadsheet className="h-5 w-5" />
-                    </div>
-                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-                      暂无设备记录
-                    </h3>
-                    <div className="flex items-center justify-center gap-2.5 pt-1">
-                      {auth.isAdmin ? (
-                        <>
-                          <button
-                            type="button"
-                            onClick={() => setImportModalOpen(true)}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] text-zinc-800 dark:text-zinc-100 text-xs font-medium transition"
-                          >
-                            <Upload className="h-3.5 w-3.5" />
-                            <span>导入 Excel</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={openCreateDrawer}
-                            className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium transition"
-                          >
-                            <Plus className="h-3.5 w-3.5" />
-                            <span>新增设备</span>
-                          </button>
-                        </>
-                      ) : (
+            {/* Virtualized Precision Data Table Area */}
+            {loading ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-2 text-xs text-zinc-400">
+                <div className="h-5 w-5 rounded-full border-2 border-zinc-300 dark:border-zinc-700 border-t-zinc-900 dark:border-t-white animate-spin" />
+                <span>加载中...</span>
+              </div>
+            ) : instruments.length === 0 ? (
+              <div className="flex-1 flex items-center justify-center p-8">
+                <div className="text-center max-w-sm space-y-4">
+                  <div className="h-12 w-12 rounded-2xl bg-zinc-100 dark:bg-white/[0.05] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-center mx-auto text-zinc-500 dark:text-zinc-400">
+                    <FileSpreadsheet className="h-5 w-5" />
+                  </div>
+                  <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+                    暂无设备记录
+                  </h3>
+                  <div className="flex items-center justify-center gap-2.5 pt-1">
+                    {auth.isAdmin ? (
+                      <>
                         <button
                           type="button"
-                          onClick={() => setLoginModalOpen(true)}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-medium transition"
+                          onClick={() => setImportModalOpen(true)}
+                          className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] shadow-tactile text-zinc-800 dark:text-zinc-100 text-xs font-medium"
                         >
-                          <LogIn className="h-3.5 w-3.5" />
-                          <span>登录</span>
+                          <Upload className="h-3.5 w-3.5" />
+                          <span>导入 Excel</span>
                         </button>
-                      )}
-                    </div>
+                        <button
+                          type="button"
+                          onClick={openCreateDrawer}
+                          className="btn-sheen btn-tactile inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 shadow-tactile-primary text-white dark:text-zinc-950 text-xs font-medium"
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          <span>新增设备</span>
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => setLoginModalOpen(true)}
+                        className="btn-sheen btn-tactile inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 shadow-tactile-primary text-white dark:text-zinc-950 text-xs font-medium"
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                        <span>登录</span>
+                      </button>
+                    )}
                   </div>
                 </div>
-              ) : filteredInstruments.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center gap-3 p-8 text-center">
-                  <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                    无匹配记录
-                  </p>
-                  <button
-                    type="button"
-                    onClick={resetAllFilters}
-                    className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.06] transition"
-                  >
-                    重置筛选
-                  </button>
-                </div>
-              ) : (
-                <table className="w-full text-left border-collapse">
-                  <thead className="sticky top-0 z-10 bg-white/95 dark:bg-[#09090b]/95 backdrop-blur-md">
-                    <tr className="border-b border-zinc-200/80 dark:border-white/[0.07] text-[11px] font-medium text-zinc-400 dark:text-zinc-500">
-                      <th className="py-2.5 pl-6 pr-2 w-12 font-mono">#</th>
-                      <th className="py-2.5 px-3 min-w-[200px]">设备与使用部门</th>
-                      <th className="py-2.5 px-3 min-w-[165px]">编号 / 型号规格</th>
-                      <th className="py-2.5 px-3 min-w-[175px]">存放位置</th>
-                      <th className="py-2.5 px-3 min-w-[130px]">上次校验 / 周期</th>
-                      <th className="py-2.5 px-3 min-w-[112px]">下次校验</th>
-                      <th className="py-2.5 px-3 min-w-[118px]">效期状态</th>
-                      <th className="py-2.5 px-3 min-w-[125px]">校验报告</th>
-                      <th className="py-2.5 pl-3 pr-6 text-right w-28">操作</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-zinc-100 dark:divide-white/[0.05] text-sm">
-                    {filteredInstruments.map((inst, idx) => {
-                      const statusInfo = getInstrumentStatus(
-                        inst,
-                        settings.warningThresholds
-                      );
-                      const tierVisuals =
-                        statusInfo.status === "warning" &&
-                        statusInfo.matchedThreshold
-                          ? getThresholdVisuals(statusInfo.matchedThreshold.color)
-                          : null;
-                      const rowStyle: React.CSSProperties | undefined =
-                        statusInfo.status === "expired"
-                          ? { boxShadow: "inset 2.5px 0 0 0 rgb(244, 63, 94)" }
-                          : tierVisuals
-                            ? {
-                                ...tierVisuals.cssVars,
-                                boxShadow: tierVisuals.rowAccentShadow,
-                              }
-                            : undefined;
-                      return (
-                        <tr
-                          key={inst.id}
-                          onClick={() => openViewDrawer(inst)}
-                          style={rowStyle}
-                          className="group cursor-pointer transition-colors hover:bg-zinc-50/90 dark:hover:bg-white/[0.025]"
-                        >
-                          <td className="py-3 pl-6 pr-2 font-mono tabular-nums text-[11.5px] text-zinc-400 dark:text-zinc-600">
-                            {String(idx + 1).padStart(2, "0")}
-                          </td>
-
-                          {/* Name & Department */}
-                          <td className="py-3 px-3">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-medium text-zinc-900 dark:text-zinc-100 text-[13px] tracking-tight">
-                                {inst.name}
-                              </span>
-                              {activeTab === "all" && (
-                                <span className="px-1.5 py-0.2 rounded border border-zinc-200/80 dark:border-white/[0.09] text-[10px] font-medium text-zinc-500 dark:text-zinc-400">
-                                  {inst.category === "fixture" ? "检具" : "量具"}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
-                              {inst.department && (
-                                <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-white/[0.06] text-zinc-600 dark:text-zinc-300">
-                                  {inst.department}
-                                </span>
-                              )}
-                              {inst.remark && (
-                                <span
-                                  className="truncate max-w-[180px] text-zinc-400 dark:text-zinc-500"
-                                  title={inst.remark}
-                                >
-                                  {inst.remark}
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Serial No & Spec */}
-                          <td className="py-3 px-3">
-                            <div className="font-mono tabular-nums text-xs font-medium text-zinc-800 dark:text-zinc-200">
-                              {inst.serialNo || "—"}
-                            </div>
-                            <div
-                              className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 truncate max-w-[185px]"
-                              title={inst.modelSpec}
-                            >
-                              {inst.modelSpec || "—"}
-                            </div>
-                          </td>
-
-                          {/* Location + Photo Thumbnail */}
-                          <td className="py-3 px-3">
-                            <div className="flex items-center gap-2.5">
-                              <LocationThumb
-                                photoPath={inst.photoPath}
-                                alt={`${inst.name} 位置图`}
-                                onClick={() =>
-                                  setLightboxState({
-                                    photoPath: inst.photoPath,
-                                    title: `${inst.name} ${inst.serialNo ? `(${inst.serialNo})` : ""}`,
-                                    subtitle: inst.location || "未登记存放位置",
-                                  })
-                                }
-                              />
-                              <div className="min-w-0">
-                                <div
-                                  className="text-xs text-zinc-700 dark:text-zinc-200 truncate max-w-[150px]"
-                                  title={inst.location}
-                                >
-                                  {inst.location || (
-                                    <span className="text-zinc-300 dark:text-zinc-600">
-                                      未登记
-                                    </span>
-                                  )}
-                                </div>
-                                {inst.calAgency && (
-                                  <div
-                                    className="text-[10.5px] text-zinc-400 dark:text-zinc-500 truncate max-w-[150px] mt-0.5"
-                                    title={inst.calAgency}
-                                  >
-                                    {inst.calAgency}
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          </td>
-
-                          {/* Last Cal Date + Method + Cycle */}
-                          <td className="py-3 px-3">
-                            <div className="font-mono tabular-nums text-xs text-zinc-700 dark:text-zinc-300">
-                              {inst.lastCalDate || "—"}
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-1 text-[10.5px] text-zinc-500 dark:text-zinc-400">
-                              <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-white/[0.06] text-zinc-600 dark:text-zinc-300 font-medium">
-                                {calTypeLabel(inst.calibrationType)}
-                              </span>
-                              {inst.calCycleMonths > 0 && !inst.exemptCalibration && (
-                                <span className="font-mono tabular-nums text-zinc-400 dark:text-zinc-500">
-                                  {inst.calCycleMonths}月
-                                </span>
-                              )}
-                            </div>
-                          </td>
-
-                          {/* Next Cal Date */}
-                          <td className="py-3 px-3 font-mono tabular-nums text-xs whitespace-nowrap">
-                            {inst.exemptCalibration ? (
-                              <span className="text-zinc-400 dark:text-zinc-600">—</span>
-                            ) : (
-                              <span
-                                className={cn(
-                                  "font-medium",
-                                  statusInfo.status === "expired"
-                                    ? "text-rose-600 dark:text-rose-400"
-                                    : statusInfo.status === "warning" && tierVisuals
-                                      ? "text-[var(--tier-text)] dark:text-[var(--tier-text-dark)]"
-                                      : "text-zinc-800 dark:text-zinc-200"
-                                )}
-                              >
-                                {inst.nextCalDate || "—"}
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Precision Status Badge */}
-                          <td className="py-3 px-3">
-                            <StatusBadge info={statusInfo} />
-                          </td>
-
-                          {/* Report Attachments */}
-                          <td
-                            className="py-3 px-3"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {inst.reportCount > 0 ? (
-                              <button
-                                type="button"
-                                onClick={() => setReportInstrument(inst)}
-                                className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-zinc-100/90 hover:bg-zinc-200/80 dark:bg-white/[0.06] dark:hover:bg-white/[0.11] text-zinc-700 dark:text-zinc-200 border border-zinc-200/70 dark:border-white/[0.08] text-[11.5px] font-medium transition max-w-[148px]"
-                                title={`点击预览最新报告：${inst.latestReportName || ""}`}
-                              >
-                                <FileText className="h-3.5 w-3.5 shrink-0 text-indigo-500 dark:text-indigo-400" />
-                                <span className="truncate font-mono tabular-nums">
-                                  报告 · {inst.reportCount}
-                                </span>
-                              </button>
-                            ) : auth.isAdmin ? (
-                              <button
-                                type="button"
-                                onClick={() => setReportInstrument(inst)}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-[11.5px] transition"
-                              >
-                                <Plus className="h-3 w-3" />
-                                <span>上传</span>
-                              </button>
-                            ) : (
-                              <span className="text-[11.5px] text-zinc-300 dark:text-zinc-700">
-                                —
-                              </span>
-                            )}
-                          </td>
-
-                          {/* Row Actions */}
-                          <td
-                            className="py-3 pl-3 pr-6 text-right whitespace-nowrap"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            <div className="inline-flex items-center gap-0.5 opacity-70 group-hover:opacity-100 transition-opacity">
-                              <button
-                                type="button"
-                                onClick={() => openViewDrawer(inst)}
-                                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition"
-                                title="查看完整档案"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                              </button>
-                              {auth.isAdmin && (
-                                <>
-                                  <button
-                                    type="button"
-                                    onClick={() => openEditDrawer(inst)}
-                                    className="p-1.5 rounded-lg text-zinc-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-500/10 transition"
-                                    title="编辑记录"
-                                  >
-                                    <Edit3 className="h-3.5 w-3.5" />
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => handleDelete(inst)}
-                                    className="p-1.5 rounded-lg text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-500/10 transition"
-                                    title="删除记录"
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                  </button>
-                                </>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              )}
-            </div>
+              </div>
+            ) : deferredFilteredInstruments.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center gap-3 p-8 text-center">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                  无匹配记录
+                </p>
+                <button
+                  type="button"
+                  onClick={resetAllFilters}
+                  className="btn-tactile px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-white/[0.06]"
+                >
+                  重置筛选
+                </button>
+              </div>
+            ) : (
+              <VirtualInstrumentTable
+                items={deferredFilteredInstruments}
+                statusById={statusById}
+                activeTab={activeTab}
+                isAdmin={auth.isAdmin}
+                activeInstrumentId={
+                  drawerOpen ? (editingInstrument?.id ?? null) : null
+                }
+                resetScrollKey={`${activeTab}|${statusFilter}|${expiryFilter}|${deptFilter}|${calTypeFilter}|${sortMode}`}
+                onView={openViewDrawer}
+                onEdit={openEditDrawer}
+                onDelete={handleDelete}
+                onOpenReport={handleOpenReportModal}
+                onOpenPhoto={handleOpenPhotoLightbox}
+              />
+            )}
 
             {/* Minimalist Desktop Status Bar */}
             <footer className="h-8 px-6 border-t border-zinc-200/80 dark:border-white/[0.07] bg-zinc-50/70 dark:bg-[#0c0c0f] flex items-center justify-between text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0 select-none">
@@ -2177,13 +2136,15 @@ export default function App() {
         </motion.div>
       )}
 
-      {/* Dedicated Landscape A4 Print View */}
-      <PrintLedgerView
-        instruments={filteredInstruments}
-        settings={settings}
-        activeCategory={activeTab}
-        logoDataUrl={logoDataUrl}
-      />
+      {/* Dedicated Landscape A4 Print View (Mounted strictly when printing) */}
+      {printMounted && (
+        <PrintLedgerView
+          instruments={filteredInstruments}
+          settings={settings}
+          activeCategory={activeTab}
+          logoDataUrl={logoDataUrl}
+        />
+      )}
 
       {/* Command Palette (Cmd/Ctrl + K) */}
       <CommandPalette
@@ -2219,6 +2180,7 @@ export default function App() {
         open={alertModalOpen && !(auth.isInitialized && auth.isLocked)}
         instruments={instruments}
         settings={settings}
+        precomputedSummary={alertSummary}
         mutedToday={mutedToday}
         onToggleMuteToday={handleToggleMuteToday}
         onClose={() => setAlertModalOpen(false)}
@@ -2300,6 +2262,7 @@ export default function App() {
           }));
         }}
         onDataRestored={() => refreshAll()}
+        onAppReset={handleAppReset}
         onNotify={notify}
         onRequestLogin={() => setLoginModalOpen(true)}
         onOpenAppLockSetup={(mode) =>
@@ -2395,14 +2358,15 @@ export default function App() {
       {/* Global In-App Confirm Dialog */}
       <ConfirmDialogHost />
 
-      {/* Sonner Stacked Toast Notifications */}
+      {/* Sonner Stacked Toast Notifications (above Onboarding z-[120]) */}
       <Toaster
         theme={theme}
         position="bottom-right"
+        style={{ zIndex: 220 }}
         toastOptions={{
           classNames: {
             toast:
-              "rounded-xl border border-zinc-200/80 dark:border-white/[0.1] shadow-elevated text-xs",
+              "rounded-xl border border-zinc-200/90 dark:border-white/[0.1] bg-white/95 dark:bg-[#141418]/95 backdrop-blur-xl shadow-modal-light dark:shadow-elevated text-xs",
           },
         }}
       />

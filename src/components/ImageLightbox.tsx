@@ -151,16 +151,19 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
               <div className="text-zinc-400 text-xs">正在加载高清现场图...</div>
             ) : src ? (
               <motion.img
-                initial={{ opacity: 0, scale: 0.94 }}
-                animate={{ opacity: 1, scale: 1 }}
-                transition={{ duration: 0.22 }}
+                initial={{ opacity: 0, scale: 0.92, filter: "blur(6px)" }}
+                animate={{
+                  opacity: 1,
+                  scale,
+                  rotate: rotation,
+                  filter: "blur(0px)",
+                }}
+                exit={{ opacity: 0, scale: 0.94 }}
+                transition={{ type: "spring", stiffness: 320, damping: 28 }}
                 src={src}
                 alt={title || "位置图"}
                 onClick={(e) => e.stopPropagation()}
-                style={{
-                  transform: `scale(${scale}) rotate(${rotation}deg)`,
-                }}
-                className="max-h-[80vh] max-w-[85vw] object-contain rounded-xl shadow-2xl transition-transform duration-150 select-none"
+                className="max-h-[80vh] max-w-[85vw] object-contain rounded-xl shadow-2xl select-none"
               />
             ) : (
               <div className="text-zinc-400 text-xs">图片加载失败</div>

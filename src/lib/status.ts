@@ -55,13 +55,21 @@ export function calcNextCalDate(lastCalDate: string, cycleMonths: number): strin
   return `${y}-${m}-${d}`;
 }
 
-export function diffDaysFromToday(targetDateStr: string): number | null {
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+export function getTodayEpochMs(): number {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+}
+
+export function diffDaysFromToday(
+  targetDateStr: string,
+  todayEpochMs?: number
+): number | null {
   const target = parseYmd(targetDateStr);
   if (!target) return null;
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const msPerDay = 24 * 60 * 60 * 1000;
-  return Math.round((target.getTime() - today.getTime()) / msPerDay);
+  const baseMs = todayEpochMs ?? getTodayEpochMs();
+  return Math.round((target.getTime() - baseMs) / MS_PER_DAY);
 }
 
 export interface InstrumentStatusInfo {
@@ -75,7 +83,8 @@ export interface InstrumentStatusInfo {
 
 export function getInstrumentStatus(
   inst: Pick<Instrument, "exemptCalibration" | "nextCalDate" | "remark">,
-  thresholdsOrWarningDays: WarningThreshold[] | number = DEFAULT_WARNING_THRESHOLDS
+  thresholdsOrWarningDays: WarningThreshold[] | number = DEFAULT_WARNING_THRESHOLDS,
+  opts?: { preSortedAsc?: boolean; todayEpochMs?: number }
 ): InstrumentStatusInfo {
   if (inst.exemptCalibration || !inst.nextCalDate.trim()) {
     return {
@@ -92,7 +101,7 @@ export function getInstrumentStatus(
     };
   }
 
-  const diff = diffDaysFromToday(inst.nextCalDate);
+  const diff = diffDaysFromToday(inst.nextCalDate, opts?.todayEpochMs);
   if (diff === null) {
     return {
       status: "exempt",
@@ -127,10 +136,18 @@ export function getInstrumentStatus(
             label: "即将到期",
           },
         ]
-      : sortThresholdsAsc(thresholdsOrWarningDays);
+      : opts?.preSortedAsc
+        ? thresholdsOrWarningDays
+        : sortThresholdsAsc(thresholdsOrWarningDays);
 
   // Match the tightest (smallest days) threshold that covers daysRemaining
-  const matched = ascThresholds.find((t) => diff <= t.days) ?? null;
+  let matched: WarningThreshold | null = null;
+  for (let i = 0; i < ascThresholds.length; i++) {
+    if (diff <= ascThresholds[i].days) {
+      matched = ascThresholds[i];
+      break;
+    }
+  }
   if (matched) {
     return {
       status: "warning",
@@ -152,6 +169,26 @@ export function getInstrumentStatus(
   };
 }
 
+/**
+ * Compute status once for every instrument in a single pass with pre-sorted
+ * thresholds and a single Date anchor — eliminates repeated parsing/sorting
+ * across filters, stats, sorting, and row renders.
+ */
+export function buildInstrumentStatusMap(
+  instruments: Instrument[],
+  thresholds: WarningThreshold[]
+): Map<number, InstrumentStatusInfo> {
+  const asc = sortThresholdsAsc(thresholds);
+  const todayEpochMs = getTodayEpochMs();
+  const opts = { preSortedAsc: true, todayEpochMs };
+  const map = new Map<number, InstrumentStatusInfo>();
+  for (let i = 0; i < instruments.length; i++) {
+    const inst = instruments[i];
+    map.set(inst.id, getInstrumentStatus(inst, asc, opts));
+  }
+  return map;
+}
+
 export interface ExpiryAlertTierGroup {
   threshold: WarningThreshold;
   items: Array<{ instrument: Instrument; statusInfo: InstrumentStatusInfo }>;
@@ -167,9 +204,12 @@ export interface ExpiryAlertSummary {
 
 export function summarizeExpiryAlerts(
   instruments: Instrument[],
-  thresholds: WarningThreshold[]
+  thresholds: WarningThreshold[],
+  precomputedStatusMap?: Map<number, InstrumentStatusInfo>
 ): ExpiryAlertSummary {
   const asc = sortThresholdsAsc(thresholds);
+  const todayEpochMs = getTodayEpochMs();
+  const opts = { preSortedAsc: true, todayEpochMs };
   const expired: Array<{ instrument: Instrument; statusInfo: InstrumentStatusInfo }> = [];
   const tierMap = new Map<string, ExpiryAlertTierGroup>();
 
@@ -178,7 +218,9 @@ export function summarizeExpiryAlerts(
   }
 
   for (const inst of instruments) {
-    const statusInfo = getInstrumentStatus(inst, asc);
+    const statusInfo =
+      precomputedStatusMap?.get(inst.id) ??
+      getInstrumentStatus(inst, asc, opts);
     if (statusInfo.status === "expired") {
       expired.push({ instrument: inst, statusInfo });
     } else if (statusInfo.status === "warning" && statusInfo.matchedThreshold) {

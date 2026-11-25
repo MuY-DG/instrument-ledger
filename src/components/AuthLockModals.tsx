@@ -17,9 +17,19 @@ import {
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { InfoTip } from "@/components/InfoTip";
+import {
+  EASE_PRECISION,
+  SPRING_SNAPPY,
+  TAP_SCALE,
+  TAP_SCALE_SUBTLE,
+} from "@/lib/motion";
+import { ModalShell } from "@/components/ui/MotionPrimitives";
+import {
+  PrecisionCheckbox,
+  PrecisionSelect,
+  PrecisionSwitch,
+} from "@/components/ui/FormControls";
 import type { AuthStatus } from "@/types";
-
-const EASE_PRECISION: [number, number, number, number] = [0.16, 1, 0.3, 1];
 
 export function isMacPlatform(): boolean {
   if (typeof navigator === "undefined") return false;
@@ -211,27 +221,15 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 bg-zinc-950/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 no-print"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: 6 }}
-            transition={{ duration: 0.22, ease: EASE_PRECISION }}
-            className="w-full max-w-md bg-white dark:bg-[#121216] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      closeOnEsc
+      panelClassName="w-full max-w-md"
+    >
+            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between bg-zinc-50/55 dark:bg-white/[0.015]">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shrink-0">
+                <div className="h-8 w-8 rounded-xl bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shrink-0 shadow-tactile-primary">
                   <ShieldCheck className="h-4 w-4" />
                 </div>
                 <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
@@ -241,7 +239,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.07] transition"
+                className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.07]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -258,7 +256,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="请输入管理员账号"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-200 dark:border-white/[0.1] bg-zinc-50/50 dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.05] focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
+                  className="precision-field w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-zinc-50/60 hover:bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.05]"
                 />
               </div>
 
@@ -274,7 +272,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="请输入密码"
-                    className="w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-zinc-200 dark:border-white/[0.1] bg-zinc-50/50 dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.05] focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition"
+                    className="precision-field w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-zinc-50/60 hover:bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.05]"
                   />
                   <button
                     type="button"
@@ -286,49 +284,60 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                 </div>
               </div>
 
-              <label className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-zinc-50/80 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/[0.07] cursor-pointer select-none">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl bg-zinc-50/80 dark:bg-white/[0.03] border border-zinc-200/80 dark:border-white/[0.07]">
+                <PrecisionCheckbox
                   checked={remember}
-                  onChange={(e) => setRemember(e.target.checked)}
-                  className="h-3.5 w-3.5 rounded border-zinc-300 dark:border-zinc-600 accent-zinc-900 dark:accent-white"
+                  onChange={setRemember}
+                  label={
+                    <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                      {sessionDays} 天内保持登录
+                    </span>
+                  }
                 />
-                <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
-                  {sessionDays} 天内保持登录
-                </span>
                 <InfoTip
                   content={`勾选后 ${sessionDays} 天内重启软件无需重输密码，到期自动恢复只读；可随时在侧边栏退出。`}
                 />
-              </label>
+              </div>
 
-              {error && (
-                <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-500/[0.08] border border-rose-500/20 rounded-xl px-3.5 py-2.5">
-                  {error}
-                </div>
-              )}
+              <AnimatePresence>
+                {error && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4, height: 0 }}
+                    animate={{ opacity: 1, y: 0, height: "auto" }}
+                    exit={{ opacity: 0, y: -4, height: 0 }}
+                    transition={SPRING_SNAPPY}
+                    className="overflow-hidden"
+                  >
+                    <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-500/[0.08] border border-rose-500/20 rounded-xl px-3.5 py-2.5">
+                      {error}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
 
               <div className="flex items-center justify-end gap-2 pt-2">
-                <button
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE}
+                  transition={SPRING_SNAPPY}
                   onClick={onClose}
-                  className="px-4 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
+                  className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] transition-colors"
                 >
                   取消
-                </button>
-                <button
+                </motion.button>
+                <motion.button
                   type="submit"
                   disabled={loading}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                  whileTap={loading ? undefined : TAP_SCALE}
+                  transition={SPRING_SNAPPY}
+                  className="btn-sheen inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                 >
                   <KeyRound className="h-3.5 w-3.5" />
                   <span>{loading ? "登录中..." : "登录"}</span>
-                </button>
+                </motion.button>
               </div>
             </form>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </ModalShell>
   );
 };
 
@@ -444,28 +453,17 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-[70] bg-zinc-950/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 no-print"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: 6 }}
-            transition={{ duration: 0.22, ease: EASE_PRECISION }}
-            className="w-full max-w-md bg-white dark:bg-[#121216] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      closeOnEsc
+      zIndexClass="z-[70]"
+      panelClassName="w-full max-w-md"
+    >
             {/* Header */}
-            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
+            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/55 dark:bg-white/[0.015] flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="h-8 w-8 rounded-xl bg-indigo-500/12 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                <div className="h-8 w-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
                   <Lock className="h-4 w-4" />
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -478,7 +476,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.07] transition"
+                className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.07]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -491,21 +489,32 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                   PIN 码位数
                 </span>
                 <div className="inline-flex items-center p-0.5 rounded-lg bg-zinc-100 dark:bg-white/[0.05] border border-zinc-200/80 dark:border-white/[0.08]">
-                  {([4, 5, 6] as const).map((len) => (
-                    <button
-                      key={len}
-                      type="button"
-                      onClick={() => handleChangeLength(len)}
-                      className={cn(
-                        "px-2.5 py-1 rounded-md text-xs font-medium transition",
-                        pinLength === len
-                          ? "bg-white dark:bg-white/[0.12] text-zinc-950 dark:text-white shadow-hairline"
-                          : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
-                      )}
-                    >
-                      {len} 位
-                    </button>
-                  ))}
+                  {([4, 5, 6] as const).map((len) => {
+                    const active = pinLength === len;
+                    return (
+                      <motion.button
+                        key={len}
+                        type="button"
+                        whileTap={TAP_SCALE_SUBTLE}
+                        onClick={() => handleChangeLength(len)}
+                        className={cn(
+                          "relative px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
+                          active
+                            ? "text-zinc-950 dark:text-white"
+                            : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+                        )}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="pin-len-pill"
+                            transition={SPRING_SNAPPY}
+                            className="absolute inset-0 rounded-md bg-white dark:bg-white/[0.12] shadow-tactile"
+                          />
+                        )}
+                        <span className="relative z-10">{len} 位</span>
+                      </motion.button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -585,42 +594,44 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                     <span className="text-xs text-zinc-600 dark:text-zinc-400">
                       无操作自动锁定
                     </span>
-                    <select
+                    <PrecisionSelect
                       value={autoLockMinutes}
-                      onChange={(e) => setAutoLockMinutes(Number(e.target.value))}
-                      className="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-[#16161b] text-zinc-800 dark:text-zinc-200 focus:outline-none"
-                    >
-                      <option value={0}>关闭</option>
-                      <option value={5}>5 分钟</option>
-                      <option value={10}>10 分钟</option>
-                      <option value={15}>15 分钟</option>
-                      <option value={30}>30 分钟</option>
-                    </select>
+                      onChange={setAutoLockMinutes}
+                      align="right"
+                      className="min-w-[100px]"
+                      options={[
+                        { value: 0, label: "关闭" },
+                        { value: 5, label: "5 分钟" },
+                        { value: 10, label: "10 分钟" },
+                        { value: 15, label: "15 分钟" },
+                        { value: 30, label: "30 分钟" },
+                      ]}
+                    />
                   </div>
 
-                  <label className="flex items-center justify-between gap-2 cursor-pointer select-none">
+                  <div className="flex items-center justify-between gap-2 select-none">
                     <span className="text-xs text-zinc-600 dark:text-zinc-400">
                       隐藏到{mac ? "菜单栏" : "托盘"}时锁定
                     </span>
-                    <input
-                      type="checkbox"
+                    <PrecisionSwitch
                       checked={lockOnHide}
-                      onChange={(e) => setLockOnHide(e.target.checked)}
-                      className="h-3.5 w-3.5 accent-zinc-900 dark:accent-white"
+                      onChange={setLockOnHide}
+                      size="sm"
+                      ariaLabel="隐藏时锁定"
                     />
-                  </label>
+                  </div>
 
-                  <label className="flex items-center justify-between gap-2 cursor-pointer select-none">
+                  <div className="flex items-center justify-between gap-2 select-none">
                     <span className="text-xs text-zinc-600 dark:text-zinc-400">
                       启动程序时锁定
                     </span>
-                    <input
-                      type="checkbox"
+                    <PrecisionSwitch
                       checked={lockOnStartup}
-                      onChange={(e) => setLockOnStartup(e.target.checked)}
-                      className="h-3.5 w-3.5 accent-zinc-900 dark:accent-white"
+                      onChange={setLockOnStartup}
+                      size="sm"
+                      ariaLabel="启动程序时锁定"
                     />
-                  </label>
+                  </div>
                 </div>
               )}
 
@@ -631,17 +642,21 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
               )}
 
               <div className="flex items-center justify-end gap-2 pt-1">
-                <button
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE}
+                  transition={SPRING_SNAPPY}
                   onClick={onClose}
-                  className="px-4 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
+                  className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition-colors"
                 >
                   取消
-                </button>
-                <button
+                </motion.button>
+                <motion.button
                   type="submit"
                   disabled={saving || !pinsMatch}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                  whileTap={saving || !pinsMatch ? undefined : TAP_SCALE}
+                  transition={SPRING_SNAPPY}
+                  className="btn-sheen inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                 >
                   <Lock className="h-3.5 w-3.5" />
                   <span>
@@ -653,13 +668,10 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
                           ? "确定并锁定"
                           : "确定"}
                   </span>
-                </button>
+                </motion.button>
               </div>
             </form>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </ModalShell>
   );
 };
 
@@ -1025,24 +1037,35 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                           { id: "reset_pin", label: "重设 PIN" },
                           { id: "disable_lock", label: "关闭应用锁" },
                         ] as const
-                      ).map((opt) => (
-                        <button
-                          key={opt.id}
-                          type="button"
-                          onClick={() => {
-                            setRecoveryAction(opt.id);
-                            setError("");
-                          }}
-                          className={cn(
-                            "py-1.5 px-2 rounded-lg text-[11.5px] font-medium transition",
-                            recoveryAction === opt.id
-                              ? "bg-white dark:bg-white/[0.12] text-zinc-950 dark:text-white shadow-hairline"
-                              : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
-                          )}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
+                      ).map((opt) => {
+                        const active = recoveryAction === opt.id;
+                        return (
+                          <motion.button
+                            key={opt.id}
+                            type="button"
+                            whileTap={TAP_SCALE_SUBTLE}
+                            onClick={() => {
+                              setRecoveryAction(opt.id);
+                              setError("");
+                            }}
+                            className={cn(
+                              "relative py-1.5 px-2 rounded-lg text-[11.5px] font-medium transition-colors",
+                              active
+                                ? "text-zinc-950 dark:text-white"
+                                : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200"
+                            )}
+                          >
+                            {active && (
+                              <motion.span
+                                layoutId="recovery-action-pill"
+                                transition={SPRING_SNAPPY}
+                                className="absolute inset-0 rounded-lg bg-white dark:bg-white/[0.12] shadow-tactile"
+                              />
+                            )}
+                            <span className="relative z-10">{opt.label}</span>
+                          </motion.button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1133,32 +1156,20 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.16 }}
-          className="fixed inset-0 z-[130] bg-zinc-950/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 no-print"
-          onClick={onCancel}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: 6 }}
-            transition={{ duration: 0.2, ease: EASE_PRECISION }}
-            className="w-full max-w-[420px] bg-white dark:bg-[#121216] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between">
+    <ModalShell
+      open={open}
+      onClose={onCancel}
+      zIndexClass="z-[130]"
+      panelClassName="w-full max-w-[420px]"
+    >
+            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/55 dark:bg-white/[0.015] flex items-center justify-between">
               <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
                 关闭窗口
               </h2>
               <button
                 type="button"
                 onClick={onCancel}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.07] transition"
+                className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.07]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -1166,21 +1177,23 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
 
             <div className="p-6 space-y-3">
               {/* Option 1: Minimize to Tray / Menu Bar */}
-              <button
+              <motion.button
                 type="button"
+                whileTap={TAP_SCALE_SUBTLE}
+                transition={SPRING_SNAPPY}
                 onClick={() => setSelected("minimize_to_tray")}
                 className={cn(
-                  "w-full text-left px-3.5 py-3 rounded-xl border transition flex items-center gap-3",
+                  "w-full text-left px-3.5 py-3 rounded-xl border transition-all flex items-center gap-3",
                   selected === "minimize_to_tray"
-                    ? "border-zinc-900 dark:border-white/70 bg-zinc-50 dark:bg-white/[0.06] ring-1 ring-zinc-900/10 dark:ring-white/15"
-                    : "border-zinc-200/90 dark:border-white/[0.08] hover:bg-zinc-50/70 dark:hover:bg-white/[0.03]"
+                    ? "border-zinc-900 dark:border-white/70 bg-zinc-50/90 dark:bg-white/[0.06] ring-1 ring-zinc-900/10 dark:ring-white/15 shadow-tactile"
+                    : "border-zinc-200/95 dark:border-white/[0.08] hover:bg-zinc-50/70 dark:hover:bg-white/[0.03]"
                 )}
               >
                 <div
                   className={cn(
-                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0",
+                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
                     selected === "minimize_to_tray"
-                      ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950"
+                      ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 shadow-hairline"
                       : "bg-zinc-100 dark:bg-white/[0.06] text-zinc-500 dark:text-zinc-400"
                   )}
                 >
@@ -1198,24 +1211,26 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                     }
                   />
                 </div>
-              </button>
+              </motion.button>
 
               {/* Option 2: Exit Application */}
-              <button
+              <motion.button
                 type="button"
+                whileTap={TAP_SCALE_SUBTLE}
+                transition={SPRING_SNAPPY}
                 onClick={() => setSelected("exit")}
                 className={cn(
-                  "w-full text-left px-3.5 py-3 rounded-xl border transition flex items-center gap-3",
+                  "w-full text-left px-3.5 py-3 rounded-xl border transition-all flex items-center gap-3",
                   selected === "exit"
-                    ? "border-zinc-900 dark:border-white/70 bg-zinc-50 dark:bg-white/[0.06] ring-1 ring-zinc-900/10 dark:ring-white/15"
-                    : "border-zinc-200/90 dark:border-white/[0.08] hover:bg-zinc-50/70 dark:hover:bg-white/[0.03]"
+                    ? "border-zinc-900 dark:border-white/70 bg-zinc-50/90 dark:bg-white/[0.06] ring-1 ring-zinc-900/10 dark:ring-white/15 shadow-tactile"
+                    : "border-zinc-200/95 dark:border-white/[0.08] hover:bg-zinc-50/70 dark:hover:bg-white/[0.03]"
                 )}
               >
                 <div
                   className={cn(
-                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0",
+                    "h-8 w-8 rounded-lg flex items-center justify-center shrink-0 transition-colors",
                     selected === "exit"
-                      ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950"
+                      ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 shadow-hairline"
                       : "bg-zinc-100 dark:bg-white/[0.06] text-zinc-500 dark:text-zinc-400"
                   )}
                 >
@@ -1226,44 +1241,45 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                     直接退出
                   </div>
                 </div>
-              </button>
+              </motion.button>
 
               {/* Remember Checkbox */}
-              <label className="flex items-center gap-2 pt-1.5 cursor-pointer select-none">
-                <input
-                  type="checkbox"
+              <div className="flex items-center gap-2 pt-1.5">
+                <PrecisionCheckbox
                   checked={remember}
-                  onChange={(e) => setRemember(e.target.checked)}
-                  className="h-3.5 w-3.5 accent-zinc-900 dark:accent-white"
+                  onChange={setRemember}
+                  label={
+                    <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                      记住选择
+                    </span>
+                  }
                 />
-                <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                  记住选择
-                </span>
                 <InfoTip content="下次关闭不再询问，可随时在「设置 → 窗口与托盘」修改。" />
-              </label>
+              </div>
 
               {/* Footer Actions */}
               <div className="flex items-center justify-end gap-2 pt-3">
-                <button
+                <motion.button
                   type="button"
+                  whileTap={TAP_SCALE}
+                  transition={SPRING_SNAPPY}
                   onClick={onCancel}
-                  className="px-4 py-2 rounded-xl border border-zinc-200 dark:border-white/[0.1] text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition"
+                  className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition-colors"
                 >
                   取消
-                </button>
-                <button
+                </motion.button>
+                <motion.button
                   type="button"
                   disabled={submitting}
+                  whileTap={submitting ? undefined : TAP_SCALE}
+                  transition={SPRING_SNAPPY}
                   onClick={handleConfirm}
-                  className="px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                  className="btn-sheen px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                 >
                   确定
-                </button>
+                </motion.button>
               </div>
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </ModalShell>
   );
 };

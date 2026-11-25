@@ -73,8 +73,13 @@ export interface ThresholdVisuals {
   cssVars: CSSProperties;
 }
 
+const thresholdVisualsCache = new Map<string, ThresholdVisuals>();
+
 export function getThresholdVisuals(rawHex: string): ThresholdVisuals {
   const hex = normalizeHexColor(rawHex);
+  const cached = thresholdVisualsCache.get(hex);
+  if (cached) return cached;
+
   const { r, g, b } = hexToRgb(hex);
 
   // Perceived luminance in [0, 1]
@@ -118,7 +123,7 @@ export function getThresholdVisuals(rawHex: string): ThresholdVisuals {
     "--tier-glow": glow,
   } as CSSProperties;
 
-  return {
+  const result: ThresholdVisuals = {
     hex,
     textLight,
     textDark,
@@ -134,6 +139,8 @@ export function getThresholdVisuals(rawHex: string): ThresholdVisuals {
     excelTextArgb,
     cssVars,
   };
+  thresholdVisualsCache.set(hex, result);
+  return result;
 }
 
 export function normalizeThresholds(

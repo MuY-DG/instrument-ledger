@@ -11,19 +11,28 @@ import type {
   ImportResult,
   Instrument,
   InstrumentInput,
+  ResetAppResult,
   RestoreResult,
   SettingsUpdateInput,
   UpdateCheckResult,
 } from "@/types";
 
 const mediaDataUrlCache = new Map<string, string>();
+const mediaInFlight = new Map<string, Promise<string>>();
+
+export function getCachedImageDataUrl(relPath: string): string {
+  if (!relPath) return "";
+  return mediaDataUrlCache.get(relPath) || "";
+}
 
 export function clearMediaCache() {
   mediaDataUrlCache.clear();
+  mediaInFlight.clear();
 }
 
 export function invalidateMediaPath(relPath: string) {
   mediaDataUrlCache.delete(relPath);
+  mediaInFlight.delete(relPath);
 }
 
 export const api = {
@@ -128,12 +137,24 @@ export const api = {
     if (!relPath) return "";
     const cached = mediaDataUrlCache.get(relPath);
     if (cached) return cached;
-    const payload = await invoke<Base64FilePayload>("read_stored_file_base64", {
+    const inflight = mediaInFlight.get(relPath);
+    if (inflight) return inflight;
+
+    const task = invoke<Base64FilePayload>("read_stored_file_base64", {
       relPath,
-    });
-    const url = `data:${payload.mime};base64,${payload.base64}`;
-    mediaDataUrlCache.set(relPath, url);
-    return url;
+    })
+      .then((payload) => {
+        const url = `data:${payload.mime};base64,${payload.base64}`;
+        mediaDataUrlCache.set(relPath, url);
+        mediaInFlight.delete(relPath);
+        return url;
+      })
+      .catch((err) => {
+        mediaInFlight.delete(relPath);
+        throw err;
+      });
+    mediaInFlight.set(relPath, task);
+    return task;
   },
 
   // Settings, Backup & Updates
@@ -152,6 +173,14 @@ export const api = {
     invoke<BackupResult>("create_local_backup", { destZipPath }),
   restoreLocalBackup: (srcZipPath: string) =>
     invoke<RestoreResult>("restore_local_backup", { srcZipPath }),
+  getDefaultDownloadsDir: () => invoke<string>("get_default_downloads_dir"),
+  openFolderPath: (folderPath: string) =>
+    invoke<void>("open_folder_path", { folderPath }),
+  resetAppWithBackup: (adminPassword: string, backupDir?: string) =>
+    invoke<ResetAppResult>("reset_app_with_backup", {
+      adminPassword,
+      backupDir: backupDir?.trim() || null,
+    }),
 
   checkForUpdates: (githubRepoOverride?: string, proxyOverride?: string) =>
     invoke<UpdateCheckResult>("check_for_updates", {

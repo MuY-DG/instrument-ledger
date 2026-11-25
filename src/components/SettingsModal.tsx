@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "motion/react";
 import {
   AlertCircle,
+  AlertTriangle,
   AppWindow,
   Archive,
   ArrowRight,
@@ -14,6 +15,8 @@ import {
   CloudDownload,
   Edit3,
   ExternalLink,
+  Eye,
+  EyeOff,
   FileText,
   FolderOpen,
   HardDrive,
@@ -40,10 +43,19 @@ import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
 import { MarkdownNotes } from "@/components/MarkdownNotes";
 import { ThresholdSettingsEditor } from "@/components/ThresholdSettingsEditor";
+import {
+  EASE_PRECISION,
+  SPRING_SNAPPY,
+  TAP_SCALE,
+  TAP_SCALE_SUBTLE,
+} from "@/lib/motion";
+import { Collapsible, ModalShell } from "@/components/ui/MotionPrimitives";
+import { PrecisionSelect, PrecisionSwitch } from "@/components/ui/FormControls";
 import type {
   AppSettings,
   CloseBehavior,
   DataDirInfo,
+  ResetAppResult,
   UpdateCheckResult,
   UpdateDownloadProgress,
 } from "@/types";
@@ -71,6 +83,7 @@ interface SettingsModalProps {
   onClose: () => void;
   onSettingsChanged: (next: AppSettings) => void;
   onDataRestored: () => void;
+  onAppReset?: (res: ResetAppResult) => void;
   onNotify: (msg: string, type?: "success" | "error") => void;
   onRequestLogin?: () => void;
   onOpenAppLockSetup?: (mode: "enable" | "change") => void;
@@ -79,7 +92,7 @@ interface SettingsModalProps {
 }
 
 const INPUT_CLS =
-  "w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition";
+  "precision-field w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-[#fafafa] hover:bg-white focus:bg-white dark:bg-white/[0.03] dark:focus:bg-white/[0.05] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400";
 
 function formatPublishDate(raw: string): string {
   const m = raw.trim().match(/^(\d{4}-\d{2}-\d{2})/);
@@ -109,6 +122,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onClose,
   onSettingsChanged,
   onDataRestored,
+  onAppReset,
   onNotify,
   onRequestLogin,
   onOpenAppLockSetup,
@@ -146,10 +160,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPwd, setSavingPwd] = useState(false);
 
-  // Backup / storage info
+  // Backup / storage info & Factory Reset (Mandatory Downloads Backup)
   const [dirInfo, setDirInfo] = useState<DataDirInfo | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [defaultDownloadsDir, setDefaultDownloadsDir] = useState("");
+  const [resetBackupDir, setResetBackupDir] = useState("");
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetPassword, setResetPassword] = useState("");
+  const [showResetPassword, setShowResetPassword] = useState(false);
+  const [resetError, setResetError] = useState("");
+  const [resettingApp, setResettingApp] = useState(false);
+  const resetPwdRef = useRef<HTMLInputElement | null>(null);
 
   // Updater state
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -181,6 +203,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setNewPassword("");
       setConfirmPassword("");
       setUpdateError("");
+      setResetDialogOpen(false);
+      setResetPassword("");
+      setResetError("");
       if (availableUpdate) {
         setUpdateResult(availableUpdate);
         setShowSourceConfig(!availableUpdate.hasUpdate);
@@ -188,6 +213,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
         setShowSourceConfig(true);
       }
       api.getDataDirInfo().then(setDirInfo).catch(() => {});
+      api
+        .getDefaultDownloadsDir()
+        .then((dlDir) => {
+          setDefaultDownloadsDir(dlDir);
+          setResetBackupDir((prev) => prev || dlDir);
+        })
+        .catch(() => {});
     }
   }, [openModal, initialTab, isAdmin, availableUpdate]);
 
@@ -378,9 +410,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleBackup = async () => {
+    const baseName = `仪器台账备份_${getTodayStr()}.zip`;
+    const sep = defaultDownloadsDir.includes("\\") ? "\\" : "/";
+    const defaultPath = defaultDownloadsDir
+      ? `${defaultDownloadsDir.replace(/[/\\]+$/, "")}${sep}${baseName}`
+      : baseName;
     const dest = await save({
       title: "保存本地完整备份包",
-      defaultPath: `仪器台账备份_${getTodayStr()}.zip`,
+      defaultPath,
       filters: [{ name: "ZIP 备份包", extensions: ["zip"] }],
     });
     if (!dest) return;
@@ -395,6 +432,53 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       onNotify(String(err), "error");
     } finally {
       setBackingUp(false);
+    }
+  };
+
+  const handleChooseResetBackupDir = async () => {
+    const picked = await open({
+      directory: true,
+      multiple: false,
+      defaultPath: resetBackupDir || defaultDownloadsDir || undefined,
+      title: "选择初始化前强制备份的保存目录",
+    });
+    if (typeof picked === "string" && picked.trim()) {
+      setResetBackupDir(picked.trim());
+    }
+  };
+
+  const openResetConfirmDialog = () => {
+    setResetPassword("");
+    setShowResetPassword(false);
+    setResetError("");
+    setResetDialogOpen(true);
+    window.setTimeout(() => resetPwdRef.current?.focus(), 100);
+  };
+
+  const handleConfirmResetApp = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (resettingApp) return;
+    if (!resetPassword) {
+      setResetError("请输入当前管理员密码以确认初始化");
+      return;
+    }
+
+    setResettingApp(true);
+    setResetError("");
+    try {
+      const res = await api.resetAppWithBackup(
+        resetPassword,
+        resetBackupDir || defaultDownloadsDir || undefined
+      );
+      clearMediaCache();
+      setResetDialogOpen(false);
+      setResetPassword("");
+      onClose();
+      onAppReset?.(res);
+    } catch (err) {
+      setResetError(String(err));
+    } finally {
+      setResettingApp(false);
     }
   };
 
@@ -538,24 +622,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   ];
 
   return (
-    <AnimatePresence>
-      {openModal && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 bg-zinc-950/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 no-print"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: 6 }}
-            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full max-w-3xl h-[78vh] bg-white dark:bg-[#111114] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
+    <>
+    <ModalShell
+      open={openModal}
+      onClose={onClose}
+      closeOnEsc={!resetDialogOpen}
+      panelClassName="w-full max-w-3xl h-[78vh] flex flex-col"
+    >
             {/* Header */}
             <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between bg-zinc-50/70 dark:bg-white/[0.02]">
               <div className="flex items-center gap-2.5">
@@ -567,7 +640,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] transition"
+                className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -575,31 +648,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
             <div className="flex-1 flex min-h-0">
               {/* Sidebar Tabs */}
-              <div className="w-44 border-r border-zinc-200/80 dark:border-white/[0.07] bg-zinc-50/50 dark:bg-[#0d0d10] p-3 space-y-1 shrink-0">
+              <div className="w-44 border-r border-zinc-200/80 dark:border-white/[0.07] bg-[#f6f6f8] dark:bg-[#0d0d10] p-3 space-y-1 shrink-0">
                 {tabs
                   .filter((t) => !t.adminOnly || isAdmin)
-                  .map((t) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      onClick={() => setTab(t.id)}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition ${
-                        tab === t.id
-                          ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 shadow-hairline"
-                          : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-white/[0.05] hover:text-zinc-900 dark:hover:text-zinc-100"
-                      }`}
-                    >
-                      {t.icon}
-                      <span className="flex-1 text-left">{t.label}</span>
-                      {t.id === "update" && (availableUpdate?.hasUpdate || updateResult?.hasUpdate) && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
-                      )}
-                    </button>
-                  ))}
+                  .map((t) => {
+                    const active = tab === t.id;
+                    return (
+                      <motion.button
+                        key={t.id}
+                        type="button"
+                        whileTap={TAP_SCALE_SUBTLE}
+                        transition={SPRING_SNAPPY}
+                        onClick={() => setTab(t.id)}
+                        className={cn(
+                          "relative w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors",
+                          active
+                            ? "text-white dark:text-zinc-950"
+                            : "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-white/[0.05] hover:text-zinc-900 dark:hover:text-zinc-100"
+                        )}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="settings-tab-pill"
+                            transition={SPRING_SNAPPY}
+                            className="absolute inset-0 rounded-lg bg-zinc-900 dark:bg-white shadow-tactile-primary"
+                          />
+                        )}
+                        <span className="relative z-10 flex items-center">
+                          {t.icon}
+                        </span>
+                        <span className="relative z-10 flex-1 text-left">
+                          {t.label}
+                        </span>
+                        {t.id === "update" &&
+                          (availableUpdate?.hasUpdate ||
+                            updateResult?.hasUpdate) && (
+                            <span className="relative z-10 h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+                          )}
+                      </motion.button>
+                    );
+                  })}
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto p-6">
+              <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-[#121216]">
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={tab}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.16, ease: EASE_PRECISION }}
+                  >
                 {tab === "account" && isAdmin && (
                   <div className="space-y-4">
                     {/* Profile Showcase Hero Card with Cover Background */}
@@ -1142,7 +1242,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </span>
                           <InfoTip content="独立于管理员密码，输完 4~6 位 PIN 码自动解锁；忘记时可通过管理员密码解除或重设。" />
                           {settings.appLockEnabled ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/12 border border-emerald-500/20 text-[10.5px] font-medium text-emerald-700 dark:text-emerald-300">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10.5px] font-medium text-emerald-700 dark:text-emerald-300">
                               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                               已开启 · {settings.appLockPinLength} 位
                             </span>
@@ -1219,11 +1319,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
                                 无操作自动锁定
                               </span>
-                              <select
+                              <PrecisionSelect
                                 value={autoLockMinutes}
                                 disabled={savingSecurityPref}
-                                onChange={(e) => {
-                                  const next = Number(e.target.value);
+                                align="right"
+                                className="min-w-[100px]"
+                                onChange={(next) => {
                                   setAutoLockMinutes(next);
                                   handlePatchSecuritySetting(
                                     { autoLockMinutes: next },
@@ -1232,56 +1333,56 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                       : "已关闭无操作自动锁定"
                                   );
                                 }}
-                                className="px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-[#141418] text-zinc-800 dark:text-zinc-200 focus:outline-none"
-                              >
-                                <option value={0}>关闭</option>
-                                <option value={5}>5 分钟</option>
-                                <option value={10}>10 分钟</option>
-                                <option value={15}>15 分钟</option>
-                                <option value={30}>30 分钟</option>
-                              </select>
+                                options={[
+                                  { value: 0, label: "关闭" },
+                                  { value: 5, label: "5 分钟" },
+                                  { value: 10, label: "10 分钟" },
+                                  { value: 15, label: "15 分钟" },
+                                  { value: 30, label: "30 分钟" },
+                                ]}
+                              />
                             </div>
 
-                            <label className="flex items-center justify-between gap-3 py-1 cursor-pointer select-none">
+                            <div className="flex items-center justify-between gap-3 py-1 select-none">
                               <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
                                 隐藏到{mac ? "菜单栏" : "托盘"}时自动锁定
                               </span>
-                              <input
-                                type="checkbox"
+                              <PrecisionSwitch
                                 checked={settings.lockOnHide}
                                 disabled={savingSecurityPref}
-                                onChange={(e) =>
+                                size="sm"
+                                ariaLabel="隐藏时自动锁定"
+                                onChange={(checked) =>
                                   handlePatchSecuritySetting(
-                                    { lockOnHide: e.target.checked },
-                                    e.target.checked
+                                    { lockOnHide: checked },
+                                    checked
                                       ? "已开启最小化到后台自动锁定"
                                       : "已关闭最小化到后台自动锁定"
                                   )
                                 }
-                                className="h-4 w-4 accent-zinc-900 dark:accent-white"
                               />
-                            </label>
+                            </div>
 
-                            <label className="flex items-center justify-between gap-3 py-1 cursor-pointer select-none">
+                            <div className="flex items-center justify-between gap-3 py-1 select-none">
                               <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200">
                                 <span>启动程序时自动锁定</span>
                                 <InfoTip content="锁屏状态下强制关闭时，下次重启会自动保持锁定。" />
                               </span>
-                              <input
-                                type="checkbox"
+                              <PrecisionSwitch
                                 checked={settings.lockOnStartup}
                                 disabled={savingSecurityPref}
-                                onChange={(e) =>
+                                size="sm"
+                                ariaLabel="启动程序时自动锁定"
+                                onChange={(checked) =>
                                   handlePatchSecuritySetting(
-                                    { lockOnStartup: e.target.checked },
-                                    e.target.checked
+                                    { lockOnStartup: checked },
+                                    checked
                                       ? "已开启启动程序时自动锁定"
                                       : "已关闭启动程序时自动锁定"
                                   )
                                 }
-                                className="h-4 w-4 accent-zinc-900 dark:accent-white"
                               />
-                            </label>
+                            </div>
                           </div>
                         </>
                       )}
@@ -1365,10 +1466,107 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           type="button"
                           disabled={restoring}
                           onClick={handleRestore}
-                          className="w-full py-2 rounded-lg border border-zinc-300 dark:border-white/[0.14] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] disabled:opacity-50 text-zinc-800 dark:text-zinc-100 text-xs font-semibold transition"
+                          className="btn-tactile w-full py-2 rounded-lg border border-zinc-300 dark:border-white/[0.14] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] disabled:opacity-50 shadow-tactile text-zinc-800 dark:text-zinc-100 text-xs font-semibold"
                         >
                           {restoring ? "还原中..." : "还原"}
                         </button>
+                      </div>
+                    </div>
+
+                    {/* Factory Reset / Initialize App (Mandatory Backup -> System Downloads Default) */}
+                    <div className="p-4 rounded-2xl border border-rose-200/90 dark:border-rose-500/25 bg-rose-50/45 dark:bg-rose-500/[0.04] space-y-3.5">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div className="h-9 w-9 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
+                            <AlertTriangle className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <h4 className="text-sm font-semibold text-zinc-950 dark:text-white">
+                                初始化程序（恢复出厂）
+                              </h4>
+                              <span className="px-1.5 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-[10px] font-medium text-rose-600 dark:text-rose-400">
+                                强制备份
+                              </span>
+                              <InfoTip content="将清空当前全部设备记录、照片、报告、管理员账号与应用锁，回到首次安装启动引导页；重置前会强制自动导出完整 .zip 备份，备份失败将中止重置。" />
+                            </div>
+                            <p className="text-[11.5px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
+                              清空所有本地数据并重新进入首次安装启动动画；执行前强制自动完整备份，之后可随时通过「还原备份」恢复。
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Mandatory Backup Path Box (Defaults to System Downloads) */}
+                      <div className="p-3 rounded-xl bg-white dark:bg-[#141418] border border-zinc-200/90 dark:border-white/[0.08] space-y-2">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
+                            <span>强制备份保存目录</span>
+                            {(!resetBackupDir ||
+                              resetBackupDir === defaultDownloadsDir) && (
+                              <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-white/[0.07] text-[10px] text-zinc-500 dark:text-zinc-400">
+                                默认 · 系统下载目录
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {defaultDownloadsDir &&
+                              resetBackupDir &&
+                              resetBackupDir !== defaultDownloadsDir && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setResetBackupDir(defaultDownloadsDir)
+                                  }
+                                  className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 transition"
+                                >
+                                  恢复默认下载目录
+                                </button>
+                              )}
+                            <button
+                              type="button"
+                              onClick={handleChooseResetBackupDir}
+                              className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+                            >
+                              更改目录
+                            </button>
+                            {(resetBackupDir || defaultDownloadsDir) && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  api
+                                    .openFolderPath(
+                                      resetBackupDir || defaultDownloadsDir
+                                    )
+                                    .catch((e) => onNotify(String(e), "error"))
+                                }
+                                className="inline-flex items-center gap-0.5 text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 transition"
+                              >
+                                <FolderOpen className="h-3 w-3" />
+                                <span>打开</span>
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="text-[11px] font-mono text-zinc-600 dark:text-zinc-300 break-all bg-zinc-50 dark:bg-[#0d0d10] px-2.5 py-1.5 rounded-lg border border-zinc-200/80 dark:border-white/[0.06]">
+                          {resetBackupDir ||
+                            defaultDownloadsDir ||
+                            "系统默认下载目录 (Downloads)"}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-end">
+                        <motion.button
+                          type="button"
+                          whileTap={TAP_SCALE}
+                          transition={SPRING_SNAPPY}
+                          onClick={openResetConfirmDialog}
+                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-tactile-primary transition-colors"
+                        >
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>备份并初始化程序</span>
+                        </motion.button>
                       </div>
                     </div>
                   </div>
@@ -1607,7 +1805,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           />
                         </button>
 
-                        {showSourceConfig && (
+                        <Collapsible open={showSourceConfig}>
                           <div className="px-4 pb-4 pt-3 border-t border-zinc-200/70 dark:border-white/[0.07] space-y-3">
                             <div className="grid grid-cols-1 gap-3">
                               <div>
@@ -1641,22 +1839,141 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <button
                                 type="button"
                                 onClick={() => handleSaveGeneral()}
-                                className="px-3.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] hover:bg-zinc-50 dark:hover:bg-white/[0.06] text-zinc-800 dark:text-zinc-200 text-xs font-medium transition"
+                                className="btn-tactile px-3.5 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.12] hover:bg-zinc-50 dark:hover:bg-white/[0.06] shadow-tactile text-zinc-800 dark:text-zinc-200 text-xs font-medium"
                               >
                                 保存
                               </button>
                             </div>
                           </div>
-                        )}
+                        </Collapsible>
                       </div>
                     )}
                   </div>
                 )}
+                  </motion.div>
+                </AnimatePresence>
               </div>
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </ModalShell>
+
+      {/* Sibling Password Confirmation Modal for Mandatory-Backup App Reset */}
+      <ModalShell
+        open={resetDialogOpen}
+        onClose={() => {
+          if (!resettingApp) setResetDialogOpen(false);
+        }}
+        closeOnEsc={!resettingApp}
+        zIndexClass="z-[80]"
+        role="alertdialog"
+        panelClassName="w-full max-w-md"
+      >
+        <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-rose-50/60 dark:bg-rose-500/[0.06] flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-xl bg-rose-500/15 border border-rose-500/25 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+              <AlertTriangle className="h-4 w-4" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
+                确认备份并初始化程序
+              </h3>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                备份完成校验通过后才会清空数据
+              </p>
+            </div>
+          </div>
+          {!resettingApp && (
+            <button
+              type="button"
+              onClick={() => setResetDialogOpen(false)}
+              className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
+        <form onSubmit={handleConfirmResetApp} className="p-6 space-y-4">
+          <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-white/[0.03] border border-zinc-200/85 dark:border-white/[0.08] space-y-1.5 text-xs">
+            <div className="font-medium text-zinc-800 dark:text-zinc-200">
+              强制备份将保存至：
+            </div>
+            <div className="font-mono text-[11px] text-zinc-600 dark:text-zinc-400 break-all">
+              {resetBackupDir ||
+                defaultDownloadsDir ||
+                "系统默认下载目录 (Downloads)"}
+            </div>
+            <div className="text-[11px] text-zinc-400 dark:text-zinc-500 pt-0.5">
+              文件名格式：仪器台账_初始化前自动备份_YYYYMMDD_HHMMSS.zip
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
+              验证当前管理员密码
+            </label>
+            <div className="relative">
+              <input
+                ref={resetPwdRef}
+                type={showResetPassword ? "text" : "password"}
+                required
+                disabled={resettingApp}
+                value={resetPassword}
+                onChange={(e) => {
+                  setResetPassword(e.target.value);
+                  setResetError("");
+                }}
+                placeholder="请输入当前管理员密码"
+                className={`${INPUT_CLS} pr-10`}
+              />
+              <button
+                type="button"
+                onClick={() => setShowResetPassword((v) => !v)}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+                tabIndex={-1}
+              >
+                {showResetPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+          </div>
+
+          {resetError && (
+            <div className="text-xs text-rose-600 dark:text-rose-400 bg-rose-500/[0.08] border border-rose-500/20 rounded-xl px-3.5 py-2.5">
+              {resetError}
+            </div>
+          )}
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <motion.button
+              type="button"
+              disabled={resettingApp}
+              whileTap={resettingApp ? undefined : TAP_SCALE}
+              transition={SPRING_SNAPPY}
+              onClick={() => setResetDialogOpen(false)}
+              className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] disabled:opacity-50 transition-colors"
+            >
+              取消
+            </motion.button>
+            <motion.button
+              type="submit"
+              disabled={resettingApp || !resetPassword}
+              whileTap={resettingApp || !resetPassword ? undefined : TAP_SCALE}
+              transition={SPRING_SNAPPY}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white text-xs font-semibold shadow-tactile-primary transition-colors"
+            >
+              {resettingApp ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <RotateCcw className="h-3.5 w-3.5" />
+              )}
+              <span>{resettingApp ? "正在备份并初始化..." : "强制备份并初始化"}</span>
+            </motion.button>
+          </div>
+        </form>
+      </ModalShell>
+    </>
   );
 };

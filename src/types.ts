@@ -183,6 +183,11 @@ export interface RestoreResult {
   restoredFrom: string;
 }
 
+export interface ResetAppResult {
+  backup: BackupResult;
+  auth: AuthStatus;
+}
+
 export interface UpdateCheckResult {
   hasUpdate: boolean;
   currentVersion: string;

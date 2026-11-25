@@ -62,6 +62,93 @@
   background-size: 12px 12px;
 }
 
+.bg-precision-grid-fine-light {
+  background-image:
+    linear-gradient(to right, rgba(15, 23, 42, 0.022) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.022) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.bg-porcelain-dots {
+  background-image: radial-gradient(rgba(15, 23, 42, 0.09) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* Tactile micro-press feedback for standard interactive buttons */
+.btn-tactile {
+  transition: transform 140ms cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 150ms ease,
+    border-color 150ms ease,
+    box-shadow 150ms ease,
+    color 150ms ease;
+}
+
+.btn-tactile:active:not(:disabled) {
+  transform: scale(0.975);
+}
+
+/* Refined focus illumination across form inputs */
+.precision-field {
+  transition: border-color 160ms ease, box-shadow 180ms ease, background-color 160ms ease;
+}
+
+.precision-field:focus {
+  outline: none;
+  border-color: rgba(24, 24, 27, 0.36);
+  box-shadow: 0 0 0 3px rgba(24, 24, 27, 0.065), 0 1px 2px rgba(15, 23, 42, 0.04);
+}
+
+.dark .precision-field:focus {
+  border-color: rgba(255, 255, 255, 0.28);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.07);
+}
+
+@keyframes border-beam-spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-border-beam-spin {
+  animation: border-beam-spin 9s linear infinite;
+}
+
+@keyframes shimmer-slide {
+  0% {
+    transform: translateX(-120%) skewX(-18deg);
+  }
+  100% {
+    transform: translateX(220%) skewX(-18deg);
+  }
+}
+
+.btn-sheen {
+  position: relative;
+  overflow: hidden;
+}
+
+.btn-sheen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 45%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.18),
+    transparent
+  );
+  transform: translateX(-140%) skewX(-18deg);
+  pointer-events: none;
+}
+
+.btn-sheen:hover:not(:disabled)::after {
+  animation: shimmer-slide 0.85s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 @keyframes shake {
   0%, 100% { transform: translateX(0); }
   20% { transform: translateX(-8px); }

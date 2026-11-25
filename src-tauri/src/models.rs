@@ -202,6 +202,13 @@ pub struct RestoreResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ResetAppResult {
+    pub backup: BackupResult,
+    pub auth: AuthStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateCheckResult {
     pub has_update: bool,
     pub current_version: String,

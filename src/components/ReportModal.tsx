@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import * as pdfjsLib from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import {
@@ -24,6 +24,9 @@ import { api } from "@/lib/api";
 import { formatFileSize, formatShortDateTime, getTodayStr } from "@/lib/status";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
+import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
+import { Collapsible, ModalShell } from "@/components/ui/MotionPrimitives";
+import { PrecisionCheckbox } from "@/components/ui/FormControls";
 import type { CalibrationReport, Instrument } from "@/types";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
@@ -302,53 +305,49 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     return <FileText className="h-4 w-4 text-zinc-400 shrink-0" />;
   };
 
+  const lastInstrumentRef = useRef<Instrument | null>(null);
+  if (instrument) lastInstrumentRef.current = instrument;
+  const displayInstrument = instrument ?? lastInstrumentRef.current;
+
   return (
-    <AnimatePresence>
-      {instrument && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 bg-zinc-950/55 dark:bg-black/75 backdrop-blur-sm flex items-center justify-center p-4 no-print"
-          onClick={onClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: 6 }}
-            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="bg-white dark:bg-[#111114] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] w-full max-w-6xl h-[86vh] flex flex-col overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
+    <ModalShell
+      open={Boolean(instrument)}
+      onClose={onClose}
+      closeOnEsc
+      panelClassName="w-full max-w-6xl h-[86vh] flex flex-col"
+    >
+      {displayInstrument && (
+        <>
             {/* Header */}
             <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between bg-zinc-50/70 dark:bg-white/[0.02]">
               <div className="flex items-center gap-2 min-w-0">
                 <FileText className="h-4 w-4 text-indigo-500 shrink-0" />
                 <h2 className="text-sm font-semibold text-zinc-950 dark:text-white truncate">
-                  校验报告 · {instrument.name}
+                  校验报告 · {displayInstrument.name}
                 </h2>
-                {instrument.serialNo && (
+                {displayInstrument.serialNo && (
                   <span className="px-2 py-0.5 text-[11px] font-mono bg-zinc-200/70 dark:bg-white/[0.07] text-zinc-700 dark:text-zinc-300 rounded shrink-0">
-                    {instrument.serialNo}
+                    {displayInstrument.serialNo}
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {isAdmin && (
-                  <button
+                  <motion.button
                     type="button"
+                    whileTap={TAP_SCALE}
+                    transition={SPRING_SNAPPY}
                     onClick={() => setShowUpload((v) => !v)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                    className="btn-sheen inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                   >
                     <Plus className="h-3.5 w-3.5" />
                     <span>{showUpload ? "取消" : "上传报告"}</span>
-                  </button>
+                  </motion.button>
                 )}
                 <button
                   type="button"
                   onClick={onClose}
-                  className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] transition"
+                  className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
                 >
                   <X className="h-4 w-4" />
                 </button>
@@ -359,7 +358,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             <div className="flex-1 flex min-h-0">
               {/* Left Sidebar */}
               <div className="w-80 md:w-96 border-r border-zinc-200/80 dark:border-white/[0.07] flex flex-col bg-zinc-50/40 dark:bg-[#0d0d10] shrink-0">
-                {showUpload && isAdmin && (
+                <Collapsible open={showUpload && isAdmin}>
                   <form
                     onSubmit={handleUpload}
                     className="p-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-indigo-500/[0.04] space-y-3"
@@ -371,7 +370,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                     <button
                       type="button"
                       onClick={handlePickFile}
-                      className="w-full py-3 px-3 rounded-xl border border-dashed border-zinc-300 dark:border-white/20 bg-white dark:bg-white/[0.03] hover:border-indigo-400 text-center transition"
+                      className="btn-tactile w-full py-3 px-3 rounded-xl border border-dashed border-zinc-300 dark:border-white/20 bg-white dark:bg-white/[0.03] hover:border-indigo-400 text-center"
                     >
                       <Upload className="h-4 w-4 text-indigo-500 mx-auto mb-1" />
                       <div className="text-xs font-medium text-zinc-700 dark:text-zinc-200 truncate">
@@ -388,7 +387,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                           type="date"
                           value={calDate}
                           onChange={(e) => setCalDate(e.target.value)}
-                          className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-400"
+                          className="precision-field w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-zinc-900 dark:text-zinc-100"
                         />
                       </div>
                       <div>
@@ -400,7 +399,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                           value={calAgency}
                           onChange={(e) => setCalAgency(e.target.value)}
                           placeholder="如：帝恩检测"
-                          className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-400"
+                          className="precision-field w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-zinc-900 dark:text-zinc-100"
                         />
                       </div>
                     </div>
@@ -414,32 +413,34 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                         value={remark}
                         onChange={(e) => setRemark(e.target.value)}
                         placeholder="选填"
-                        className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-400"
+                        className="precision-field w-full px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-zinc-900 dark:text-zinc-100"
                       />
                     </div>
 
-                    <label className="flex items-center gap-2 cursor-pointer select-none">
-                      <input
-                        type="checkbox"
+                    <div className="flex items-center gap-2">
+                      <PrecisionCheckbox
                         checked={syncDate}
-                        onChange={(e) => setSyncDate(e.target.checked)}
-                        className="rounded border-zinc-300 dark:border-zinc-700"
+                        onChange={setSyncDate}
+                        label={
+                          <span className="text-[11px] text-zinc-600 dark:text-zinc-400">
+                            同步更新设备校验日期
+                          </span>
+                        }
                       />
-                      <span className="text-[11px] text-zinc-600 dark:text-zinc-400">
-                        同步更新设备校验日期
-                      </span>
                       <InfoTip content="将本次校验日期同步写入设备的「上次检验日期」，并自动重算下次校验日期。" />
-                    </label>
+                    </div>
 
-                    <button
+                    <motion.button
                       type="submit"
                       disabled={uploading || !pickedPath}
-                      className="w-full py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold transition"
+                      whileTap={uploading || !pickedPath ? undefined : TAP_SCALE}
+                      transition={SPRING_SNAPPY}
+                      className="btn-sheen w-full py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                     >
                       {uploading ? "上传中..." : "确定"}
-                    </button>
+                    </motion.button>
                   </form>
-                )}
+                </Collapsible>
 
                 <div className="px-4 py-2.5 border-b border-zinc-200/80 dark:border-white/[0.07] flex items-center justify-between text-[11px] text-zinc-500">
                   <span>已归档（{reports.length} 份）</span>
@@ -682,9 +683,8 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                 )}
               </div>
             </div>
-          </motion.div>
-        </motion.div>
+        </>
       )}
-    </AnimatePresence>
+    </ModalShell>
   );
 };

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Image as ImageIcon, ZoomIn } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, getCachedImageDataUrl } from "@/lib/api";
 
 interface LocationThumbProps {
   photoPath: string;
@@ -8,12 +8,12 @@ interface LocationThumbProps {
   onClick?: () => void;
 }
 
-export const LocationThumb: React.FC<LocationThumbProps> = ({
+export const LocationThumb: React.FC<LocationThumbProps> = React.memo(({
   photoPath,
   alt,
   onClick,
 }) => {
-  const [src, setSrc] = useState<string>("");
+  const [src, setSrc] = useState<string>(() => getCachedImageDataUrl(photoPath));
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -23,6 +23,12 @@ export const LocationThumb: React.FC<LocationThumbProps> = ({
       setSrc("");
       return;
     }
+    const cached = getCachedImageDataUrl(photoPath);
+    if (cached) {
+      setSrc(cached);
+      return;
+    }
+    setSrc("");
     api
       .getStoredImageDataUrl(photoPath)
       .then((url) => {
@@ -66,6 +72,8 @@ export const LocationThumb: React.FC<LocationThumbProps> = ({
       <img
         src={src}
         alt={alt}
+        loading="lazy"
+        decoding="async"
         className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-110"
       />
       <div className="absolute inset-0 bg-zinc-950/0 group-hover:bg-zinc-950/40 transition-colors flex items-center justify-center">
@@ -73,4 +81,4 @@ export const LocationThumb: React.FC<LocationThumbProps> = ({
       </div>
     </button>
   );
-};
+});

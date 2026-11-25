@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion } from "motion/react";
 import {
   Bell,
   Clock,
@@ -19,6 +20,9 @@ import {
 } from "@/lib/thresholdColors";
 import { cn } from "@/lib/utils";
 import { InfoTip } from "@/components/InfoTip";
+import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
+import { Collapsible } from "@/components/ui/MotionPrimitives";
+import { PrecisionSwitch } from "@/components/ui/FormControls";
 import type {
   AlertPopupFrequency,
   AppSettings,
@@ -34,7 +38,7 @@ interface ThresholdSettingsEditorProps {
 }
 
 const INPUT_CLS =
-  "px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 disabled:opacity-60 transition";
+  "precision-field px-2.5 py-1.5 text-xs rounded-lg border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 disabled:opacity-60";
 
 function pickNextUnusedColor(existing: WarningThreshold[]): string {
   const used = new Set(existing.map((t) => normalizeHexColor(t.color)));
@@ -266,14 +270,20 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
 
         {/* Threshold Rows */}
         <div className="space-y-2.5">
-          {thresholds.map((item) => {
-            const visuals = getThresholdVisuals(item.color);
-            return (
-              <div
-                key={item.id}
-                style={visuals.cssVars}
-                className="p-3 rounded-xl border border-zinc-200/90 dark:border-white/[0.08] bg-zinc-50/50 dark:bg-white/[0.02] space-y-2.5"
-              >
+          <AnimatePresence initial={false}>
+            {thresholds.map((item) => {
+              const visuals = getThresholdVisuals(item.color);
+              return (
+                <motion.div
+                  key={item.id}
+                  layout
+                  initial={{ opacity: 0, y: -8, scale: 0.98 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.96, transition: { duration: 0.14 } }}
+                  transition={SPRING_SNAPPY}
+                  style={visuals.cssVars}
+                  className="p-3 rounded-xl border border-zinc-200/90 dark:border-white/[0.08] bg-zinc-50/55 dark:bg-white/[0.02] space-y-2.5"
+                >
                 <div className="flex flex-wrap items-center gap-2.5">
                   {/* Live Pill Preview */}
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-[11px] font-medium shrink-0 bg-[var(--tier-bg)] dark:bg-[var(--tier-bg-dark)] text-[var(--tier-text)] dark:text-[var(--tier-text-dark)] border-[var(--tier-border)] dark:border-[var(--tier-border-dark)]">
@@ -385,9 +395,10 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
                     })}
                   </div>
                 )}
-              </div>
-            );
-          })}
+                </motion.div>
+              );
+            })}
+          </AnimatePresence>
         </div>
 
         {/* Custom Add Row */}
@@ -493,28 +504,13 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
             <InfoTip content="仅当存在已超期或命中以上阈值的设备时自动弹窗；也可随时点击顶部铃铛手动查看。" />
           </div>
 
-          <button
-            type="button"
-            role="switch"
-            aria-checked={popupEnabled}
+          <PrecisionSwitch
+            checked={popupEnabled}
+            onChange={setPopupEnabled}
             disabled={!isAdmin}
-            onClick={() => setPopupEnabled((v) => !v)}
-            className={cn(
-              "relative inline-flex h-5 w-9 shrink-0 items-center rounded-full transition-colors disabled:opacity-50",
-              popupEnabled
-                ? "bg-zinc-900 dark:bg-white"
-                : "bg-zinc-300 dark:bg-zinc-700"
-            )}
-          >
-            <span
-              className={cn(
-                "inline-block h-3.5 w-3.5 transform rounded-full transition-transform",
-                popupEnabled
-                  ? "translate-x-[18px] bg-white dark:bg-zinc-950"
-                  : "translate-x-[3px] bg-white dark:bg-zinc-300"
-              )}
-            />
-          </button>
+            size="sm"
+            ariaLabel="自动弹窗提醒"
+          />
         </div>
 
         <div
@@ -544,16 +540,18 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
           ).map((opt) => {
             const active = popupFrequency === opt.id;
             return (
-              <button
+              <motion.button
                 key={opt.id}
                 type="button"
                 disabled={!isAdmin || !popupEnabled}
+                whileTap={!isAdmin || !popupEnabled ? undefined : TAP_SCALE}
+                transition={SPRING_SNAPPY}
                 onClick={() => setPopupFrequency(opt.id)}
                 className={cn(
-                  "px-3 py-2.5 rounded-xl border text-left transition",
+                  "px-3 py-2.5 rounded-xl border text-left transition-colors",
                   active
-                    ? "border-zinc-900 dark:border-white bg-white dark:bg-white/[0.06] shadow-hairline"
-                    : "border-zinc-200/80 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.015] hover:border-zinc-300 dark:hover:border-white/[0.15]"
+                    ? "border-zinc-900 dark:border-white bg-white dark:bg-white/[0.06] shadow-tactile"
+                    : "border-zinc-200/85 dark:border-white/[0.08] bg-white/60 dark:bg-white/[0.015] hover:border-zinc-300 dark:hover:border-white/[0.15]"
                 )}
               >
                 <div className="flex items-center justify-between gap-2">
@@ -570,16 +568,20 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
                     )}
                   >
                     {active && (
-                      <span className="h-1.5 w-1.5 rounded-full bg-zinc-900 dark:bg-white" />
+                      <motion.span
+                        layoutId="alert-freq-dot"
+                        transition={SPRING_SNAPPY}
+                        className="h-1.5 w-1.5 rounded-full bg-zinc-900 dark:bg-white"
+                      />
                     )}
                   </span>
                 </div>
-              </button>
+              </motion.button>
             );
           })}
         </div>
 
-        {popupEnabled && popupFrequency === "interval" && (
+        <Collapsible open={popupEnabled && popupFrequency === "interval"}>
           <div className="flex items-center gap-2 pt-1 text-xs text-zinc-600 dark:text-zinc-300">
             <Clock className="h-3.5 w-3.5 text-zinc-400" />
             <span>每</span>
@@ -598,7 +600,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
             />
             <span>小时提醒一次</span>
           </div>
-        )}
+        </Collapsible>
       </section>
 
       {/* Footer Save Bar */}

@@ -48,7 +48,7 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
           animate={{ opacity: 1, x: 0, scale: 1 }}
           exit={{ opacity: 0, x: 112, scale: 0.98 }}
           transition={{ type: "spring", stiffness: 360, damping: 32 }}
-          className="fixed top-16 right-5 z-40 w-[364px] max-w-[calc(100vw-2rem)] rounded-2xl border border-zinc-200/90 dark:border-white/[0.12] bg-white/95 dark:bg-zinc-900/95 backdrop-blur-xl shadow-elevated overflow-hidden"
+          className="fixed top-16 right-5 z-40 w-[364px] max-w-[calc(100vw-2rem)] rounded-2xl border border-zinc-200/90 dark:border-white/[0.12] bg-white dark:bg-zinc-900 shadow-modal-light dark:shadow-elevated overflow-hidden"
           role="status"
           aria-live="polite"
         >
@@ -179,7 +179,7 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
                   type="button"
                   disabled={updating}
                   onClick={onUpdateNow}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-60 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                  className="btn-sheen btn-tactile inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-zinc-950 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-60 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary"
                 >
                   {updating ? (
                     <Loader2 className="h-3.5 w-3.5 animate-spin" />

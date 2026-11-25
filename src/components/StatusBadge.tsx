@@ -8,7 +8,7 @@ interface StatusBadgeProps {
   compact?: boolean;
 }
 
-export const StatusBadge: React.FC<StatusBadgeProps> = ({ info, compact }) => {
+export const StatusBadge: React.FC<StatusBadgeProps> = React.memo(({ info, compact }) => {
   // Custom multi-tier warning color rendering
   if (info.status === "warning" && info.matchedThreshold) {
     const visuals = getThresholdVisuals(info.matchedThreshold.color);
@@ -131,4 +131,4 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ info, compact }) => {
       )}
     </div>
   );
-};
+});

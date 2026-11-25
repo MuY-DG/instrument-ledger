@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
 import { Command } from "cmdk";
-import { AnimatePresence, motion } from "motion/react";
+import { ModalShell } from "@/components/ui/MotionPrimitives";
 import {
   BellRing,
   CloudDownload,
@@ -13,6 +13,7 @@ import {
   Moon,
   Plus,
   Printer,
+  RotateCcw,
   Search,
   Settings,
   SlidersHorizontal,
@@ -92,40 +93,25 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   };
 
   return (
-    <AnimatePresence>
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.16 }}
-          onClick={onClose}
-          className="fixed inset-0 z-[90] bg-zinc-950/45 dark:bg-black/65 backdrop-blur-sm flex items-start justify-center pt-[13vh] px-4 no-print"
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: -10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: -6 }}
-            transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-xl rounded-2xl bg-white dark:bg-[#121216] border border-zinc-200/90 dark:border-white/[0.1] shadow-popover overflow-hidden"
-          >
-            <Command
-              label="快速检索与命令面板"
-              className="flex flex-col"
-              loop
-            >
-              <div className="flex items-center gap-2.5 px-4 border-b border-zinc-200/80 dark:border-white/[0.08]">
-                <Search className="h-4 w-4 text-zinc-400 shrink-0" />
-                <Command.Input
-                  autoFocus
-                  placeholder="搜索设备或命令..."
-                  className="w-full py-3.5 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none"
-                />
-                <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded bg-zinc-100 dark:bg-white/[0.07] text-zinc-500 dark:text-zinc-400 border border-zinc-200/80 dark:border-white/[0.08]">
-                  ESC
-                </kbd>
-              </div>
+    <ModalShell
+      open={open}
+      onClose={onClose}
+      zIndexClass="z-[90]"
+      align="top"
+      panelClassName="w-full max-w-xl"
+    >
+      <Command label="快速检索与命令面板" className="flex flex-col" loop>
+        <div className="flex items-center gap-2.5 px-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/40 dark:bg-white/[0.015]">
+          <Search className="h-4 w-4 text-zinc-400 shrink-0" />
+          <Command.Input
+            autoFocus
+            placeholder="搜索设备或命令..."
+            className="w-full py-3.5 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none"
+          />
+          <kbd className="px-1.5 py-0.5 text-[10px] font-mono rounded-md bg-white dark:bg-white/[0.07] text-zinc-500 dark:text-zinc-400 border border-zinc-200/90 dark:border-white/[0.08] shadow-[0_1px_0_rgba(15,23,42,0.06)]">
+            ESC
+          </kbd>
+        </div>
 
               <Command.List className="max-h-[380px] overflow-y-auto p-2 space-y-2">
                 <Command.Empty className="py-10 text-center text-xs text-zinc-400">
@@ -248,6 +234,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         <Settings className="h-3.5 w-3.5 text-zinc-400" />
                         <span>系统设置</span>
                       </span>
+                    </Command.Item>
+                  )}
+
+                  {isAdmin && (
+                    <Command.Item
+                      onSelect={() => runAndClose(() => onOpenSettings("backup"))}
+                      className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <RotateCcw className="h-3.5 w-3.5 text-rose-500" />
+                        <span>备份与初始化程序</span>
+                      </span>
+                      <span className="text-[10px] text-zinc-400">管理员</span>
                     </Command.Item>
                   )}
 
@@ -378,9 +377,6 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 )}
               </Command.List>
             </Command>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </ModalShell>
   );
 };

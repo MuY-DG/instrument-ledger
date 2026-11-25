@@ -5,7 +5,6 @@ import {
   AlertTriangle,
   CalendarClock,
   ChevronDown,
-  ChevronUp,
   Image as ImageIcon,
   Save,
   Trash2,
@@ -16,6 +15,15 @@ import { api, invalidateMediaPath } from "@/lib/api";
 import { calcNextCalDate, getInstrumentStatus } from "@/lib/status";
 import { InfoTip } from "@/components/InfoTip";
 import { StatusBadge } from "@/components/StatusBadge";
+import {
+  BACKDROP_MOTION,
+  SPRING_SMOOTH,
+  SPRING_SNAPPY,
+  TAP_SCALE,
+  TAP_SCALE_SUBTLE,
+} from "@/lib/motion";
+import { Collapsible } from "@/components/ui/MotionPrimitives";
+import { PrecisionSelect, PrecisionSwitch } from "@/components/ui/FormControls";
 import type {
   CalibrationType,
   Instrument,
@@ -37,7 +45,7 @@ interface InstrumentDrawerProps {
 }
 
 const INPUT_CLS =
-  "w-full px-3 py-2 text-xs sm:text-sm rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 disabled:bg-zinc-50 dark:disabled:bg-white/[0.02] disabled:text-zinc-500 focus:outline-none focus:border-zinc-400 dark:focus:border-white/25 transition";
+  "precision-field w-full px-3 py-2 text-xs sm:text-sm rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-zinc-50/55 hover:bg-white focus:bg-white dark:bg-white/[0.03] dark:focus:bg-white/[0.05] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 disabled:bg-zinc-50/80 dark:disabled:bg-white/[0.02] disabled:text-zinc-500";
 
 export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
   openDrawer,
@@ -284,19 +292,16 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
     <AnimatePresence>
       {openDrawer && (
         <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-40 bg-zinc-950/40 dark:bg-black/60 backdrop-blur-[2px] flex justify-end no-print"
+          {...BACKDROP_MOTION}
+          className="fixed inset-0 z-40 bg-slate-900/30 dark:bg-black/65 backdrop-blur-[4px] flex justify-end no-print"
           onClick={onClose}
         >
           <motion.div
-            initial={{ x: "100%" }}
-            animate={{ x: 0 }}
-            exit={{ x: "100%" }}
-            transition={{ type: "spring", stiffness: 360, damping: 36 }}
-            className="w-full max-w-2xl bg-white dark:bg-[#111114] h-full shadow-2xl border-l border-zinc-200/90 dark:border-white/[0.08] flex flex-col"
+            initial={{ x: "100%", opacity: 0.92 }}
+            animate={{ x: 0, opacity: 1 }}
+            exit={{ x: "100%", opacity: 0.96 }}
+            transition={SPRING_SMOOTH}
+            className="w-full max-w-2xl bg-white dark:bg-[#111114] h-full shadow-modal-light dark:shadow-2xl border-l border-zinc-200/90 dark:border-white/[0.08] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}
@@ -311,7 +316,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="p-2 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] transition"
+                className="btn-tactile p-2 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -336,29 +341,42 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                     <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                       台账类别
                     </label>
-                    <div className="grid grid-cols-2 gap-1 bg-zinc-100 dark:bg-white/[0.05] p-1 rounded-lg border border-zinc-200/70 dark:border-white/[0.06]">
-                      {(["gauge", "fixture"] as const).map((cat) => (
-                        <button
-                          key={cat}
-                          type="button"
-                          disabled={readOnly}
-                          onClick={() => {
-                            setCategory(cat);
-                            if (mode === "create") {
-                              setCalibrationType(
-                                cat === "fixture" ? "internal" : "external"
-                              );
-                            }
-                          }}
-                          className={`py-1.5 text-xs font-medium rounded-md transition ${
-                            category === cat
-                              ? "bg-white dark:bg-white/[0.12] text-zinc-950 dark:text-white shadow-hairline"
-                              : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200"
-                          }`}
-                        >
-                          {cat === "gauge" ? "仪器 / 量具" : "尺寸检具"}
-                        </button>
-                      ))}
+                    <div className="grid grid-cols-2 gap-1 bg-zinc-100/90 dark:bg-white/[0.05] p-1 rounded-xl border border-zinc-200/80 dark:border-white/[0.06]">
+                      {(["gauge", "fixture"] as const).map((cat) => {
+                        const active = category === cat;
+                        return (
+                          <motion.button
+                            key={cat}
+                            type="button"
+                            disabled={readOnly}
+                            whileTap={readOnly ? undefined : TAP_SCALE_SUBTLE}
+                            onClick={() => {
+                              setCategory(cat);
+                              if (mode === "create") {
+                                setCalibrationType(
+                                  cat === "fixture" ? "internal" : "external"
+                                );
+                              }
+                            }}
+                            className={`relative py-1.5 text-xs font-medium rounded-lg transition-colors ${
+                              active
+                                ? "text-zinc-950 dark:text-white"
+                                : "text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200"
+                            }`}
+                          >
+                            {active && (
+                              <motion.span
+                                layoutId="drawer-cat-pill"
+                                transition={SPRING_SNAPPY}
+                                className="absolute inset-0 rounded-lg bg-white dark:bg-white/[0.12] shadow-tactile"
+                              />
+                            )}
+                            <span className="relative z-10">
+                              {cat === "gauge" ? "仪器 / 量具" : "尺寸检具"}
+                            </span>
+                          </motion.button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -462,19 +480,19 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                     </h3>
                   </div>
 
-                  <label className="inline-flex items-center gap-1.5 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      disabled={readOnly}
-                      checked={exemptCalibration}
-                      onChange={(e) => setExemptCalibration(e.target.checked)}
-                      className="rounded border-zinc-300 dark:border-zinc-700 text-zinc-900 focus:ring-indigo-500"
-                    />
-                    <span className="text-xs text-zinc-600 dark:text-zinc-400">
+                  <div className="inline-flex items-center gap-2">
+                    <span className="text-xs text-zinc-600 dark:text-zinc-400 select-none">
                       免校
                     </span>
                     <InfoTip content="辅助工具无需周期校验时勾选" />
-                  </label>
+                    <PrecisionSwitch
+                      checked={exemptCalibration}
+                      onChange={setExemptCalibration}
+                      disabled={readOnly}
+                      size="sm"
+                      ariaLabel="免校"
+                    />
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-3">
@@ -482,18 +500,18 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                     <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                       校验方式
                     </label>
-                    <select
+                    <PrecisionSelect
                       disabled={readOnly || exemptCalibration}
                       value={exemptCalibration ? "exempt" : calibrationType}
-                      onChange={(e) =>
-                        setCalibrationType(e.target.value as CalibrationType)
-                      }
-                      className={`${INPUT_CLS} dark:bg-[#141418]`}
-                    >
-                      <option value="external">外校</option>
-                      <option value="internal">内校</option>
-                      <option value="exempt">免校</option>
-                    </select>
+                      onChange={(val) => setCalibrationType(val as CalibrationType)}
+                      size="md"
+                      className="w-full"
+                      options={[
+                        { value: "external", label: "外校" },
+                        { value: "internal", label: "内校" },
+                        { value: "exempt", label: "免校" },
+                      ]}
+                    />
                   </div>
 
                   <div>
@@ -664,22 +682,24 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
               </section>
 
               {/* Extended Fields */}
-              <section className="border border-zinc-200/80 dark:border-white/[0.08] rounded-xl overflow-hidden">
+              <section className="border border-zinc-200/85 dark:border-white/[0.08] rounded-xl overflow-hidden">
                 <button
                   type="button"
                   onClick={() => setShowExtended((v) => !v)}
-                  className="w-full px-4 py-3 bg-zinc-50/70 dark:bg-white/[0.02] hover:bg-zinc-100/70 dark:hover:bg-white/[0.04] flex items-center justify-between text-xs font-medium text-zinc-700 dark:text-zinc-300 transition"
+                  className="w-full px-4 py-3 bg-zinc-50/75 dark:bg-white/[0.02] hover:bg-zinc-100/75 dark:hover:bg-white/[0.04] flex items-center justify-between text-xs font-medium text-zinc-700 dark:text-zinc-300 transition-colors"
                 >
                   <span>扩展信息</span>
-                  {showExtended ? (
-                    <ChevronUp className="h-4 w-4 text-zinc-400" />
-                  ) : (
+                  <motion.span
+                    animate={{ rotate: showExtended ? 180 : 0 }}
+                    transition={SPRING_SNAPPY}
+                    className="flex items-center"
+                  >
                     <ChevronDown className="h-4 w-4 text-zinc-400" />
-                  )}
+                  </motion.span>
                 </button>
 
-                {showExtended && (
-                  <div className="p-4 space-y-3.5 bg-white dark:bg-[#111114]">
+                <Collapsible open={showExtended}>
+                  <div className="p-4 space-y-3.5 bg-white dark:bg-[#111114] border-t border-zinc-200/70 dark:border-white/[0.06]">
                     <div className="grid grid-cols-2 gap-3.5">
                       <div>
                         <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
@@ -785,29 +805,33 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                       />
                     </div>
                   </div>
-                )}
+                </Collapsible>
               </section>
             </form>
 
             {/* Footer */}
             <div className="px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-end gap-2.5">
-              <button
+              <motion.button
                 type="button"
+                whileTap={TAP_SCALE}
+                transition={SPRING_SNAPPY}
                 onClick={onClose}
-                className="px-4 py-2 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
+                className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
               >
                 {readOnly ? "关闭" : "取消"}
-              </button>
+              </motion.button>
               {!readOnly && (
-                <button
+                <motion.button
                   type="button"
                   disabled={saving}
+                  whileTap={saving ? undefined : TAP_SCALE}
+                  transition={SPRING_SNAPPY}
                   onClick={handleSubmit}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                  className="btn-sheen inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                 >
                   <Save className="h-3.5 w-3.5" />
                   <span>{saving ? "保存中..." : "保存"}</span>
-                </button>
+                </motion.button>
               )}
             </div>
           </motion.div>

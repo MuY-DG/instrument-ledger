@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AnimatePresence, motion } from "motion/react";
+import { motion } from "motion/react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -11,6 +11,8 @@ import {
 import { api } from "@/lib/api";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
+import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
+import { ModalShell } from "@/components/ui/MotionPrimitives";
 import {
   base64ToArrayBuffer,
   parseJsskExcel,
@@ -103,24 +105,12 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   };
 
   return (
-    <AnimatePresence>
-      {openModal && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 bg-zinc-950/50 dark:bg-black/70 backdrop-blur-sm flex items-center justify-center p-4 no-print"
-          onClick={resetAndClose}
-        >
-          <motion.div
-            initial={{ opacity: 0, scale: 0.96, y: 10 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.97, y: 6 }}
-            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-            className="w-full max-w-2xl bg-white dark:bg-[#111114] rounded-2xl shadow-popover border border-zinc-200/90 dark:border-white/[0.1] overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
+    <ModalShell
+      open={openModal}
+      onClose={resetAndClose}
+      closeOnEsc
+      panelClassName="w-full max-w-2xl"
+    >
             <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
@@ -132,7 +122,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               <button
                 type="button"
                 onClick={resetAndClose}
-                className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] transition"
+                className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -264,29 +254,30 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             </div>
 
             <div className="px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-end gap-2.5">
-              <button
+              <motion.button
                 type="button"
+                whileTap={TAP_SCALE}
+                transition={SPRING_SNAPPY}
                 onClick={resetAndClose}
-                className="px-4 py-2 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
+                className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
               >
                 取消
-              </button>
-              <button
+              </motion.button>
+              <motion.button
                 type="button"
                 disabled={!parsed || importing}
+                whileTap={!parsed || importing ? undefined : TAP_SCALE}
+                transition={SPRING_SNAPPY}
                 onClick={handleConfirmImport}
-                className="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold shadow-hairline transition"
+                className="btn-sheen px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-45 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
               >
                 {importing
                   ? "导入中..."
                   : parsed
                     ? `导入 (${parsed.rows.length})`
                     : "导入"}
-              </button>
+              </motion.button>
             </div>
-          </motion.div>
-        </motion.div>
-      )}
-    </AnimatePresence>
+    </ModalShell>
   );
 };

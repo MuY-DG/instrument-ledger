@@ -1,7 +1,8 @@
 use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+use chrono::Local;
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 use walkdir::WalkDir;
@@ -223,6 +224,78 @@ pub fn restore_backup(
     })
 }
 
+fn build_unique_reset_backup_path(backup_dir: &Path) -> PathBuf {
+    let ts = Local::now().format("%Y%m%d_%H%M%S");
+    let base = format!("仪器台账_初始化前自动备份_{}", ts);
+    let candidate = backup_dir.join(format!("{}.zip", base));
+    if !candidate.exists() {
+        return candidate;
+    }
+    for i in 1..=999 {
+        let alt = backup_dir.join(format!("{}_{}.zip", base, i));
+        if !alt.exists() {
+            return alt;
+        }
+    }
+    backup_dir.join(format!("{}_{}.zip", base, Uuid::new_v4()))
+}
+
+/// Mandatory-backup factory reset:
+/// 1. Creates & verifies a complete ZIP backup in `backup_dir` FIRST.
+///    If backup fails for any reason, live data is left completely untouched.
+/// 2. Releases the SQLite file lock, wipes ledger.db (+ WAL/SHM) and attachments,
+///    and initializes a clean uninitialized database ready for first-launch onboarding.
+pub fn reset_app_data_with_backup(
+    conn_guard: &mut Connection,
+    db_path: &Path,
+    data_dir: &Path,
+    backup_dir: &Path,
+) -> Result<BackupResult, String> {
+    fs::create_dir_all(backup_dir)
+        .map_err(|e| format!("无法访问或创建备份目录 ({}): {}", backup_dir.display(), e))?;
+
+    let dest_zip = build_unique_reset_backup_path(backup_dir);
+    let backup_res = create_backup(conn_guard, data_dir, &dest_zip)?;
+
+    if !dest_zip.exists() || backup_res.size_bytes == 0 {
+        return Err("强制备份校验失败（备份文件为空），已中止初始化操作".to_string());
+    }
+
+    // Release active SQLite file handle cleanly (essential on Windows)
+    let mem_conn =
+        Connection::open_in_memory().map_err(|e| format!("切换临时内存库失败: {}", e))?;
+    *conn_guard = mem_conn;
+
+    // Remove database & WAL/SHM sidecar files
+    let wal_path = db_path.with_extension("db-wal");
+    let shm_path = db_path.with_extension("db-shm");
+    let _ = fs::remove_file(&wal_path);
+    let _ = fs::remove_file(&shm_path);
+    if db_path.exists() {
+        fs::remove_file(db_path).map_err(|e| {
+            if let Ok(reopened) = init_db(db_path) {
+                *conn_guard = reopened;
+            }
+            format!("清理旧数据库文件失败（备份已保存至 {}）: {}", dest_zip.display(), e)
+        })?;
+    }
+
+    // Wipe and recreate attachment folders
+    for folder in ["images", "reports"] {
+        let dir = data_dir.join(folder);
+        if dir.exists() {
+            let _ = fs::remove_dir_all(&dir);
+        }
+        fs::create_dir_all(&dir).map_err(|e| format!("重建附件目录失败: {}", e))?;
+    }
+
+    // Re-initialize brand new empty database (account_initialized unset)
+    let fresh_conn = init_db(db_path)?;
+    *conn_guard = fresh_conn;
+
+    Ok(backup_res)
+}
+
 fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<(), String> {
     for entry in WalkDir::new(src).into_iter().filter_map(|e| e.ok()) {
         let rel = entry
@@ -290,6 +363,58 @@ mod tests {
         assert_eq!(
             fs::read(data_dir.join("reports").join("1").join("cert.pdf")).unwrap(),
             b"%PDF-1.4"
+        );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_reset_app_data_with_backup_and_restore() {
+        use crate::db::{is_account_initialized, set_setting};
+
+        let root = std::env::temp_dir().join(format!("inst_reset_test_{}", Uuid::new_v4()));
+        let data_dir = root.join("data");
+        let downloads_dir = root.join("Downloads");
+        let db_path = data_dir.join("ledger.db");
+
+        ensure_storage_dirs(&data_dir).unwrap();
+        let mut conn = init_db(&db_path).unwrap();
+
+        set_setting(&conn, "admin_username", "qa_admin").unwrap();
+        set_setting(&conn, "admin_password_hash", "dummy_hash").unwrap();
+        set_setting(&conn, "account_initialized", "1").unwrap();
+        conn.execute(
+            "INSERT INTO instruments (category, seq_no, department, name, serial_no, created_at, updated_at)
+             VALUES ('gauge', 1, '品质部', '数显卡尺', 'DCJ-01', '2026-11-25', '2026-11-25')",
+            [],
+        )
+        .unwrap();
+        fs::write(data_dir.join("images").join("photo.png"), b"img-data").unwrap();
+
+        let bak = reset_app_data_with_backup(&mut conn, &db_path, &data_dir, &downloads_dir)
+            .expect("reset with backup failed");
+
+        assert!(Path::new(&bak.path).exists());
+        assert!(bak.path.starts_with(downloads_dir.to_string_lossy().as_ref()));
+        assert_eq!(bak.instrument_count, 1);
+        assert!(bak.size_bytes > 0);
+
+        // Live database must be freshly uninitialized & empty
+        assert!(!is_account_initialized(&conn).unwrap());
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM instruments", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+        assert!(!data_dir.join("images").join("photo.png").exists());
+
+        // Restoring from the mandatory backup brings everything back
+        let res = restore_backup(&mut conn, &db_path, &data_dir, Path::new(&bak.path))
+            .expect("restore after reset failed");
+        assert_eq!(res.instrument_count, 1);
+        assert!(is_account_initialized(&conn).unwrap());
+        assert_eq!(
+            fs::read(data_dir.join("images").join("photo.png")).unwrap(),
+            b"img-data"
         );
 
         let _ = fs::remove_dir_all(&root);

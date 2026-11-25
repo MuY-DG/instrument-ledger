@@ -51,10 +51,18 @@ export default {
       },
       boxShadow: {
         hairline: "0 1px 2px 0 rgb(9 9 11 / 0.04)",
+        tactile:
+          "0 1px 2px 0 rgb(15 23 42 / 0.04), inset 0 1px 0 0 rgb(255 255 255 / 0.8)",
+        "tactile-primary":
+          "0 1px 2px 0 rgb(15 23 42 / 0.16), 0 4px 12px -4px rgb(15 23 42 / 0.22), inset 0 1px 0 0 rgb(255 255 255 / 0.14)",
+        ceramic:
+          "0 1px 2px 0 rgb(15 23 42 / 0.04), 0 16px 40px -16px rgb(15 23 42 / 0.12), inset 0 1px 0 0 rgb(255 255 255 / 0.9)",
         surface:
           "0 1px 2px 0 rgb(9 9 11 / 0.03), 0 4px 16px -4px rgb(9 9 11 / 0.05)",
         elevated:
           "0 12px 32px -8px rgb(9 9 11 / 0.12), 0 2px 8px -2px rgb(9 9 11 / 0.06)",
+        "modal-light":
+          "0 24px 64px -16px rgb(15 23 42 / 0.18), 0 4px 16px -4px rgb(15 23 42 / 0.07), 0 0 0 1px rgb(15 23 42 / 0.05)",
         popover:
           "0 20px 50px -12px rgb(9 9 11 / 0.22), 0 0 0 1px rgb(9 9 11 / 0.06)",
       },

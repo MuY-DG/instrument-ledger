@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::auth::{hash_password, validate_pin, verify_password, SessionState};
-use crate::backup::{create_backup, restore_backup};
+use crate::backup::{create_backup, reset_app_data_with_backup, restore_backup};
 use crate::db::{
     calc_next_cal_date, get_setting, is_account_initialized, is_app_lock_configured,
     load_app_settings, now_iso, query_instrument_by_id, query_instruments,
@@ -21,7 +21,7 @@ use crate::db::{
 };
 use crate::models::{
     AddReportInput, AppSettings, AuthStatus, BackupResult, CalibrationReport, DataDirInfo,
-    ImportResult, Instrument, InstrumentInput, RestoreResult, SettingsUpdateInput,
+    ImportResult, Instrument, InstrumentInput, ResetAppResult, RestoreResult, SettingsUpdateInput,
     UpdateCheckResult,
 };
 use crate::storage::{
@@ -1316,6 +1316,78 @@ pub fn restore_local_backup(
         &state.data_dir,
         Path::new(src_zip_path.trim()),
     )
+}
+
+fn resolve_default_downloads_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    if let Ok(dir) = app.path().download_dir() {
+        return Ok(dir);
+    }
+    if let Ok(home) = app.path().home_dir() {
+        return Ok(home.join("Downloads"));
+    }
+    Err("无法获取系统默认下载目录".to_string())
+}
+
+#[tauri::command]
+pub fn get_default_downloads_dir(app: AppHandle) -> Result<String, String> {
+    let dir = resolve_default_downloads_dir(&app)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub fn open_folder_path(app: AppHandle, folder_path: String) -> Result<(), String> {
+    let trimmed = folder_path.trim();
+    if trimmed.is_empty() {
+        return Err("目录路径为空".to_string());
+    }
+    let path = Path::new(trimmed);
+    let target = if path.is_file() {
+        path.parent().unwrap_or(path)
+    } else {
+        path
+    };
+    app.opener()
+        .open_path(target.to_string_lossy().as_ref(), None::<&str>)
+        .map_err(|e| format!("打开目录失败: {}", e))
+}
+
+#[tauri::command]
+pub fn reset_app_with_backup(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    admin_password: String,
+    backup_dir: Option<String>,
+) -> Result<ResetAppResult, String> {
+    check_admin(&state)?;
+
+    let target_backup_dir = match backup_dir {
+        Some(ref raw) if !raw.trim().is_empty() => PathBuf::from(raw.trim()),
+        _ => resolve_default_downloads_dir(&app)?,
+    };
+
+    let mut conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let stored_hash = get_setting(&conn, "admin_password_hash")?
+        .ok_or_else(|| "管理员密码未初始化".to_string())?;
+    if !verify_password(&admin_password, &stored_hash) {
+        return Err("管理员密码错误，已取消初始化".to_string());
+    }
+
+    let backup = reset_app_data_with_backup(
+        &mut conn,
+        &state.db_path,
+        &state.data_dir,
+        &target_backup_dir,
+    )?;
+
+    let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;
+    session.is_admin = false;
+    session.is_locked = false;
+    session.admin_expires_at = None;
+
+    let auth = build_auth_status(&conn, &session)?;
+    emit_auth_status(&app, &auth);
+
+    Ok(ResetAppResult { backup, auth })
 }
 
 // ---------------- Updates ----------------

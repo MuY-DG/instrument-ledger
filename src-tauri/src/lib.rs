@@ -208,6 +208,9 @@ pub fn run() {
             commands::open_data_dir,
             commands::create_local_backup,
             commands::restore_local_backup,
+            commands::get_default_downloads_dir,
+            commands::open_folder_path,
+            commands::reset_app_with_backup,
             commands::check_for_updates,
             commands::download_and_launch_update,
         ])
