@@ -1,38 +1,24 @@
-use std::fs::{self, File};
-use std::io::Write;
 use std::time::Duration;
 
-use futures_util::StreamExt;
-use semver::Version;
-use serde::Deserialize;
 use tauri::{AppHandle, Emitter};
-use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_updater::{Update, UpdaterExt};
+use url::Url;
 
 use crate::models::{UpdateCheckResult, UpdateDownloadProgress};
 
-#[derive(Debug, Deserialize)]
-struct GithubRelease {
-    tag_name: String,
-    body: Option<String>,
-    published_at: Option<String>,
-    html_url: String,
-    assets: Vec<GithubAsset>,
+#[derive(Clone)]
+pub struct PendingUpdate {
+    pub repo: String,
+    pub update: Update,
 }
 
-#[derive(Debug, Deserialize)]
-struct GithubAsset {
-    name: String,
-    size: u64,
-    browser_download_url: String,
-}
-
-fn normalize_repo(raw: &str) -> Result<String, String> {
+pub fn normalize_repo(raw: &str) -> Result<String, String> {
     let trimmed = raw
         .trim()
         .trim_end_matches('/')
         .trim_end_matches(".git");
     if trimmed.is_empty() {
-        return Err("请先在系统设置中配置 GitHub 仓库地址（例如：username/instrument-ledger）".to_string());
+        return Err("请先在系统设置中配置 GitHub 仓库地址（例如：MuY-DG/instrument-ledger）".to_string());
     }
     let cleaned = if let Some(idx) = trimmed.find("github.com/") {
         &trimmed[idx + "github.com/".len()..]
@@ -46,7 +32,7 @@ fn normalize_repo(raw: &str) -> Result<String, String> {
     Ok(format!("{}/{}", parts[0], parts[1]))
 }
 
-fn apply_proxy(url: &str, proxy_prefix: &str) -> String {
+pub fn apply_proxy(url: &str, proxy_prefix: &str) -> String {
     let prefix = proxy_prefix.trim();
     if prefix.is_empty() {
         return url.to_string();
@@ -58,215 +44,278 @@ fn apply_proxy(url: &str, proxy_prefix: &str) -> String {
     }
 }
 
-fn pick_best_asset(assets: &[GithubAsset]) -> Option<&GithubAsset> {
-    if cfg!(target_os = "windows") {
-        assets
-            .iter()
-            .find(|a| a.name.to_lowercase().ends_with("-setup.exe"))
-            .or_else(|| {
-                assets
-                    .iter()
-                    .find(|a| a.name.to_lowercase().ends_with(".exe"))
-            })
-            .or_else(|| {
-                assets
-                    .iter()
-                    .find(|a| a.name.to_lowercase().ends_with(".msi"))
-            })
-            .or_else(|| assets.first())
-    } else if cfg!(target_os = "macos") {
-        let arch_hint = if cfg!(target_arch = "aarch64") {
-            "aarch64"
-        } else {
-            "x64"
-        };
-        assets
-            .iter()
-            .find(|a| {
-                let low = a.name.to_lowercase();
-                low.ends_with(".dmg") && low.contains("universal")
-            })
-            .or_else(|| {
-                assets.iter().find(|a| {
-                    let low = a.name.to_lowercase();
-                    low.ends_with(".dmg")
-                        && (low.contains(arch_hint)
-                            || (cfg!(target_arch = "aarch64") && low.contains("arm64"))
-                            || (cfg!(target_arch = "x86_64") && low.contains("x86_64")))
-                })
-            })
-            .or_else(|| {
-                assets
-                    .iter()
-                    .find(|a| a.name.to_lowercase().ends_with(".dmg"))
-            })
-            .or_else(|| {
-                assets
-                    .iter()
-                    .find(|a| a.name.to_lowercase().ends_with(".app.tar.gz"))
-            })
-            .or_else(|| assets.first())
-    } else {
-        assets
-            .iter()
-            .find(|a| a.name.to_lowercase().ends_with(".appimage"))
-            .or_else(|| {
-                assets
-                    .iter()
-                    .find(|a| a.name.to_lowercase().ends_with(".deb"))
-            })
-            .or_else(|| assets.first())
+fn build_manifest_endpoints(repo: &str, proxy_url: &str) -> Result<Vec<Url>, String> {
+    let direct_str = format!(
+        "https://github.com/{}/releases/latest/download/latest.json",
+        repo
+    );
+    let direct_url =
+        Url::parse(&direct_str).map_err(|e| format!("构造更新地址失败: {}", e))?;
+
+    let mut endpoints = Vec::with_capacity(2);
+    if !proxy_url.trim().is_empty() {
+        let proxied_str = apply_proxy(&direct_str, proxy_url);
+        if let Ok(proxied_url) = Url::parse(&proxied_str) {
+            if proxied_url.scheme() == "https" {
+                endpoints.push(proxied_url);
+            }
+        }
     }
+    endpoints.push(direct_url);
+    Ok(endpoints)
+}
+
+fn extract_asset_name(url: &Url) -> String {
+    url.path_segments()
+        .and_then(|segs| segs.last())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("InstrumentLedger-Update")
+        .to_string()
+}
+
+fn emit_progress(
+    app: &AppHandle,
+    downloaded: u64,
+    total: u64,
+    percent: f64,
+    phase: &str,
+    message: &str,
+) {
+    let _ = app.emit(
+        "update-download-progress",
+        UpdateDownloadProgress {
+            downloaded,
+            total,
+            percent,
+            phase: phase.to_string(),
+            message: message.to_string(),
+        },
+    );
 }
 
 pub async fn check_github_release(
+    app: &AppHandle,
     github_repo: &str,
-    _proxy_url: &str,
-) -> Result<UpdateCheckResult, String> {
+    proxy_url: &str,
+) -> Result<(UpdateCheckResult, Option<PendingUpdate>), String> {
     let repo = normalize_repo(github_repo)?;
-    let api_url = format!("https://api.github.com/repos/{}/releases/latest", repo);
+    let endpoints = build_manifest_endpoints(&repo, proxy_url)?;
+    let current_version = env!("CARGO_PKG_VERSION").to_string();
 
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(15))
-        .user_agent(format!("InstrumentLedger/{}", env!("CARGO_PKG_VERSION")))
+    let updater = app
+        .updater_builder()
+        .endpoints(endpoints)
+        .map_err(|e| format!("配置更新源失败: {}", e))?
+        .timeout(Duration::from_secs(20))
         .build()
-        .map_err(|e| format!("初始化网络客户端失败: {}", e))?;
+        .map_err(|e| format!("初始化更新客户端失败: {}", e))?;
 
-    let resp = client
-        .get(&api_url)
-        .header("Accept", "application/vnd.github+json")
-        .send()
-        .await
-        .map_err(|e| format!("连接 GitHub 检查更新失败，请检查网络: {}", e))?;
+    let maybe_update = updater.check().await.map_err(|e| {
+        let msg = e.to_string();
+        if msg.contains("404") || msg.to_lowercase().contains("release") {
+            format!("未能读取到版本更新清单（latest.json），请确认仓库 {} 已发布支持自动更新的版本: {}", repo, msg)
+        } else {
+            format!("连接更新源检查更新失败，请检查网络或代理设置: {}", msg)
+        }
+    })?;
 
-    if resp.status().as_u16() == 404 {
-        return Err("仓库尚未发布任何 Release 版本，请先在 GitHub 创建 Release".to_string());
+    if let Some(update) = maybe_update {
+        let latest_version = update.version.trim().trim_start_matches(['v', 'V']).to_string();
+        let asset_name = extract_asset_name(&update.download_url);
+        let html_url = format!(
+            "https://github.com/{}/releases/tag/v{}",
+            repo, latest_version
+        );
+        let published_at = update.date.map(|d| d.to_string()).unwrap_or_default();
+        let result = UpdateCheckResult {
+            has_update: true,
+            current_version,
+            latest_version,
+            release_notes: update.body.clone().unwrap_or_default(),
+            published_at,
+            download_url: update.download_url.to_string(),
+            html_url,
+            asset_name,
+            asset_size: 0,
+        };
+        let pending = PendingUpdate { repo, update };
+        Ok((result, Some(pending)))
+    } else {
+        let result = UpdateCheckResult {
+            has_update: false,
+            current_version: current_version.clone(),
+            latest_version: current_version,
+            release_notes: String::new(),
+            published_at: String::new(),
+            download_url: String::new(),
+            html_url: format!("https://github.com/{}/releases", repo),
+            asset_name: String::new(),
+            asset_size: 0,
+        };
+        Ok((result, None))
     }
-    if !resp.status().is_success() {
-        return Err(format!("GitHub API 返回状态码: {}", resp.status()));
-    }
-
-    let release: GithubRelease = resp
-        .json()
-        .await
-        .map_err(|e| format!("解析更新信息失败: {}", e))?;
-
-    let current_str = env!("CARGO_PKG_VERSION");
-    let latest_clean = release.tag_name.trim().trim_start_matches(['v', 'V']);
-
-    let has_update = match (Version::parse(latest_clean), Version::parse(current_str)) {
-        (Ok(latest), Ok(current)) => latest > current,
-        _ => latest_clean != current_str,
-    };
-
-    let best_asset = pick_best_asset(&release.assets);
-    let (download_url, asset_name, asset_size) = match best_asset {
-        Some(a) => (a.browser_download_url.clone(), a.name.clone(), a.size),
-        None => (String::new(), String::new(), 0),
-    };
-
-    Ok(UpdateCheckResult {
-        has_update,
-        current_version: current_str.to_string(),
-        latest_version: latest_clean.to_string(),
-        release_notes: release.body.unwrap_or_default(),
-        published_at: release.published_at.unwrap_or_default(),
-        download_url,
-        html_url: release.html_url,
-        asset_name,
-        asset_size,
-    })
 }
 
-pub async fn download_and_launch_installer(
+async fn download_with_progress(
     app: &AppHandle,
-    download_url: &str,
-    asset_name: &str,
+    update: &Update,
+    label: &str,
+) -> Result<Vec<u8>, String> {
+    let mut downloaded: u64 = 0;
+    let app_clone = app.clone();
+    let label_owned = label.to_string();
+
+    emit_progress(app, 0, 0, 0.0, "downloading", label);
+
+    update
+        .download(
+            move |chunk_len, content_len| {
+                downloaded = downloaded.saturating_add(chunk_len as u64);
+                let total = content_len.unwrap_or(0);
+                let percent = if total > 0 {
+                    ((downloaded as f64 / total as f64) * 100.0).min(100.0)
+                } else {
+                    0.0
+                };
+                emit_progress(
+                    &app_clone,
+                    downloaded,
+                    total,
+                    percent,
+                    "downloading",
+                    &label_owned,
+                );
+            },
+            || {},
+        )
+        .await
+        .map_err(|e| e.to_string())
+}
+
+pub async fn download_and_install_update(
+    app: &AppHandle,
+    pending: Option<PendingUpdate>,
+    github_repo: &str,
     proxy_url: &str,
 ) -> Result<String, String> {
-    let raw_url = download_url.trim();
-    if raw_url.is_empty() {
-        return Err("没有可下载的安装包链接".to_string());
-    }
+    let repo = normalize_repo(github_repo)?;
+    let mut update = match pending {
+        Some(p) if p.repo == repo => p.update,
+        _ => {
+            let (_, fresh) = check_github_release(app, &repo, proxy_url).await?;
+            match fresh {
+                Some(p) => p.update,
+                None => return Err("当前已是最新版本，无需更新".to_string()),
+            }
+        }
+    };
+
+    // Give binary downloads generous timeout while keeping proxy fallback responsive
+    update.timeout = Some(Duration::from_secs(300));
+
+    let original_url = update.download_url.clone();
     let proxy_trimmed = proxy_url.trim();
 
-    let client = reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(15))
-        .timeout(Duration::from_secs(600))
-        .user_agent(format!("InstrumentLedger/{}", env!("CARGO_PKG_VERSION")))
-        .build()
-        .map_err(|e| format!("初始化下载客户端失败: {}", e))?;
+    let bytes = if !proxy_trimmed.is_empty() {
+        let proxied_str = apply_proxy(original_url.as_str(), proxy_trimmed);
+        let tried_proxy = match Url::parse(&proxied_str) {
+            Ok(proxied_url) => {
+                update.download_url = proxied_url;
+                download_with_progress(app, &update, "正在通过加速代理下载更新包...").await
+            }
+            Err(_) => Err("代理前缀格式无效".to_string()),
+        };
 
-    let resp = if !proxy_trimmed.is_empty() {
-        let proxied_url = apply_proxy(raw_url, proxy_trimmed);
-        match client.get(&proxied_url).send().await {
-            Ok(r) if r.status().is_success() => r,
-            _ => {
-                // Fallback to direct GitHub download if configured proxy is unavailable
-                let direct = client
-                    .get(raw_url)
-                    .send()
-                    .await
-                    .map_err(|e| format!("代理与直连下载安装包均失败，请检查网络或更换代理前缀: {}", e))?;
-                if !direct.status().is_success() {
-                    return Err(format!("下载失败，服务器返回: {}", direct.status()));
-                }
-                direct
+        match tried_proxy {
+            Ok(b) => b,
+            Err(_proxy_err) => {
+                // Automatic fallback to direct GitHub release download
+                update.download_url = original_url.clone();
+                download_with_progress(
+                    app,
+                    &update,
+                    "代理节点不可用，已自动切换直连下载...",
+                )
+                .await
+                .map_err(|e| format!("代理与直连下载更新均失败，请检查网络设置: {}", e))?
             }
         }
     } else {
-        let direct = client
-            .get(raw_url)
-            .send()
+        download_with_progress(app, &update, "正在从 GitHub 下载更新包...")
             .await
-            .map_err(|e| format!("下载安装包失败: {}", e))?;
-        if !direct.status().is_success() {
-            return Err(format!("下载失败，服务器返回: {}", direct.status()));
-        }
-        direct
+            .map_err(|e| format!("下载更新包失败: {}", e))?
     };
 
-    let total = resp.content_length().unwrap_or(0);
-    let update_dir = std::env::temp_dir().join("InstrumentLedger-Updates");
-    fs::create_dir_all(&update_dir).map_err(|e| format!("创建临时下载目录失败: {}", e))?;
+    emit_progress(
+        app,
+        bytes.len() as u64,
+        bytes.len() as u64,
+        100.0,
+        "installing",
+        "签名校验通过，正在替换安装新版程序...",
+    );
 
-    let safe_name = std::path::Path::new(asset_name)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .unwrap_or("InstrumentLedger-Setup.exe");
-    let dest_path = update_dir.join(safe_name);
+    // On Windows (NSIS passive), install() spawns the updater installer and exits cleanly.
+    // On macOS, install() replaces the .app bundle in place and returns Ok(()), then we restart.
+    update
+        .install(&bytes)
+        .map_err(|e| format!("校验或安装更新包失败: {}", e))?;
 
-    let mut file = File::create(&dest_path).map_err(|e| format!("创建安装文件失败: {}", e))?;
-    let mut downloaded: u64 = 0;
-    let mut stream = resp.bytes_stream();
+    emit_progress(
+        app,
+        bytes.len() as u64,
+        bytes.len() as u64,
+        100.0,
+        "restarting",
+        "安装完成，正在自动重启应用...",
+    );
 
-    while let Some(chunk) = stream.next().await {
-        let bytes = chunk.map_err(|e| format!("下载中断: {}", e))?;
-        file.write_all(&bytes)
-            .map_err(|e| format!("写入安装包失败: {}", e))?;
-        downloaded += bytes.len() as u64;
-        let percent = if total > 0 {
-            ((downloaded as f64 / total as f64) * 100.0).min(100.0)
-        } else {
-            0.0
-        };
-        let _ = app.emit(
-            "update-download-progress",
-            UpdateDownloadProgress {
-                downloaded,
-                total,
-                percent,
-            },
+    std::thread::sleep(Duration::from_millis(250));
+    app.restart()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalize_repo_and_proxy() {
+        assert_eq!(
+            normalize_repo("https://github.com/MuY-DG/instrument-ledger.git").unwrap(),
+            "MuY-DG/instrument-ledger"
+        );
+        assert_eq!(
+            normalize_repo("MuY-DG/instrument-ledger/").unwrap(),
+            "MuY-DG/instrument-ledger"
+        );
+        assert_eq!(
+            apply_proxy(
+                "https://github.com/a/b/releases/latest/download/latest.json",
+                "https://gh-proxy.com"
+            ),
+            "https://gh-proxy.com/https://github.com/a/b/releases/latest/download/latest.json"
+        );
+        assert_eq!(
+            apply_proxy("https://github.com/a/b", ""),
+            "https://github.com/a/b"
         );
     }
 
-    file.flush().map_err(|e| format!("保存安装包失败: {}", e))?;
-    drop(file);
+    #[test]
+    fn test_build_manifest_endpoints_with_fallback() {
+        let eps = build_manifest_endpoints("MuY-DG/instrument-ledger", "https://gh-proxy.com/")
+            .unwrap();
+        assert_eq!(eps.len(), 2);
+        assert_eq!(
+            eps[0].as_str(),
+            "https://gh-proxy.com/https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json"
+        );
+        assert_eq!(
+            eps[1].as_str(),
+            "https://github.com/MuY-DG/instrument-ledger/releases/latest/download/latest.json"
+        );
 
-    let path_str = dest_path.to_string_lossy().to_string();
-    app.opener()
-        .open_path(&path_str, None::<&str>)
-        .map_err(|e| format!("安装包已下载到 {}，但自动启动失败: {}", path_str, e))?;
-
-    Ok(path_str)
+        let direct_only = build_manifest_endpoints("MuY-DG/instrument-ledger", "").unwrap();
+        assert_eq!(direct_only.len(), 1);
+    }
 }

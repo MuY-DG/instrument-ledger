@@ -344,7 +344,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
         transition={{ delay: 0.5, duration: 0.9 }}
         className="absolute top-6 left-7 font-mono text-[10px] tracking-[0.18em] text-zinc-500/80 uppercase hidden sm:block"
       >
-        <div>INSTRUMENT.LEDGER // v1.1.1</div>
+        <div>INSTRUMENT.LEDGER // v1.2.0</div>
         <div className="text-zinc-600 mt-0.5">LOCAL VAULT · ARGON2ID + SQLITE</div>
       </motion.div>
 

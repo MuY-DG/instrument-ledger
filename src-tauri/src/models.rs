@@ -184,6 +184,8 @@ pub struct UpdateDownloadProgress {
     pub downloaded: u64,
     pub total: u64,
     pub percent: f64,
+    pub phase: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

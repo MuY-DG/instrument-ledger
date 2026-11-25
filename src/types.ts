@@ -162,6 +162,8 @@ export interface UpdateDownloadProgress {
   downloaded: number;
   total: number;
   percent: number;
+  phase: string;
+  message: string;
 }
 
 export interface DataDirInfo {

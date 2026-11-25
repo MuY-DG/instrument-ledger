@@ -1,6 +1,5 @@
 import React, { useEffect, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { AnimatePresence, motion } from "motion/react";
 import {
@@ -36,6 +35,11 @@ interface SettingsModalProps {
   initialTab?: SettingsTab;
   isAdmin: boolean;
   settings: AppSettings;
+  availableUpdate?: UpdateCheckResult | null;
+  updatingApp?: boolean;
+  updateProgress?: UpdateDownloadProgress | null;
+  onUpdateDetected?: (res: UpdateCheckResult) => void;
+  onTriggerInstallUpdate?: (repoOverride?: string, proxyOverride?: string) => Promise<void>;
   onClose: () => void;
   onSettingsChanged: (next: AppSettings) => void;
   onDataRestored: () => void;
@@ -50,6 +54,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   initialTab = "general",
   isAdmin,
   settings,
+  availableUpdate = null,
+  updatingApp = false,
+  updateProgress = null,
+  onUpdateDetected,
+  onTriggerInstallUpdate,
   onClose,
   onSettingsChanged,
   onDataRestored,
@@ -84,11 +93,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
   // Updater state
   const [checkingUpdate, setCheckingUpdate] = useState(false);
-  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(null);
+  const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(availableUpdate);
   const [updateError, setUpdateError] = useState("");
-  const [downloadingUpdate, setDownloadingUpdate] = useState(false);
-  const [downloadProgress, setDownloadProgress] =
-    useState<UpdateDownloadProgress | null>(null);
 
   useEffect(() => {
     if (!openModal) return;
@@ -107,6 +113,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setNewPassword("");
     setConfirmPassword("");
     setUpdateError("");
+    if (availableUpdate) {
+      setUpdateResult(availableUpdate);
+    }
 
     api.getDataDirInfo().then(setDirInfo).catch(() => {});
     if (settings.companyLogoPath) {
@@ -117,20 +126,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     } else {
       setLogoPreview("");
     }
-  }, [openModal, initialTab, isAdmin, settings]);
-
-  useEffect(() => {
-    if (!openModal) return;
-    const unlistenPromise = listen<UpdateDownloadProgress>(
-      "update-download-progress",
-      (event) => {
-        setDownloadProgress(event.payload);
-      }
-    );
-    return () => {
-      unlistenPromise.then((fn) => fn());
-    };
-  }, [openModal]);
+  }, [openModal, initialTab, isAdmin, settings, availableUpdate]);
 
   const handleSaveGeneral = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -272,6 +268,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const res = await api.checkForUpdates(githubRepo, updateProxyUrl);
       setUpdateResult(res);
+      onUpdateDetected?.(res);
       if (!res.hasUpdate) {
         onNotify(`当前已是最新版本 v${res.currentVersion}`, "success");
       }
@@ -283,20 +280,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleDownloadUpdate = async () => {
-    if (!updateResult?.downloadUrl) return;
-    setDownloadingUpdate(true);
-    setDownloadProgress({ downloaded: 0, total: updateResult.assetSize, percent: 0 });
-    try {
-      await api.downloadAndLaunchUpdate(
-        updateResult.downloadUrl,
-        updateResult.assetName,
-        updateProxyUrl
-      );
-      onNotify("安装包下载完成，已自动启动安装程序", "success");
-    } catch (err) {
-      onNotify(String(err), "error");
-    } finally {
-      setDownloadingUpdate(false);
+    if (!updateResult?.hasUpdate) return;
+    if (onTriggerInstallUpdate) {
+      await onTriggerInstallUpdate(githubRepo, updateProxyUrl);
+    } else {
+      try {
+        await api.downloadAndLaunchUpdate(githubRepo, updateProxyUrl);
+      } catch (err) {
+        onNotify(String(err), "error");
+      }
     }
   };
 
@@ -707,7 +699,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           当前安装版本
                         </div>
                         <div className="text-lg font-semibold font-mono tabular-nums text-zinc-950 dark:text-white mt-0.5">
-                          v{dirInfo?.appVersion || "1.1.1"}
+                          v{dirInfo?.appVersion || "1.2.0"}
                         </div>
                       </div>
                       <button
@@ -816,38 +808,62 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </pre>
                         )}
 
-                        {updateResult.hasUpdate && updateResult.downloadUrl && (
+                        {updateResult.hasUpdate && (
                           <div className="space-y-2.5 pt-1">
-                            {downloadingUpdate && downloadProgress && (
+                            {updatingApp && updateProgress && (
                               <div className="space-y-1.5">
-                                <div className="flex justify-between text-[11px] text-zinc-500 font-mono tabular-nums">
-                                  <span>正在下载 {updateResult.assetName}...</span>
-                                  <span>
-                                    {formatFileSize(downloadProgress.downloaded)} /{" "}
-                                    {formatFileSize(downloadProgress.total)} (
-                                    {Math.round(downloadProgress.percent)}%)
+                                <div className="flex justify-between gap-2 text-[11px] text-zinc-500 font-mono tabular-nums">
+                                  <span className="truncate font-sans text-indigo-700 dark:text-indigo-300 font-medium">
+                                    {updateProgress.message || `正在下载 ${updateResult.assetName}...`}
+                                  </span>
+                                  <span className="shrink-0">
+                                    {updateProgress.phase === "installing" ||
+                                    updateProgress.phase === "restarting"
+                                      ? "100%"
+                                      : updateProgress.total > 0
+                                        ? `${formatFileSize(updateProgress.downloaded)} / ${formatFileSize(updateProgress.total)} (${Math.round(updateProgress.percent)}%)`
+                                        : updateProgress.downloaded > 0
+                                          ? formatFileSize(updateProgress.downloaded)
+                                          : "..."}
                                   </span>
                                 </div>
                                 <div className="h-1.5 rounded-full bg-zinc-200 dark:bg-white/10 overflow-hidden">
-                                  <div
-                                    className="h-full bg-indigo-500 transition-all duration-150"
-                                    style={{ width: `${downloadProgress.percent}%` }}
-                                  />
+                                  {updateProgress.total > 0 ||
+                                  updateProgress.phase === "installing" ||
+                                  updateProgress.phase === "restarting" ? (
+                                    <div
+                                      className="h-full bg-indigo-500 transition-all duration-150"
+                                      style={{
+                                        width: `${
+                                          updateProgress.phase === "installing" ||
+                                          updateProgress.phase === "restarting"
+                                            ? 100
+                                            : updateProgress.percent
+                                        }%`,
+                                      }}
+                                    />
+                                  ) : (
+                                    <div className="h-full w-1/3 bg-indigo-500 rounded-full animate-pulse" />
+                                  )}
                                 </div>
                               </div>
                             )}
 
                             <button
                               type="button"
-                              disabled={downloadingUpdate}
+                              disabled={updatingApp}
                               onClick={handleDownloadUpdate}
                               className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold transition"
                             >
                               <CloudDownload className="h-3.5 w-3.5" />
                               <span>
-                                {downloadingUpdate
-                                  ? "正在下载安装包..."
-                                  : `下载并安装 (${updateResult.assetName || "安装包"})`}
+                                {updateProgress?.phase === "restarting"
+                                  ? "安装完成，正在重启..."
+                                  : updateProgress?.phase === "installing"
+                                    ? "正在校验签名并安装..."
+                                    : updatingApp
+                                      ? "正在下载更新包..."
+                                      : `立即下载并重启更新 (${updateResult.assetName || "新版"})`}
                               </span>
                             </button>
                           </div>

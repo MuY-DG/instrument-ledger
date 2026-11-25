@@ -117,13 +117,11 @@ export const api = {
       proxyOverride: proxyOverride ?? null,
     }),
   downloadAndLaunchUpdate: (
-    downloadUrl: string,
-    assetName: string,
+    githubRepoOverride?: string,
     proxyOverride?: string
   ) =>
     invoke<string>("download_and_launch_update", {
-      downloadUrl,
-      assetName,
+      githubRepoOverride: githubRepoOverride || null,
       proxyOverride: proxyOverride ?? null,
     }),
 };

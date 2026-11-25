@@ -21,8 +21,9 @@
   - 日常支持以**只读浏览模式**安全查阅、检索、预览报告、导出和打印；登录本机管理员账号后解锁全部录入、编辑、导入与系统维护权限；
   - 支持快捷键（`⌘L / Ctrl+L`）或无操作定时触发**全屏高斯模糊锁屏**，输入管理员密码即可无缝恢复；
   - 全部台账数据与附件独立保存于系统应用数据目录（`ledger.db` + `images/` + `reports/`），覆盖升级不丢数据，并支持一键打包导出/还原 `.zip` 完整备份。
-- **GitHub Releases 应用内检查更新**：
-  - 自动比对 GitHub Releases 最新版本，按当前操作系统与芯片架构精准匹配安装包（macOS Universal `.dmg` / Windows `.exe`），支持可选加速代理前缀与带进度条的应用内下载安装。
+- **Tauri 官方 `tauri-plugin-updater` 静默检测与一键自更新**：
+  - 启动时后台静默检查更新，发现新版本后在侧边栏亮起红点/新版本提示条并从右侧滑入更新通知卡片；
+  - 集成 Ed25519 签名校验，点击「立即更新并重启」即可带进度条自动下载、校验签名、替换应用本体并自动重启；默认支持可编辑的国内加速代理前缀并在代理失效时自动回退直连 GitHub。
 
 ---
 
@@ -105,11 +106,15 @@ pnpm tauri build --target universal-apple-darwin --bundles dmg  # macOS 通用 .
 xattr -cr /Applications/InstrumentLedger.app
 ```
 
-### 软件内一键更新配置
+### 软件内自动更新与密钥配置
 
-软件默认已预填以下更新源配置（管理员可在侧边栏左下角 **设置 → 检查更新** 中随时修改或清空）：
+软件已接入 Tauri 官方 `tauri-plugin-updater`（基于 Ed25519 公私钥签名校验，防中间人篡改），并默认预填以下更新源配置（管理员可在侧边栏左下角 **设置 → 检查更新** 中随时修改或清空）：
 
 - **GitHub 仓库**：`MuY-DG/instrument-ledger`
-- **下载加速代理前缀**：`https://gh-proxy.com/`（适合国内网络加速下载安装包；若该节点异常，应用会自动回退为直连 GitHub，也可手动更换为 `https://ghfast.top/`、`https://gh-proxy.org/` 或留空直连）
+- **下载加速代理前缀**：`https://gh-proxy.com/`（同时加速 `latest.json` 与更新包下载；若代理异常会自动回退直连 GitHub，也可手动更换为 `https://ghfast.top/`、`https://gh-proxy.org/` 或留空直连）
 
-后续发布新版本后，点击 **立即检查更新** 即可自动匹配对应系统的安装包（macOS `_universal.dmg` / Windows `_x64-setup.exe`）并完成下载与覆盖升级。
+更新体验：
+- 启动时后台静默检查更新（离线或网络异常不打扰），发现新版本后侧边栏亮起红点与新版本提示条，同时从界面右侧向左平滑滑入更新弹窗；
+- 点击 **立即更新并重启** 后，自动下载新版包 → 校验 Ed25519 签名 → 自动替换程序本体并重启（本地 SQLite 台账数据与附件保持不动）。
+
+> **CI 签名密钥说明**：GitHub 仓库需在 `Settings → Secrets and variables → Actions` 配置私钥 `TAURI_SIGNING_PRIVATE_KEY`（对应 `src-tauri/tauri.conf.json` 中的 `plugins.updater.pubkey`），流水线会自动为 `.app.tar.gz` 与 `-setup.exe` 生成 `.sig` 签名文件并汇总输出 `latest.json`。

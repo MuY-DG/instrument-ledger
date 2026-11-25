@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion } from "motion/react";
 import { Toaster, toast } from "sonner";
 import {
   ArrowUpDown,
   ChevronDown,
+  ChevronRight,
   CloudDownload,
   Download,
   Edit3,
@@ -43,6 +45,7 @@ import { SettingsModal } from "@/components/SettingsModal";
 import { ImportModal } from "@/components/ImportModal";
 import { PrintLedgerView } from "@/components/PrintLedgerView";
 import { CommandPalette } from "@/components/CommandPalette";
+import { UpdateBannerToast } from "@/components/UpdateBannerToast";
 import type {
   AppSettings,
   AuthStatus,
@@ -50,6 +53,8 @@ import type {
   Instrument,
   SortMode,
   StatusFilter,
+  UpdateCheckResult,
+  UpdateDownloadProgress,
 } from "@/types";
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -123,6 +128,13 @@ export default function App() {
   >("general");
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
+
+  // Silent startup & in-app auto-updater state
+  const [availableUpdate, setAvailableUpdate] = useState<UpdateCheckResult | null>(null);
+  const [updatePopupOpen, setUpdatePopupOpen] = useState(false);
+  const [updatingApp, setUpdatingApp] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
+  const startupUpdateCheckedRef = useRef(false);
 
   // Sync theme to <html>
   useEffect(() => {
@@ -244,6 +256,72 @@ export default function App() {
     window.addEventListener("click", close);
     return () => window.removeEventListener("click", close);
   }, [exportMenuOpen]);
+
+  // Listen for updater download/install progress events globally
+  useEffect(() => {
+    const unlistenPromise = listen<UpdateDownloadProgress>(
+      "update-download-progress",
+      (event) => {
+        setUpdateProgress(event.payload);
+      }
+    );
+    return () => {
+      unlistenPromise.then((fn) => fn());
+    };
+  }, []);
+
+  // Silent background update check once after startup finishes
+  useEffect(() => {
+    if (
+      startupUpdateCheckedRef.current ||
+      booting ||
+      !auth.isInitialized ||
+      auth.isLocked
+    ) {
+      return;
+    }
+    startupUpdateCheckedRef.current = true;
+    const timer = window.setTimeout(() => {
+      api
+        .checkForUpdates()
+        .then((res) => {
+          if (res.hasUpdate) {
+            setAvailableUpdate(res);
+            setUpdatePopupOpen(true);
+          }
+        })
+        .catch(() => {
+          // Silently ignore network/offline errors on startup
+        });
+    }, 1500);
+
+    return () => window.clearTimeout(timer);
+  }, [booting, auth.isInitialized, auth.isLocked]);
+
+  const handleInstallUpdate = useCallback(
+    async (repoOverride?: string, proxyOverride?: string) => {
+      if (updatingApp) return;
+      setUpdatingApp(true);
+      setUpdateProgress({
+        downloaded: 0,
+        total: 0,
+        percent: 0,
+        phase: "downloading",
+        message: "正在连接更新源...",
+      });
+      try {
+        await api.downloadAndLaunchUpdate(
+          repoOverride ?? settings.githubRepo,
+          proxyOverride ?? settings.updateProxyUrl
+        );
+      } catch (err) {
+        setUpdatingApp(false);
+        setUpdateProgress(null);
+        notify(`更新失败：${String(err)}`, "error");
+      }
+    },
+    [updatingApp, settings.githubRepo, settings.updateProxyUrl, notify]
+  );
 
   // Category scoped counts & lists
   const tabCounts = useMemo(() => {
@@ -836,6 +914,39 @@ export default function App() {
                 </button>
               )}
 
+              {/* Compact Sidebar Update Banner when New Version is Available */}
+              <AnimatePresence>
+                {availableUpdate?.hasUpdate && (
+                  <motion.button
+                    key="sidebar-update-banner"
+                    type="button"
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: 6 }}
+                    onClick={() => setUpdatePopupOpen(true)}
+                    className="w-full px-2.5 py-2 rounded-xl bg-indigo-500/[0.08] hover:bg-indigo-500/[0.14] dark:bg-indigo-500/[0.14] dark:hover:bg-indigo-500/[0.2] border border-indigo-500/25 flex items-center justify-between gap-2 text-left transition"
+                    title="点击查看并一键安装新版本"
+                  >
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="relative flex h-2 w-2 shrink-0">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
+                      </span>
+                      <span className="text-[11.5px] font-medium text-indigo-700 dark:text-indigo-200 truncate">
+                        新版本{" "}
+                        <span className="font-mono font-semibold">
+                          v{availableUpdate.latestVersion}
+                        </span>
+                      </span>
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 text-[10.5px] font-semibold text-indigo-600 dark:text-indigo-300 shrink-0">
+                      <span>{updatingApp ? "更新中" : "更新"}</span>
+                      <ChevronRight className="h-3 w-3" />
+                    </span>
+                  </motion.button>
+                )}
+              </AnimatePresence>
+
               {/* Compact Utility Controls */}
               <div className="grid grid-cols-4 gap-1">
                 <button
@@ -856,11 +967,25 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => openSettingsTab("update")}
-                  className="py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
-                  title="检查软件更新"
+                  onClick={() =>
+                    availableUpdate?.hasUpdate
+                      ? setUpdatePopupOpen((v) => !v)
+                      : openSettingsTab("update")
+                  }
+                  className="relative py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/60 dark:hover:bg-white/[0.06] flex items-center justify-center transition"
+                  title={
+                    availableUpdate?.hasUpdate
+                      ? `发现新版本 v${availableUpdate.latestVersion}，点击查看`
+                      : "检查软件更新"
+                  }
                 >
                   <CloudDownload className="h-3.5 w-3.5" />
+                  {availableUpdate?.hasUpdate && (
+                    <span className="absolute top-1 right-2.5 flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500 ring-2 ring-zinc-50 dark:ring-[#0c0c0f]" />
+                    </span>
+                  )}
                 </button>
                 <button
                   type="button"
@@ -1512,6 +1637,13 @@ export default function App() {
         initialTab={settingsInitialTab}
         isAdmin={auth.isAdmin}
         settings={settings}
+        availableUpdate={availableUpdate}
+        updatingApp={updatingApp}
+        updateProgress={updateProgress}
+        onUpdateDetected={(res) => {
+          setAvailableUpdate(res.hasUpdate ? res : null);
+        }}
+        onTriggerInstallUpdate={handleInstallUpdate}
         onClose={() => setSettingsModalOpen(false)}
         onSettingsChanged={(next) => {
           setSettings(next);
@@ -1522,6 +1654,20 @@ export default function App() {
         }}
         onDataRestored={() => refreshAll()}
         onNotify={notify}
+      />
+
+      {/* Right-to-Left Sliding Auto-Update Notification Popup */}
+      <UpdateBannerToast
+        open={updatePopupOpen && !settingsModalOpen && !(auth.isInitialized && auth.isLocked)}
+        update={availableUpdate}
+        updating={updatingApp}
+        progress={updateProgress}
+        onUpdateNow={() => handleInstallUpdate()}
+        onDismiss={() => setUpdatePopupOpen(false)}
+        onOpenSettings={() => {
+          setUpdatePopupOpen(false);
+          openSettingsTab("update");
+        }}
       />
 
       <ImportModal

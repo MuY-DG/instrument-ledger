@@ -23,11 +23,12 @@ use crate::storage::{
     dir_total_size, mime_from_ext, remove_stored_file, resolve_stored_path, save_image_from_base64,
     save_image_from_path, save_report_from_base64, save_report_from_path,
 };
-use crate::updater::{check_github_release, download_and_launch_installer};
+use crate::updater::{check_github_release, download_and_install_update, PendingUpdate};
 
 pub struct AppState {
     pub db: Mutex<Connection>,
     pub session: Mutex<SessionState>,
+    pub pending_update: Mutex<Option<PendingUpdate>>,
     pub data_dir: PathBuf,
     pub db_path: PathBuf,
 }
@@ -957,6 +958,7 @@ pub fn restore_local_backup(
 
 #[tauri::command]
 pub async fn check_for_updates(
+    app: AppHandle,
     state: State<'_, AppState>,
     github_repo_override: Option<String>,
     proxy_override: Option<String>,
@@ -971,23 +973,35 @@ pub async fn check_for_updates(
             proxy_override.unwrap_or(settings.update_proxy_url),
         )
     };
-    check_github_release(&repo, &proxy).await
+    let (result, pending) = check_github_release(&app, &repo, &proxy).await?;
+    if let Ok(mut guard) = state.pending_update.lock() {
+        *guard = pending;
+    }
+    Ok(result)
 }
 
 #[tauri::command]
 pub async fn download_and_launch_update(
     app: AppHandle,
     state: State<'_, AppState>,
-    download_url: String,
-    asset_name: String,
+    github_repo_override: Option<String>,
     proxy_override: Option<String>,
 ) -> Result<String, String> {
-    let proxy = match proxy_override {
-        Some(p) => p,
-        None => {
-            let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-            load_app_settings(&conn)?.update_proxy_url
-        }
+    let (repo, proxy) = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        let settings = load_app_settings(&conn)?;
+        (
+            github_repo_override
+                .filter(|s| !s.trim().is_empty())
+                .unwrap_or(settings.github_repo),
+            proxy_override.unwrap_or(settings.update_proxy_url),
+        )
     };
-    download_and_launch_installer(&app, &download_url, &asset_name, &proxy).await
+    let pending = state
+        .pending_update
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+
+    download_and_install_update(&app, pending, &repo, &proxy).await
 }

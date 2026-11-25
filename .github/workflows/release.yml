@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "发布标签版本号（例如 v1.1.0；留空则仅构建 macOS & Windows 安装包产物，不创建 Release）"
+        description: "发布标签版本号（例如 v1.2.0；留空则仅构建 macOS & Windows 安装包产物，不创建 Release）"
         required: false
         default: ""
       draft:
@@ -33,13 +33,13 @@ jobs:
           - name: macos-universal
             platform: macos-latest
             rust_targets: "aarch64-apple-darwin,x86_64-apple-darwin"
-            args: "--target universal-apple-darwin --bundles dmg"
-            artifact_glob: "src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg"
+            args: "--target universal-apple-darwin --bundles app,dmg"
+            bundle_dir: "src-tauri/target/universal-apple-darwin/release/bundle"
           - name: windows-x64
             platform: windows-latest
             rust_targets: "x86_64-pc-windows-msvc"
             args: "--target x86_64-pc-windows-msvc --bundles nsis"
-            artifact_glob: "src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe"
+            bundle_dir: "src-tauri/target/x86_64-pc-windows-msvc/release/bundle"
 
     runs-on: ${{ matrix.platform }}
 
@@ -82,28 +82,49 @@ jobs:
         shell: bash
         run: cargo test --manifest-path src-tauri/Cargo.toml
 
-      - name: Build Tauri desktop installer
+      - name: Build signed Tauri desktop installer & updater bundle
         shell: bash
         env:
           CI: true
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
         run: pnpm tauri build ${{ matrix.args }}
 
-      - name: Stage installer artifacts
+      - name: Stage installer & updater artifacts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release-artifacts
           shopt -s nullglob
-          files=(${{ matrix.artifact_glob }})
-          if [ ${#files[@]} -eq 0 ]; then
-            echo "No installer files matched: ${{ matrix.artifact_glob }}"
-            find src-tauri/target -maxdepth 5 -type f \( -name "*.dmg" -o -name "*.exe" \) || true
-            exit 1
+
+          if [[ "${{ matrix.name }}" == "macos-universal" ]]; then
+            dmg_files=(${{ matrix.bundle_dir }}/dmg/*.dmg)
+            tar_files=(${{ matrix.bundle_dir }}/macos/*.app.tar.gz)
+            sig_files=(${{ matrix.bundle_dir }}/macos/*.app.tar.gz.sig)
+
+            if [ ${#dmg_files[@]} -eq 0 ] || [ ${#tar_files[@]} -eq 0 ] || [ ${#sig_files[@]} -eq 0 ]; then
+              echo "Missing expected macOS bundle or updater artifacts!"
+              find src-tauri/target -maxdepth 6 -type f \( -name "*.dmg" -o -name "*.tar.gz" -o -name "*.sig" \) || true
+              exit 1
+            fi
+
+            cp -v "${dmg_files[@]}" "${tar_files[@]}" "${sig_files[@]}" release-artifacts/
+          else
+            exe_files=(${{ matrix.bundle_dir }}/nsis/*-setup.exe)
+            sig_files=(${{ matrix.bundle_dir }}/nsis/*-setup.exe.sig)
+
+            if [ ${#exe_files[@]} -eq 0 ] || [ ${#sig_files[@]} -eq 0 ]; then
+              echo "Missing expected Windows NSIS installer or updater signature!"
+              find src-tauri/target -maxdepth 6 -type f \( -name "*.exe" -o -name "*.sig" \) || true
+              exit 1
+            fi
+
+            cp -v "${exe_files[@]}" "${sig_files[@]}" release-artifacts/
           fi
-          cp -v "${files[@]}" release-artifacts/
+
           ls -lh release-artifacts/
 
-      - name: Upload installer artifacts
+      - name: Upload installer & updater artifacts
         uses: actions/upload-artifact@v4
         with:
           name: InstrumentLedger-${{ matrix.name }}
@@ -117,13 +138,13 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag_name != '')
 
     steps:
-      - name: Download built installers
+      - name: Download built installers & updater bundles
         uses: actions/download-artifact@v4
         with:
           path: release-assets
           merge-multiple: true
 
-      - name: Verify installers and publish Release
+      - name: Generate latest.json & publish Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -138,11 +159,78 @@ jobs:
           else
             TAG="${INPUT_TAG}"
           fi
+          export TAG
 
           echo "Publishing Release for tag: ${TAG}"
           ls -lh release-assets/
 
-          CHECKSUMS=$(cd release-assets && sha256sum *)
+          python3 - <<'PY'
+          import glob
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          repo = os.environ["GH_REPO"]
+          tag = os.environ["TAG"]
+          version = tag.lstrip("vV")
+
+          mac_tar = sorted(glob.glob("release-assets/*.app.tar.gz"))
+          mac_sig = sorted(glob.glob("release-assets/*.app.tar.gz.sig"))
+          win_exe = sorted(glob.glob("release-assets/*-setup.exe"))
+          win_sig = sorted(glob.glob("release-assets/*-setup.exe.sig"))
+
+          if not mac_tar or not mac_sig:
+              raise SystemExit(f"Missing macOS updater files: tar={mac_tar}, sig={mac_sig}")
+          if not win_exe or not win_sig:
+              raise SystemExit(f"Missing Windows updater files: exe={win_exe}, sig={win_sig}")
+
+          mac_tar_name = os.path.basename(mac_tar[0])
+          win_exe_name = os.path.basename(win_exe[0])
+
+          with open(mac_sig[0], encoding="utf-8") as f:
+              mac_sig_val = f.read().strip()
+          with open(win_sig[0], encoding="utf-8") as f:
+              win_sig_val = f.read().strip()
+
+          base_url = f"https://github.com/{repo}/releases/download/{tag}"
+          notes = (
+              f"InstrumentLedger {tag} 已发布，支持应用内一键签名校验下载、自动替换本体并重启升级。\n"
+              "覆盖更新不会影响本地 SQLite 台账数据库、位置照片与校验报告附件。"
+          )
+
+          manifest = {
+              "version": version,
+              "notes": notes,
+              "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+              "platforms": {
+                  "darwin-aarch64": {
+                      "signature": mac_sig_val,
+                      "url": f"{base_url}/{mac_tar_name}",
+                  },
+                  "darwin-x86_64": {
+                      "signature": mac_sig_val,
+                      "url": f"{base_url}/{mac_tar_name}",
+                  },
+                  "windows-x86_64": {
+                      "signature": win_sig_val,
+                      "url": f"{base_url}/{win_exe_name}",
+                  },
+                  "windows-x86_64-nsis": {
+                      "signature": win_sig_val,
+                      "url": f"{base_url}/{win_exe_name}",
+                  },
+              },
+          }
+
+          with open("release-assets/latest.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, ensure_ascii=False, indent=2)
+              f.write("\n")
+
+          print("Generated release-assets/latest.json:")
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+
+          CHECKSUMS=$(cd release-assets && sha256sum *.dmg *.exe *.app.tar.gz)
 
           cat <<EOF > release-notes.md
           ## 安装包下载说明
@@ -151,9 +239,10 @@ jobs:
             > 若首次打开提示「无法验证开发者」或「已损坏」（个人自构建未签名），可在终端执行一次 \`xattr -cr /Applications/InstrumentLedger.app\` 后正常启动。
           - **Windows（64 位）**：下载 \`*_x64-setup.exe\` 安装包直接双击安装（覆盖升级不会清除本地 SQLite 数据库、位置照片与校验报告附件）。
 
-          ## 首次启动与应用内更新说明
+          ## 首次启动与无感自动更新说明
           - 软件无默认账号或初始密码，安装后首次打开将播放启动动画并引导初始化本机管理员账号。
-          - 软件已默认预填更新源 \`MuY-DG/instrument-ledger\` 与国内下载加速代理 \`https://gh-proxy.com/\`（代理异常时自动回退直连），管理员可在「设置 → 检查更新」中随时修改或清空。
+          - 已接入 Tauri 官方 \`tauri-plugin-updater\` 与 Ed25519 签名校验：启动时后台静默检测新版本，发现更新后侧边栏亮起红点并从右侧滑入更新弹窗，点击「立即更新并重启」即可自动下载、验签替换本体并重启。
+          - 默认预填更新源 \`MuY-DG/instrument-ledger\` 与国内下载加速代理 \`https://gh-proxy.com/\`（代理异常时自动回退直连），管理员可在「设置 → 检查更新」中随时修改或清空。
 
           ## SHA-256 校验值
           \`\`\`
