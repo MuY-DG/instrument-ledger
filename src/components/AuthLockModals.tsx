@@ -1230,7 +1230,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.28, ease: EASE_PRECISION }}
-          className="fixed inset-0 z-[100] bg-[#f4f5f8]/[0.86] dark:bg-[#09090b]/[0.88] backdrop-blur-2xl flex flex-col items-center justify-center p-6 select-none no-print overflow-hidden"
+          className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h,0px)] z-[100] bg-[#f4f5f8]/[0.86] dark:bg-[#09090b]/[0.88] backdrop-blur-2xl flex flex-col items-center justify-center p-6 select-none no-print overflow-hidden"
         >
           {/* Adaptive Architectural Grid */}
           <div className="absolute inset-0 bg-precision-grid-light dark:bg-precision-grid pointer-events-none" />

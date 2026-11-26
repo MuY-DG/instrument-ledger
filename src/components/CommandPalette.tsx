@@ -4,6 +4,7 @@ import { ModalShell } from "@/components/ui/MotionPrimitives";
 import { KeycapBadge } from "@/components/ui/InteractiveControls";
 import {
   BellRing,
+  Check,
   CloudDownload,
   FileSpreadsheet,
   Gauge,
@@ -11,6 +12,7 @@ import {
   Lock,
   LogIn,
   LogOut,
+  Monitor,
   Moon,
   Plus,
   Printer,
@@ -23,6 +25,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { getInstrumentStatus } from "@/lib/status";
+import type { ThemePreference } from "@/lib/themeTransition";
 import { getMaxWarningDays, sortThresholdsDesc } from "@/lib/thresholdColors";
 import type {
   CategoryTab,
@@ -37,7 +40,7 @@ interface CommandPaletteProps {
   instruments: Instrument[];
   warningThresholds: WarningThreshold[];
   isAdmin: boolean;
-  theme: "light" | "dark";
+  themePreference: ThemePreference;
   onClose: () => void;
   onSelectInstrument: (inst: Instrument) => void;
   onNavigateTab: (tab: CategoryTab) => void;
@@ -52,7 +55,7 @@ interface CommandPaletteProps {
   onOpenSettings: (
     tab: "account" | "general" | "window" | "alerts" | "applock" | "backup" | "update"
   ) => void;
-  onToggleTheme: () => void;
+  onSelectThemePreference: (pref: ThemePreference) => void;
   onLoginOrLogout: () => void;
 }
 
@@ -61,7 +64,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   instruments,
   warningThresholds,
   isAdmin,
-  theme,
+  themePreference,
   onClose,
   onSelectInstrument,
   onNavigateTab,
@@ -74,7 +77,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onPrint,
   onLock,
   onOpenSettings,
-  onToggleTheme,
+  onSelectThemePreference,
   onLoginOrLogout,
 }) => {
   const descThresholds = sortThresholdsDesc(warningThresholds);
@@ -188,19 +191,48 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   </Command.Item>
 
                   <Command.Item
-                    onSelect={() => runAndClose(onToggleTheme)}
+                    onSelect={() =>
+                      runAndClose(() => onSelectThemePreference("light"))
+                    }
                     className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
                   >
                     <span className="flex items-center gap-2.5">
-                      {theme === "dark" ? (
-                        <Sun className="h-3.5 w-3.5 text-amber-400" />
-                      ) : (
-                        <Moon className="h-3.5 w-3.5 text-indigo-500" />
-                      )}
-                      <span>
-                        切换{theme === "dark" ? "浅色模式" : "深色模式"}
-                      </span>
+                      <Sun className="h-3.5 w-3.5 text-amber-500" />
+                      <span>主题：亮色模式</span>
                     </span>
+                    {themePreference === "light" && (
+                      <Check className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-300" />
+                    )}
+                  </Command.Item>
+
+                  <Command.Item
+                    onSelect={() =>
+                      runAndClose(() => onSelectThemePreference("dark"))
+                    }
+                    className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <Moon className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
+                      <span>主题：暗色模式</span>
+                    </span>
+                    {themePreference === "dark" && (
+                      <Check className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-300" />
+                    )}
+                  </Command.Item>
+
+                  <Command.Item
+                    onSelect={() =>
+                      runAndClose(() => onSelectThemePreference("system"))
+                    }
+                    className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <Monitor className="h-3.5 w-3.5 text-sky-500 dark:text-sky-400" />
+                      <span>主题：跟随系统</span>
+                    </span>
+                    {themePreference === "system" && (
+                      <Check className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-300" />
+                    )}
                   </Command.Item>
 
                   <Command.Item

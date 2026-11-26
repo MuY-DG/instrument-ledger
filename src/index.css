@@ -220,6 +220,34 @@
 [data-av="11"] { --av-l: #f6ff86; --av-a: #8ae83a; --av-b: #1fb86a; --av-p: #fbffc8; --p1: -2.9% 34.4%; --p2: 65.4% -7.4%; --p3: 105.9% 70.8%; }
 [data-av="12"] { --av-l: #ffa3cd; --av-a: #e03cff; --av-b: #6a2cff; --av-p: #ffd2ea; --p1: 88.0% 90.0%; --p2: 8.0% 92.0%; --p3: 12.0% 4.0%; }
 
+/* Bottom-left -> top-right circular theme reveal (View Transitions API) */
+html[data-theme-transition]::view-transition {
+  pointer-events: none;
+}
+
+html[data-theme-transition]::view-transition-old(root),
+html[data-theme-transition]::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+  display: block;
+}
+
+html[data-theme-transition]::view-transition-old(root) {
+  z-index: 1;
+}
+
+html[data-theme-transition]::view-transition-new(root) {
+  z-index: 9999;
+}
+
+/* Snap Tailwind/CSS color transitions instantaneously inside the View Transition snapshot */
+html[data-theme-transition],
+html[data-theme-transition] *,
+html[data-theme-transition] *::before,
+html[data-theme-transition] *::after {
+  transition: none !important;
+}
+
 /* Landscape A4 Printing Styles (always crisp monochrome + semantic print tint) */
 @media print {
   @page {

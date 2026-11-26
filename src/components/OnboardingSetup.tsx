@@ -11,7 +11,9 @@ import {
   Palette,
   RotateCcw,
   Shuffle,
+  Sparkles,
   User,
+  X,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import {
@@ -44,6 +46,12 @@ interface OnboardingSetupProps {
   defaultDocTitle: string;
   defaultDocCode: string;
   onCompleted: (auth: AuthStatus) => void;
+  /** Preview-only mode triggered from Settings: never mutates backend or localStorage */
+  previewMode?: boolean;
+  /** Optional display name shown in the simulated completion step during preview */
+  previewUsername?: string;
+  /** Callback to close preview mode */
+  onExitPreview?: () => void;
 }
 
 type Stage = "intro" | "welcome" | "setup" | "complete";
@@ -280,6 +288,9 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
   defaultDocTitle,
   defaultDocCode,
   onCompleted,
+  previewMode = false,
+  previewUsername,
+  onExitPreview,
 }) => {
   const [stage, setStage] = useState<Stage>("intro");
   const [emblemReady, setEmblemReady] = useState(false);
@@ -313,20 +324,37 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
   const revealStageRef = useRef<HTMLDivElement | null>(null);
   const pickerWrapRef = useRef<HTMLDivElement | null>(null);
   const timersRef = useRef<number[]>([]);
+  const completeTimerRef = useRef<number | null>(null);
 
   const isLightMesh = LIGHT_TONE_MESH_IDS.has(bgId);
   const activeAccent = PALETTE_ACCENTS[bgId] || PALETTE_ACCENTS["1"];
   const activePresetName =
     GRAIN_MESH_PRESETS.find((p) => p.id === bgId)?.name || "霓虹粉紫";
 
-  const handleSelectBg = useCallback((nextId: GrainMeshId) => {
-    setBgId(nextId);
-    saveAccountBg(nextId);
-  }, []);
+  const handleSelectBg = useCallback(
+    (nextId: GrainMeshId) => {
+      setBgId(nextId);
+      if (!previewMode) {
+        saveAccountBg(nextId);
+      }
+    },
+    [previewMode]
+  );
 
   // Persist initial default ("1" 霓虹粉紫) so account cover matches upon entering app
   useEffect(() => {
-    saveAccountBg("1");
+    if (!previewMode) {
+      saveAccountBg("1");
+    }
+  }, [previewMode]);
+
+  useEffect(() => {
+    return () => {
+      if (completeTimerRef.current !== null) {
+        window.clearTimeout(completeTimerRef.current);
+        completeTimerRef.current = null;
+      }
+    };
   }, []);
 
   // Close background popover when clicking outside
@@ -383,6 +411,11 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
 
   const handleReplayIntro = () => {
     clearIntroTimers();
+    if (completeTimerRef.current !== null) {
+      window.clearTimeout(completeTimerRef.current);
+      completeTimerRef.current = null;
+    }
+    setSubmitting(false);
     setShowBgPicker(false);
     setShowSkip(false);
     setEmblemReady(false);
@@ -392,6 +425,20 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
     canvasRef.current?.replay();
     scheduleIntroTimeline();
   };
+
+  // Esc shortcut to exit preview mode at any stage
+  useEffect(() => {
+    if (!previewMode || !onExitPreview) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onExitPreview();
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [previewMode, onExitPreview]);
 
   // Enter shortcut once welcome CTA is ready
   useEffect(() => {
@@ -423,11 +470,12 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
   const passwordsMismatch =
     confirmPassword.length > 0 && password !== confirmPassword;
 
-  const canSubmit =
-    username.trim().length >= 2 &&
-    password.length >= 6 &&
-    password === confirmPassword &&
-    !submitting;
+  const canSubmit = previewMode
+    ? !submitting
+    : username.trim().length >= 2 &&
+      password.length >= 6 &&
+      password === confirmPassword &&
+      !submitting;
 
   const triggerError = (msg: string) => {
     setError(msg);
@@ -437,6 +485,18 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+
+    if (previewMode) {
+      setSubmitting(true);
+      setCreatedUser(username.trim() || previewUsername?.trim() || "管理员");
+      setShowBgPicker(false);
+      setStage("complete");
+      completeTimerRef.current = window.setTimeout(() => {
+        onExitPreview?.();
+      }, 1450);
+      return;
+    }
+
     const cleanUser = username.trim();
     if (cleanUser.length < 2) {
       triggerError("管理员用户名至少需要 2 个字符");
@@ -463,7 +523,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
       setCreatedUser(authStatus.username);
       setShowBgPicker(false);
       setStage("complete");
-      window.setTimeout(() => {
+      completeTimerRef.current = window.setTimeout(() => {
         onCompleted(authStatus);
       }, 1250);
     } catch (err) {
@@ -474,10 +534,10 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
 
   return (
     <motion.div
-      initial={{ opacity: 1 }}
+      initial={previewMode ? { opacity: 0 } : { opacity: 1 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0, scale: 1.02, filter: "blur(10px)" }}
-      transition={{ duration: 0.5, ease: EASE_PRECISION }}
+      transition={{ duration: previewMode ? 0.35 : 0.5, ease: EASE_PRECISION }}
       className="fixed inset-0 z-[120] bg-black text-zinc-900 overflow-hidden select-none flex items-center justify-center p-6"
     >
       {/* 1:1 Netflix Intro -> Autonomous 21st.dev Silk Background */}
@@ -503,39 +563,79 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Top-Right Skip / Replay Pill */}
-      <AnimatePresence mode="wait">
-        {stage === "intro" && showSkip ? (
+      {/* Top-Right Skip / Replay & Preview Exit Pills */}
+      <div className="fixed top-6 right-7 z-30 flex items-center gap-2">
+        <AnimatePresence mode="wait">
+          {stage === "intro" && showSkip ? (
+            <motion.button
+              key="skip-btn"
+              type="button"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.85 }}
+              whileHover={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.25 }}
+              onClick={handleSkipIntro}
+              className="px-3 py-1 rounded-full bg-black/65 backdrop-blur-md border border-white/20 text-xs font-medium text-white hover:bg-black/80 transition-colors cursor-pointer"
+            >
+              跳过
+            </motion.button>
+          ) : (stage === "welcome" || stage === "setup") && actionReady ? (
+            <motion.button
+              key="replay-btn"
+              type="button"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 0.9 }}
+              whileHover={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.3 }}
+              onClick={handleReplayIntro}
+              title="重播开场动画"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/85 backdrop-blur-md border border-white/70 shadow-tactile text-[11.5px] font-medium text-zinc-800 hover:bg-white hover:text-zinc-950 transition-colors cursor-pointer"
+            >
+              <RotateCcw className="h-3 w-3" />
+              <span>重播开场</span>
+            </motion.button>
+          ) : null}
+        </AnimatePresence>
+
+        {previewMode && onExitPreview && (
           <motion.button
-            key="skip-btn"
             type="button"
             initial={{ opacity: 0 }}
-            animate={{ opacity: 0.85 }}
+            animate={{ opacity: 0.92 }}
             whileHover={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
+            whileTap={TAP_SCALE_SUBTLE}
             transition={{ duration: 0.25 }}
-            onClick={handleSkipIntro}
-            className="fixed top-6 right-7 z-30 px-3 py-1 rounded-full bg-black/65 backdrop-blur-md border border-white/20 text-xs font-medium text-white hover:bg-black/80 transition-colors cursor-pointer"
+            onClick={onExitPreview}
+            title="退出预览 (Esc)"
+            className={cn(
+              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur-md text-[11.5px] font-medium transition-colors cursor-pointer",
+              stage === "intro"
+                ? "bg-black/65 border border-white/20 text-white hover:bg-black/85"
+                : "bg-white/85 border border-white/70 shadow-tactile text-zinc-800 hover:bg-white hover:text-zinc-950"
+            )}
           >
-            跳过
+            <X className="h-3 w-3" />
+            <span>退出预览</span>
           </motion.button>
-        ) : (stage === "welcome" || stage === "setup") && actionReady ? (
-          <motion.button
-            key="replay-btn"
-            type="button"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 0.9 }}
-            whileHover={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.3 }}
-            onClick={handleReplayIntro}
-            title="重播奈飞开场动画"
-            className="fixed top-6 right-7 z-30 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/85 backdrop-blur-md border border-white/70 shadow-tactile text-[11.5px] font-medium text-zinc-800 hover:bg-white hover:text-zinc-950 transition-colors cursor-pointer"
+        )}
+      </div>
+
+      {/* Bottom-Left Subtle Preview Notice Pill (clear of macOS top-left traffic lights) */}
+      <AnimatePresence>
+        {previewMode && (stage === "welcome" || stage === "setup") && actionReady && (
+          <motion.div
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.45, ease: EASE_PRECISION }}
+            className="fixed bottom-6 left-7 z-30 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/85 backdrop-blur-xl border border-white/75 shadow-[0_8px_28px_-6px_rgba(15,23,42,0.2)] text-[11px] font-medium text-zinc-700"
           >
-            <RotateCcw className="h-3 w-3" />
-            <span>重播开场</span>
-          </motion.button>
-        ) : null}
+            <Sparkles className="h-3 w-3 text-violet-500 shrink-0" />
+            <span>预览模式 · 仅演示动画，不修改数据</span>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Bottom-Right Interactive Background Switcher Pill & 12-Color Popover (matching Account Cover UI!) */}
@@ -834,7 +934,9 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                             创建管理员账号
                           </h2>
                           <p className="text-[11.5px] text-zinc-500 mt-0.5">
-                            配置本地台账管理权限与表单标识
+                            {previewMode
+                              ? "预览模式 · 不会保存账号或修改本地数据"
+                              : "配置本地台账管理权限与表单标识"}
                           </p>
                         </div>
                       </div>
@@ -867,8 +969,8 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                         <input
                           ref={usernameRef}
                           type="text"
-                          required
-                          minLength={2}
+                          required={!previewMode}
+                          minLength={previewMode ? undefined : 2}
                           maxLength={32}
                           autoComplete="username"
                           value={username}
@@ -919,8 +1021,8 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                         />
                         <input
                           type={showPassword ? "text" : "password"}
-                          required
-                          minLength={6}
+                          required={!previewMode}
+                          minLength={previewMode ? undefined : 6}
                           autoComplete="new-password"
                           value={password}
                           onFocus={() => setFocusedField("password")}
@@ -1015,8 +1117,8 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                         />
                         <input
                           type={showConfirm ? "text" : "password"}
-                          required
-                          minLength={6}
+                          required={!previewMode}
+                          minLength={previewMode ? undefined : 6}
                           autoComplete="new-password"
                           value={confirmPassword}
                           onFocus={() => setFocusedField("confirm")}
@@ -1126,7 +1228,11 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                         className="btn-sheen group w-full py-2.5 px-4 rounded-xl bg-zinc-950 hover:bg-zinc-800 disabled:bg-zinc-900/[0.08] disabled:text-zinc-500 disabled:border disabled:border-zinc-200/90 disabled:shadow-none text-white text-[13px] font-semibold shadow-[0_10px_24px_-6px_rgba(9,9,11,0.38)] inline-flex items-center justify-center gap-2 transition-colors cursor-pointer disabled:cursor-not-allowed"
                       >
                         <span>
-                          {submitting ? "正在初始化..." : "完成并进入"}
+                          {previewMode
+                            ? "预览完成动画"
+                            : submitting
+                              ? "正在初始化..."
+                              : "完成并进入"}
                         </span>
                         {!submitting && (
                           <ArrowRight className="h-4 w-4 transition-transform duration-200 group-hover:translate-x-0.5" />

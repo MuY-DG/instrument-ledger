@@ -1,4 +1,12 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { listen } from "@tauri-apps/api/event";
 import { save } from "@tauri-apps/plugin-dialog";
 import { AnimatePresence, motion } from "motion/react";
@@ -19,7 +27,6 @@ import {
   Lock,
   LogIn,
   LogOut,
-  Moon,
   PanelLeftClose,
   PanelLeftOpen,
   Plus,
@@ -27,7 +34,6 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
-  Sun,
   Upload,
   Wrench,
   X,
@@ -98,6 +104,23 @@ import {
   saveAccountBg,
   type AccountBgId,
 } from "@/lib/accountBackgrounds";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import {
+  getNextThemePreference,
+  getSystemTheme,
+  isTauriEnvironment,
+  resolveEffectiveTheme,
+  runThemeTransition,
+  syncNativeWindowTheme,
+  THEME_STORAGE_KEY,
+  type ThemeMode,
+  type ThemePreference,
+} from "@/lib/themeTransition";
+import {
+  ThemeStatusCapsule,
+  ThemeSwitcherButton,
+} from "@/components/ui/ThemeSwitcherButton";
+import { WindowTitleBar } from "@/components/ui/WindowTitleBar";
 import type {
   AppSettings,
   AuthStatus,
@@ -139,7 +162,6 @@ const DEFAULT_SETTINGS: AppSettings = {
   companyLogoPath: "",
 };
 
-const THEME_KEY = "instrument_ledger_theme";
 const PAGE_SIZE_KEY = "instrument_ledger_page_size";
 const SIDEBAR_COLLAPSED_KEY = "instrument_ledger_sidebar_collapsed";
 const ALERT_MUTED_DATE_KEY = "instrument_ledger_alert_muted_date";
@@ -163,14 +185,16 @@ function writeStorage(key: string, value: string) {
   }
 }
 
-function loadInitialTheme(): "light" | "dark" {
+function loadInitialThemePreference(): ThemePreference {
   try {
-    const saved = window.localStorage.getItem(THEME_KEY);
-    if (saved === "dark" || saved === "light") return saved;
+    const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
+    if (saved === "dark" || saved === "light" || saved === "system") {
+      return saved;
+    }
   } catch {
     // ignore storage access issues
   }
-  return "light";
+  return "system";
 }
 
 export default function App() {
@@ -193,8 +217,22 @@ export default function App() {
   const authRef = useRef(auth);
   authRef.current = auth;
 
-  // Theme (Precision Light / Obsidian Dark) & Collapsible Sidebar
-  const [theme, setTheme] = useState<"light" | "dark">(loadInitialTheme);
+  // Theme (Default: Follow System -> Light -> Dark) & Collapsible Sidebar
+  const [themePreference, setThemePreference] = useState<ThemePreference>(
+    loadInitialThemePreference
+  );
+  const [systemTheme, setSystemTheme] = useState<ThemeMode>(getSystemTheme);
+  const [themeCapsuleVisible, setThemeCapsuleVisible] = useState(false);
+  const themeCapsuleDelayRef = useRef<number | null>(null);
+  const themeCapsuleHideRef = useRef<number | null>(null);
+  const theme: ThemeMode = resolveEffectiveTheme(themePreference, systemTheme);
+  const themeRef = useRef<ThemeMode>(theme);
+  themeRef.current = theme;
+  const themePreferenceRef = useRef<ThemePreference>(themePreference);
+  themePreferenceRef.current = themePreference;
+  const systemThemeRef = useRef<ThemeMode>(systemTheme);
+  systemThemeRef.current = systemTheme;
+  const themeToggleBtnRef = useRef<HTMLButtonElement | null>(null);
   const [accountBg, setAccountBg] = useState<AccountBgId>(loadAccountBg);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(
     () => readStorage(SIDEBAR_COLLAPSED_KEY) === "1"
@@ -254,6 +292,7 @@ export default function App() {
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [settingsInitialTab, setSettingsInitialTab] = useState<SettingsTab>("general");
+  const [onboardingPreviewOpen, setOnboardingPreviewOpen] = useState(false);
   const [appLockSetupState, setAppLockSetupState] = useState<{
     open: boolean;
     mode: "enable" | "change";
@@ -284,20 +323,210 @@ export default function App() {
   const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
   const startupUpdateCheckedRef = useRef(false);
 
-  // Sync theme to <html>
-  useEffect(() => {
+  // Sync resolved theme to <html> synchronously before browser paint / View Transition capture
+  useLayoutEffect(() => {
     const root = document.documentElement;
     root.classList.toggle("dark", theme === "dark");
+    root.style.colorScheme = theme;
+  }, [theme]);
+
+  const flashThemeCapsule = useCallback((delayMs = 0) => {
+    if (themeCapsuleDelayRef.current !== null) {
+      window.clearTimeout(themeCapsuleDelayRef.current);
+      themeCapsuleDelayRef.current = null;
+    }
+    if (themeCapsuleHideRef.current !== null) {
+      window.clearTimeout(themeCapsuleHideRef.current);
+      themeCapsuleHideRef.current = null;
+    }
+
+    const reveal = () => {
+      setThemeCapsuleVisible(true);
+      themeCapsuleHideRef.current = window.setTimeout(() => {
+        setThemeCapsuleVisible(false);
+        themeCapsuleHideRef.current = null;
+      }, 1750);
+    };
+
+    if (delayMs > 0) {
+      themeCapsuleDelayRef.current = window.setTimeout(() => {
+        themeCapsuleDelayRef.current = null;
+        reveal();
+      }, delayMs);
+    } else {
+      reveal();
+    }
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (themeCapsuleDelayRef.current !== null) {
+        window.clearTimeout(themeCapsuleDelayRef.current);
+      }
+      if (themeCapsuleHideRef.current !== null) {
+        window.clearTimeout(themeCapsuleHideRef.current);
+      }
+    };
+  }, []);
+
+  // Persist preference & sync native OS window appearance
+  useEffect(() => {
     try {
-      window.localStorage.setItem(THEME_KEY, theme);
+      window.localStorage.setItem(THEME_STORAGE_KEY, themePreference);
     } catch {
       // ignore
     }
-  }, [theme]);
+    syncNativeWindowTheme(themePreference);
+  }, [themePreference]);
 
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"));
+  // Ensure initial OS theme is synced accurately in Tauri when starting in "system" mode
+  useEffect(() => {
+    if (!isTauriEnvironment() || themePreferenceRef.current !== "system") return;
+    const win = getCurrentWindow();
+    win
+      .setTheme(null)
+      .then(() => win.theme())
+      .then((osTheme) => {
+        if (
+          themePreferenceRef.current === "system" &&
+          (osTheme === "dark" || osTheme === "light")
+        ) {
+          systemThemeRef.current = osTheme;
+          setSystemTheme(osTheme);
+        }
+      })
+      .catch(() => {});
   }, []);
+
+  // Watch live OS appearance changes when in "system" (follow system) mode
+  useEffect(() => {
+    const applyLiveSystemTheme = (nextSys: ThemeMode) => {
+      if (themePreferenceRef.current !== "system") return;
+      if (systemThemeRef.current === nextSys && themeRef.current === nextSys) {
+        return;
+      }
+      const willSweep = themeRef.current !== nextSys;
+      systemThemeRef.current = nextSys;
+      runThemeTransition({
+        currentTheme: themeRef.current,
+        nextTheme: nextSys,
+        applyTheme: () => {
+          themeRef.current = nextSys;
+          setSystemTheme(nextSys);
+        },
+        triggerEl: themeToggleBtnRef.current,
+      });
+      flashThemeCapsule(willSweep ? 85 : 0);
+    };
+
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const onMediaChange = (ev: MediaQueryListEvent) => {
+      applyLiveSystemTheme(ev.matches ? "dark" : "light");
+    };
+    mq?.addEventListener?.("change", onMediaChange);
+
+    let unlistenTauriTheme: (() => void) | null = null;
+    if (isTauriEnvironment()) {
+      getCurrentWindow()
+        .onThemeChanged(({ payload }) => {
+          if (payload === "dark" || payload === "light") {
+            applyLiveSystemTheme(payload);
+          }
+        })
+        .then((fn) => {
+          unlistenTauriTheme = fn;
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      mq?.removeEventListener?.("change", onMediaChange);
+      unlistenTauriTheme?.();
+    };
+  }, [flashThemeCapsule]);
+
+  const handleSelectThemePreference = useCallback(
+    (nextPref: ThemePreference, triggerEl?: HTMLElement | null) => {
+      const originEl = triggerEl ?? themeToggleBtnRef.current;
+
+      if (nextPref === "system" && isTauriEnvironment()) {
+        // Clear any explicit NSWindow appearance override first so OS theme is read accurately
+        const win = getCurrentWindow();
+        win
+          .setTheme(null)
+          .then(() => win.theme())
+          .then((osTheme) => {
+            const realSys: ThemeMode =
+              osTheme === "dark" || osTheme === "light"
+                ? osTheme
+                : getSystemTheme();
+            const willSweep = themeRef.current !== realSys;
+            systemThemeRef.current = realSys;
+            themePreferenceRef.current = "system";
+            runThemeTransition({
+              currentTheme: themeRef.current,
+              nextTheme: realSys,
+              applyTheme: () => {
+                themeRef.current = realSys;
+                setSystemTheme(realSys);
+                setThemePreference("system");
+              },
+              triggerEl: originEl,
+            });
+            flashThemeCapsule(willSweep ? 85 : 0);
+          })
+          .catch(() => {
+            const fallbackSys = getSystemTheme();
+            const willSweep = themeRef.current !== fallbackSys;
+            systemThemeRef.current = fallbackSys;
+            themePreferenceRef.current = "system";
+            runThemeTransition({
+              currentTheme: themeRef.current,
+              nextTheme: fallbackSys,
+              applyTheme: () => {
+                themeRef.current = fallbackSys;
+                setSystemTheme(fallbackSys);
+                setThemePreference("system");
+              },
+              triggerEl: originEl,
+            });
+            flashThemeCapsule(willSweep ? 85 : 0);
+          });
+        return;
+      }
+
+      const nextResolved: ThemeMode =
+        nextPref === "system" ? getSystemTheme() : nextPref;
+      const willSweep = themeRef.current !== nextResolved;
+      if (nextPref === "system") {
+        systemThemeRef.current = nextResolved;
+      }
+      themePreferenceRef.current = nextPref;
+
+      runThemeTransition({
+        currentTheme: themeRef.current,
+        nextTheme: nextResolved,
+        applyTheme: () => {
+          themeRef.current = nextResolved;
+          if (nextPref === "system") {
+            setSystemTheme(nextResolved);
+          }
+          setThemePreference(nextPref);
+        },
+        triggerEl: originEl,
+      });
+      flashThemeCapsule(willSweep ? 85 : 0);
+    },
+    [flashThemeCapsule]
+  );
+
+  const handleCycleTheme = useCallback(
+    (triggerEl?: HTMLElement | null) => {
+      const nextPref = getNextThemePreference(themePreferenceRef.current);
+      handleSelectThemePreference(nextPref, triggerEl);
+    },
+    [handleSelectThemePreference]
+  );
 
   const notify = useCallback((message: string, type: "success" | "error" = "success") => {
     if (type === "error") {
@@ -392,10 +621,17 @@ export default function App() {
     }
   }, [notify]);
 
+  // Close onboarding preview automatically if app locks
+  useEffect(() => {
+    if (auth.isLocked) {
+      setOnboardingPreviewOpen(false);
+    }
+  }, [auth.isLocked]);
+
   // Global keyboard shortcuts: Cmd/Ctrl + L (Lock), Cmd/Ctrl + K (Command Palette), Cmd/Ctrl + B (Sidebar)
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!auth.isInitialized || auth.isLocked) return;
+      if (!auth.isInitialized || auth.isLocked || onboardingPreviewOpen) return;
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "l") {
         e.preventDefault();
         handleLock();
@@ -409,7 +645,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [auth.isInitialized, auth.isLocked, handleLock, toggleSidebar]);
+  }, [auth.isInitialized, auth.isLocked, onboardingPreviewOpen, handleLock, toggleSidebar]);
 
   // Independent auto-lock idle timer whenever App Lock is enabled
   useEffect(() => {
@@ -946,6 +1182,7 @@ export default function App() {
   const handleAppReset = useCallback((res: ResetAppResult) => {
     clearMediaCache();
     setSettingsModalOpen(false);
+    setOnboardingPreviewOpen(false);
     setDrawerOpen(false);
     setEditingInstrument(null);
     setAlertModalOpen(false);
@@ -1193,9 +1430,15 @@ export default function App() {
   // Prevent flashing main UI before initial auth status loads (adaptive luminous light / obsidian dark)
   if (booting) {
     return (
-      <div className="h-screen w-screen bg-[#f7f7f5] dark:bg-[#09090b] flex items-center justify-center">
-        <div className="h-10 w-10 rounded-2xl bg-white dark:bg-white/[0.06] border border-zinc-200/80 dark:border-white/[0.08] shadow-tactile flex items-center justify-center animate-pulse">
-          <div className="h-2.5 w-2.5 rounded-full bg-indigo-500/80" />
+      <div className="h-screen w-screen bg-[#f7f7f5] dark:bg-[#09090b] flex flex-col">
+        <WindowTitleBar
+          docTitle={settings.docTitle}
+          docCode={settings.docCode}
+        />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="h-10 w-10 rounded-2xl bg-white dark:bg-white/[0.06] border border-zinc-200/80 dark:border-white/[0.08] shadow-tactile flex items-center justify-center animate-pulse">
+            <div className="h-2.5 w-2.5 rounded-full bg-indigo-500/80" />
+          </div>
         </div>
       </div>
     );
@@ -1204,10 +1447,18 @@ export default function App() {
   return (
     <MorphTooltipProvider>
     <div className="h-screen w-screen overflow-hidden bg-[#f7f7f5] dark:bg-[#09090b] text-zinc-950 dark:text-zinc-50 flex flex-col">
-      {/* First-Launch Intro Animation & Gradual Account Setup */}
+      {/* In-DOM macOS Overlay Window Title Bar (participates in circular View Transition!) */}
+      <WindowTitleBar
+        docTitle={settings.docTitle}
+        docCode={settings.docCode}
+        minimalDragOnly={!auth.isInitialized}
+      />
+
+      {/* First-Launch Intro Animation & Gradual Account Setup (or Settings Preview) */}
       <AnimatePresence>
-        {!auth.isInitialized && (
+        {!auth.isInitialized ? (
           <OnboardingSetup
+            key="onboarding-setup"
             defaultDocTitle={settings.docTitle}
             defaultDocCode={settings.docCode}
             onCompleted={(nextAuth) => {
@@ -1217,7 +1468,17 @@ export default function App() {
               toast.success(`欢迎使用，管理员「${nextAuth.username}」已就绪`);
             }}
           />
-        )}
+        ) : onboardingPreviewOpen && !auth.isLocked ? (
+          <OnboardingSetup
+            key="onboarding-preview"
+            previewMode
+            previewUsername={auth.username || settings.adminUsername}
+            defaultDocTitle={settings.docTitle}
+            defaultDocCode={settings.docCode}
+            onCompleted={() => setOnboardingPreviewOpen(false)}
+            onExitPreview={() => setOnboardingPreviewOpen(false)}
+          />
+        ) : null}
       </AnimatePresence>
 
       {/* Main Desktop Shell (Hidden during print) */}
@@ -1735,35 +1996,12 @@ export default function App() {
                       </motion.button>
                     </MorphTooltip>
 
-                    <MorphTooltip
-                      placement="right"
-                      content={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
-                    >
-                      <motion.button
-                        type="button"
-                        whileTap={TAP_SCALE_ICON}
-                        transition={SPRING_SNAPPY}
-                        onClick={toggleTheme}
-                        className="h-8 w-9 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors overflow-hidden"
-                      >
-                        <AnimatePresence mode="wait" initial={false}>
-                          <motion.span
-                            key={theme}
-                            initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
-                            animate={{ opacity: 1, rotate: 0, scale: 1 }}
-                            exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
-                            transition={{ duration: 0.18, ease: EASE_PRECISION }}
-                            className="flex items-center justify-center"
-                          >
-                            {theme === "dark" ? (
-                              <Sun className="h-3.5 w-3.5" />
-                            ) : (
-                              <Moon className="h-3.5 w-3.5" />
-                            )}
-                          </motion.span>
-                        </AnimatePresence>
-                      </motion.button>
-                    </MorphTooltip>
+                    <ThemeSwitcherButton
+                      preference={themePreference}
+                      collapsed={true}
+                      buttonRef={themeToggleBtnRef}
+                      onCycleTheme={handleCycleTheme}
+                    />
                   </div>
                 </>
               ) : (
@@ -1959,37 +2197,12 @@ export default function App() {
                       </motion.button>
                     </MorphTooltip>
 
-                    <MorphTooltip
-                      placement="top"
-                      className="w-full"
-                      content={theme === "dark" ? "切换浅色模式" : "切换深色模式"}
-                    >
-                      <motion.button
-                        type="button"
-                        whileTap={TAP_SCALE_ICON}
-                        transition={SPRING_SNAPPY}
-                        onClick={toggleTheme}
-                        aria-label="切换明暗主题"
-                        className="w-full py-1.5 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors overflow-hidden"
-                      >
-                        <AnimatePresence mode="wait" initial={false}>
-                          <motion.span
-                            key={theme}
-                            initial={{ opacity: 0, rotate: -45, scale: 0.7 }}
-                            animate={{ opacity: 1, rotate: 0, scale: 1 }}
-                            exit={{ opacity: 0, rotate: 45, scale: 0.7 }}
-                            transition={{ duration: 0.18, ease: EASE_PRECISION }}
-                            className="flex items-center justify-center"
-                          >
-                            {theme === "dark" ? (
-                              <Sun className="h-3.5 w-3.5" />
-                            ) : (
-                              <Moon className="h-3.5 w-3.5" />
-                            )}
-                          </motion.span>
-                        </AnimatePresence>
-                      </motion.button>
-                    </MorphTooltip>
+                    <ThemeSwitcherButton
+                      preference={themePreference}
+                      collapsed={false}
+                      buttonRef={themeToggleBtnRef}
+                      onCycleTheme={handleCycleTheme}
+                    />
                   </div>
                 </>
               )}
@@ -2636,7 +2849,7 @@ export default function App() {
         instruments={instruments}
         warningThresholds={settings.warningThresholds}
         isAdmin={auth.isAdmin}
-        theme={theme}
+        themePreference={themePreference}
         onClose={() => setCommandOpen(false)}
         onSelectInstrument={(inst) => openViewDrawer(inst)}
         onNavigateTab={(tab) => {
@@ -2652,7 +2865,7 @@ export default function App() {
         onPrint={handlePrint}
         onLock={handleLock}
         onOpenSettings={openSettingsTab}
-        onToggleTheme={toggleTheme}
+        onSelectThemePreference={(pref) => handleSelectThemePreference(pref)}
         onLoginOrLogout={() => {
           if (auth.isAdmin) handleLogout();
           else setLoginModalOpen(true);
@@ -2750,6 +2963,8 @@ export default function App() {
         }}
         onDataRestored={() => refreshAll()}
         onAppReset={handleAppReset}
+        previewingOnboarding={onboardingPreviewOpen}
+        onPreviewOnboarding={() => setOnboardingPreviewOpen(true)}
         onNotify={notify}
         onRequestLogin={() => setLoginModalOpen(true)}
         onOpenAppLockSetup={(mode) =>
@@ -2801,7 +3016,7 @@ export default function App() {
 
       {/* Right-to-Left Sliding Auto-Update Notification Popup */}
       <UpdateBannerToast
-        open={updatePopupOpen && !settingsModalOpen && !(auth.isInitialized && auth.isLocked)}
+        open={updatePopupOpen && !settingsModalOpen && !onboardingPreviewOpen && !(auth.isInitialized && auth.isLocked)}
         update={availableUpdate}
         updating={updatingApp}
         progress={updateProgress}

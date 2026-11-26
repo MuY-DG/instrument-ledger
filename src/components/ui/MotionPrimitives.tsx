@@ -254,7 +254,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
         <motion.div
           {...BACKDROP_MOTION}
           className={cn(
-            "fixed inset-0 bg-slate-900/35 dark:bg-black/70 backdrop-blur-[6px] flex justify-center p-4 no-print",
+            "fixed inset-x-0 bottom-0 top-[var(--titlebar-h,0px)] bg-slate-900/35 dark:bg-black/70 backdrop-blur-[6px] flex justify-center p-4 no-print",
             align === "top" ? "items-start pt-[12vh]" : "items-center",
             zIndexClass,
             backdropClassName

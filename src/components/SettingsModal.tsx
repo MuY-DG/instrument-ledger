@@ -27,6 +27,7 @@ import {
   Lock,
   MonitorDown,
   Palette,
+  Play,
   Power,
   RefreshCw,
   RotateCcw,
@@ -34,6 +35,7 @@ import {
   Settings,
   ShieldCheck,
   Shuffle,
+  Sparkles,
   Trash2,
   User,
   X,
@@ -101,6 +103,8 @@ interface SettingsModalProps {
   onSettingsChanged: (next: AppSettings) => void;
   onDataRestored: () => void;
   onAppReset?: (res: ResetAppResult) => void;
+  previewingOnboarding?: boolean;
+  onPreviewOnboarding?: () => void;
   onNotify: (msg: string, type?: "success" | "error") => void;
   onRequestLogin?: () => void;
   onOpenAppLockSetup?: (mode: "enable" | "change") => void;
@@ -147,6 +151,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onSettingsChanged,
   onDataRestored,
   onAppReset,
+  previewingOnboarding = false,
+  onPreviewOnboarding,
   onNotify,
   onRequestLogin,
   onOpenAppLockSetup,
@@ -692,7 +698,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     <ModalShell
       open={openModal}
       onClose={onClose}
-      closeOnEsc={!resetDialogOpen}
+      closeOnEsc={!resetDialogOpen && !previewingOnboarding}
       panelClassName="w-full max-w-3xl h-[78vh] flex flex-col"
     >
             {/* Header */}
@@ -1708,6 +1714,30 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </button>
                       </div>
                     </div>
+
+                    {onPreviewOnboarding && (
+                      <div className="px-4 py-3.5 rounded-xl border border-zinc-200/85 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-8 w-8 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
+                            <Sparkles className="h-4 w-4" />
+                          </div>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                              启动引导动画
+                            </span>
+                            <InfoTip content="预览首次安装时的启动动画与引导界面，仅作效果演示，不会修改任何本地数据或账号配置。" />
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={onPreviewOnboarding}
+                          className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] shadow-tactile text-zinc-800 dark:text-zinc-100 text-xs font-medium shrink-0"
+                        >
+                          <Play className="h-3.5 w-3.5" />
+                          <span>预览动画</span>
+                        </button>
+                      </div>
+                    )}
 
                     <div className="px-4 py-3.5 rounded-xl border border-rose-200/85 dark:border-rose-500/20 bg-rose-50/35 dark:bg-rose-500/[0.03] flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3 min-w-0">

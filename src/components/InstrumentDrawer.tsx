@@ -320,7 +320,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
       {openDrawer && (
         <motion.div
           {...BACKDROP_MOTION}
-          className="fixed inset-0 z-40 bg-slate-900/30 dark:bg-black/65 backdrop-blur-[4px] flex justify-end no-print"
+          className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h,0px)] z-40 bg-slate-900/30 dark:bg-black/65 backdrop-blur-[4px] flex justify-end no-print"
           onClick={onClose}
         >
           <motion.div

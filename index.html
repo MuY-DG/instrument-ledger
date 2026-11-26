@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>监视与测量设备管理台账</title>
+    <script>
+      try {
+        var t = localStorage.getItem("instrument_ledger_theme_mode");
+        var isDark =
+          t === "dark" ||
+          ((!t || t === "system") &&
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (isDark) {
+          document.documentElement.classList.add("dark");
+          document.documentElement.style.colorScheme = "dark";
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body class="bg-[#fafafa] text-zinc-950 dark:bg-[#09090b] dark:text-zinc-50 antialiased selection:bg-indigo-500/20 selection:text-indigo-900 dark:selection:text-indigo-200">
     <div id="root"></div>
