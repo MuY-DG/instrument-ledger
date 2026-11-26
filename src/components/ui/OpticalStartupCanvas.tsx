@@ -1,32 +1,27 @@
-import React, { useEffect, useRef } from "react";
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+} from "react";
 
-interface OpticalStartupCanvasProps {
-  /** "intro" plays the full from-nothing VFX choreography; "welcome" | "setup" settles gently; "complete" triggers an emerald optical ripple */
-  phase: "intro" | "welcome" | "setup" | "complete";
-  /** Monotonic counter to replay the opening VFX if ever needed */
+export type OnboardingPhase = "intro" | "welcome" | "setup" | "complete";
+
+export interface OpticalStartupHandle {
+  /** Replay the central vertical light-slit ignition & outward prism bar rush */
+  replay: () => void;
+  /** Trigger a soft horizontal harmonic light ripple across the vertical bars */
+  flash: (normX?: number, normY?: number) => void;
+}
+
+export interface OpticalStartupCanvasProps {
+  /** Lifecycle phase of the onboarding flow */
+  phase: OnboardingPhase;
+  /** Optional counter to force a fresh opening sequence */
   playKey?: number;
-}
-
-interface RibbonSpec {
-  baseAngle: number;
-  spinDir: number;
-  turns: number;
-  hue: string;
-  rgb: [number, number, number];
-  delay: number;
-  duration: number;
-  width: number;
-}
-
-interface DustSpec {
-  angle: number;
-  distFactor: number;
-  size: number;
-  speed: number;
-  rgb: [number, number, number];
-  burstAngle: number;
-  burstSpeed: number;
-  phase: number;
+  /** Foreground stage revealed via center-outward horizontal curtain mask in sync with parting bars */
+  revealTargetRef?: React.RefObject<HTMLElement | null>;
 }
 
 function clamp01(v: number): number {
@@ -43,514 +38,619 @@ function easeOutQuart(t: number): number {
   return 1 - x * x * x * x;
 }
 
-function easeInOutQuart(t: number): number {
+function easeInOutCubic(t: number): number {
   const x = clamp01(t);
-  return x < 0.5 ? 8 * x * x * x * x : 1 - Math.pow(-2 * x + 2, 4) / 2;
+  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
 }
 
 /**
- * 60fps HiDPI Light-Mode Optical VFX Engine
- *
- * Starts from pure serene porcelain emptiness (t = 0) and choreographs:
- * 1. Center optical ignition & 4-point diffraction star flare (0.18s -> 1.45s)
- * 2. Six translucent prism silk ribbons spiraling inward to the focal point (0.30s -> 1.50s)
- * 3. Fine prism dust particles converging & blooming gently on convergence (0.35s -> 2.85s)
- * 4. Three chromatic caustic light ripples sweeping outward, briefly illuminating a micro-dot field (1.30s -> 2.90s)
- * 5. Diagonal 45° glass specular light sweep across the viewport (1.55s -> 2.45s)
- * 6. Dissolves into pure whisper-soft daylight stillness, then halts rAF to keep idle CPU at 0%.
+ * Custom perspective acceleration curve for Netflix "Spectra"-style ribbon expansion:
+ * begins poised at the center slit, accelerates briskly past the periphery, and settles silkily.
  */
-export const OpticalStartupCanvas: React.FC<OpticalStartupCanvasProps> = ({
-  phase,
-  playKey = 0,
-}) => {
+function easePrismZoom(t: number): number {
+  const x = clamp01(t);
+  if (x <= 0) return 0;
+  if (x >= 1) return 1;
+  return 1 - Math.pow(1 - x, 3.4);
+}
+
+const VERTEX_SHADER_SRC = `
+attribute vec2 aPos;
+void main() {
+  gl_Position = vec4(aPos, 0.0, 1.0);
+}
+`;
+
+/**
+ * Pure WebGL Fragment Shader — Netflix "Spectra" Vertical Slit-Split × React Bits Pro `Gradient Bars`
+ *
+ * Palette: Ultra-low-saturation Micro-Prism Pearl
+ * - Dominant (~85%): Warm Alabaster / Pearl White (#F6F4F1) & Brushed Silver-Grey on Velvet Obsidian (#09090B)
+ * - Micro-Prism Dispersion (~15%): Whisper-light Warm Champagne (#F6E8D5) & Misty Dusk Lavender (#E5DDF4)
+ * - Zero dot-matrix, zero HUD overlays, zero cyan/blue or heavy saturated colors.
+ */
+const FRAGMENT_SHADER_SRC = `
+precision highp float;
+
+uniform vec2 uCssSize;
+uniform float uDpr;
+uniform float uTime;
+uniform float uSlitIgnite;    // 0..1 vertical ignition of central optical filament
+uniform float uSlitFade;      // 1..0 dissolve of central filament as bars part
+uniform float uZoom;          // 0.03..1.0 outward perspective expansion into Gradient Bars
+uniform float uRushEnv;       // 0..1 bell envelope of opening Netflix spectral silk rush
+uniform float uSettleEnv;     // 0..1 settled Gradient Bars wave presence
+uniform vec2 uStageMix;       // x: setupDim [0..1], y: completeGlow [0..1]
+uniform vec2 uPointer;        // smoothed normalized pointer [0..1]
+uniform vec3 uRipple;         // x: center normX, y: age sec, z: strength [0..1]
+
+float hash11(float p) {
+  p = fract(p * 0.1031);
+  p *= p + 33.33;
+  p *= p + p;
+  return fract(p);
+}
+
+float hash21(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+
+void main() {
+  vec2 p = vec2(gl_FragCoord.x / uDpr, gl_FragCoord.y / uDpr);
+  vec2 uv = p / max(uCssSize, vec2(1.0));
+
+  // Signed & mirrored horizontal coordinate: 0 at center, 1 at left/right viewport edges
+  float sx = (uv.x - 0.5) * 2.0;
+  float ax = abs(sx);
+  float sideSeed = sx >= 0.0 ? 17.0 : 53.0;
+
+  float setupDim = uStageMix.x;
+  float completeGlow = uStageMix.y;
+
+  // =========================================================================
+  // PALETTE: Velvet Obsidian + Pearl Alabaster + Whisper Champagne & Lavender
+  // =========================================================================
+  vec3 bgCol = vec3(0.035, 0.035, 0.041);          // #09090b neutral velvet dark
+  vec3 pearlWhite = vec3(0.968, 0.957, 0.942);     // #F7F4F0 warm gallery pearl
+  vec3 silverMid = vec3(0.585, 0.576, 0.592);      // brushed silver-grey
+  vec3 champagneMist = vec3(0.965, 0.902, 0.820);  // ultra-soft champagne sheen
+  vec3 lavenderMist = vec3(0.886, 0.855, 0.952);   // ultra-soft iris/lavender mist
+  vec3 roseWhisper = vec3(0.952, 0.882, 0.896);    // faint rose-pearl refraction
+
+  vec3 col = bgCol;
+
+  // =========================================================================
+  // 1. CENTRAL VERTICAL OPTICAL FILAMENT (t = 0.08s -> 1.45s)
+  //    Ignites vertically from center like Neon Reveal, then splits apart
+  // =========================================================================
+  if (uSlitIgnite > 0.002 && uSlitFade > 0.002) {
+    float halfH = 0.44 * uSlitIgnite;
+    float dySlit = max(abs(uv.y - 0.5) - halfH, 0.0);
+    float dxPx = abs(p.x - uCssSize.x * 0.5);
+    float dyPx = dySlit * uCssSize.y;
+    float dSlit = length(vec2(dxPx, dyPx));
+
+    float vertTaper = smoothstep(0.49, 0.12, abs(uv.y - 0.5));
+    float slitCore = exp(-pow(dSlit / 1.6, 2.0)) * vertTaper;
+    float slitHalo = exp(-dSlit / 14.0) * 0.52 * vertTaper;
+    float slitAtmos = exp(-dSlit / 68.0) * 0.22 * vertTaper;
+
+    // Subtle chromatic dispersion across left/right edges of the central slit
+    vec3 slitTint = mix(champagneMist, lavenderMist, smoothstep(-18.0, 18.0, p.x - uCssSize.x * 0.5));
+    vec3 slitHaloCol = mix(pearlWhite, slitTint, 0.35);
+
+    col += slitHaloCol * ((slitHalo + slitAtmos) * uSlitFade);
+    col += pearlWhite * (slitCore * uSlitFade * 0.95);
+  }
+
+  // =========================================================================
+  // 2. PERSPECTIVE PRISM COORDINATE MAPPING (Netflix Zoom -> Gradient Bars)
+  //    As uZoom expands 0.035 -> 1.0, central compressed bars rush outward
+  //    and lock seamlessly into 18 symmetrical mirrored vertical columns.
+  // =========================================================================
+  float zoom = max(uZoom, 0.025);
+  float srcX = ax / zoom;
+  // Soft outer horizon fade while prism is still expanding inside viewport
+  float expandBound = 1.0 - smoothstep(0.92, 1.18, srcX);
+
+  // Bar tiling: 9 mirrored columns per side -> 18 symmetrical columns across screen
+  float barCount = 9.0;
+  float scaledBar = srcX * barCount;
+  float barIdx = floor(min(scaledBar, barCount - 0.001));
+  float barFract = fract(scaledBar);
+  float normBar = barIdx / barCount;
+
+  // Architectural column profile: crisp column edge step + subtle faceted glass taper
+  float seamMask = smoothstep(0.0, 0.028, barFract) * smoothstep(1.0, 0.972, barFract);
+  float glassFlute = 0.74 + 0.26 * (1.0 - barFract * 0.75);
+  // Crisp optical rim highlight along the inner bar edge facing center
+  float innerRim = exp(-barFract / 0.075) * 0.42;
+
+  // =========================================================================
+  // 3. GRADIENT BARS TRAVELING WAVE DYNAMICS
+  //    Ease-In vertical luminance waves create deep velvet troughs & luminous
+  //    pearl crests staggered across neighboring columns (React Bits Gradient Bars)
+  // =========================================================================
+  float invWave = sin(uTime * 0.18);
+  float ptrShift = (uPointer.x - 0.5) * (sx >= 0.0 ? 0.95 : -0.95) + (uPointer.y - 0.5) * 0.48;
+  float oddAlt = mod(barIdx, 2.0) * 0.52;
+
+  float waveArg = (1.0 - uv.y) * 2.45
+    - uTime * (0.34 * invWave + 0.14)
+    + normBar * 4.1
+    + oddAlt
+    + ptrShift;
+
+  float rawWave = 0.5 + 0.5 * sin(waveArg);
+  // Ease-In power curves: deep dark troughs + sculptural luminous wave crests
+  float gradBody = pow(max(rawWave, 0.0001), 2.15);
+  float gradCrest = pow(max(rawWave, 0.0001), 6.2);
+  float barWave = gradBody * 0.56 + gradCrest * 0.44;
+
+  // Soft vertical stage vignette so columns emerge smoothly from velvet top/bottom
+  float vertVignette = smoothstep(0.0, 0.18, uv.y) * smoothstep(1.0, 0.82, uv.y);
+  vertVignette = mix(0.22, 1.0, vertVignette);
+
+  // Gentle center calm zone so foreground emblem, title & setup card stay ultra-legible
+  float centerCalm = mix(
+    0.72 + 0.28 * smoothstep(0.05, 0.48, ax),
+    0.42 + 0.58 * smoothstep(0.16, 0.65, ax),
+    setupDim
+  );
+
+  // Interactive click ripple & completion uplift wave
+  float rippleBoost = 0.0;
+  if (uRipple.z > 0.004) {
+    float rDist = abs(uv.x - uRipple.x);
+    float rFront = uRipple.y * 0.85;
+    rippleBoost = exp(-pow((rDist - rFront) / 0.085, 2.0)) * uRipple.z * 0.36;
+  }
+
+  float completeSweep = completeGlow * (0.45 + 0.55 * sin(uv.y * 3.14159 - uTime * 1.4)) * 0.18;
+
+  // Micro-prism dispersion tint per bar (whisper-light champagne <-> pearl <-> misty lavender)
+  float prismWave = sin(normBar * 4.4 + (sx >= 0.0 ? 0.38 : -0.38) - uTime * 0.12);
+  vec3 prismTint = prismWave >= 0.0
+    ? mix(pearlWhite, champagneMist, prismWave * 0.9)
+    : mix(pearlWhite, lavenderMist, (-prismWave) * 0.9);
+  prismTint = mix(prismTint, roseWhisper, gradCrest * 0.25);
+
+  // Keep saturation airy & refined: pearl-alabaster core with subtle champagne/lavender kiss
+  float tintAmount = clamp(0.26 + innerRim * 0.42 + uRushEnv * 0.28, 0.0, 0.58);
+  vec3 barColor = mix(mix(silverMid, pearlWhite, gradCrest * 0.8 + 0.2), prismTint, tintAmount);
+
+  // Sculptural Gradient Bars luminance (~0.36 peak crest in welcome, ~0.21 in setup)
+  float baseLum = (barWave * 0.35 + innerRim * gradBody * 0.14 + rippleBoost + completeSweep)
+    * seamMask
+    * glassFlute
+    * vertVignette
+    * centerCalm
+    * expandBound
+    * uSettleEnv
+    * mix(1.0, 0.58, setupDim);
+
+  col += barColor * baseLum;
+
+  // =========================================================================
+  // 4. NETFLIX "SPECTRA" FINE SILK RIBBON RUSH (Opening 0.36s -> 2.30s only)
+  //    Dozens of gossamer vertical light threads fanning past left & right
+  // =========================================================================
+  if (uRushEnv > 0.003 && expandBound > 0.001) {
+    float fineScale = srcX * 27.0;
+    float fineIdx = floor(fineScale);
+    float fineFract = fract(fineScale);
+
+    float hA = hash11(fineIdx + sideSeed);
+    float hB = hash11(fineIdx * 1.73 + sideSeed + 9.2);
+
+    // Crisp vertical silk filament profile
+    float filament = smoothstep(0.0, 0.12, fineFract) * smoothstep(1.0, 0.88, fineFract);
+    float coreThread = exp(-pow((fineFract - 0.5) / 0.15, 2.0));
+
+    // Vertical light-streak window gliding along each ribbon
+    float streakCenter = 0.5 + (hB - 0.5) * 0.36 + sin(uTime * 1.5 + hA * 6.28) * 0.08;
+    float streakLen = 0.24 + hA * 0.34;
+    float vertStreak = exp(-pow((uv.y - streakCenter) / streakLen, 2.0));
+
+    // Outer ribbons gleam brighter as they fly past the camera periphery
+    float peripheryGain = 0.38 + 0.62 * smoothstep(0.03, 0.58, ax);
+    float ribbonEnergy = (filament * 0.36 + coreThread * 0.64)
+      * (0.38 + 0.62 * hA)
+      * vertStreak
+      * peripheryGain
+      * expandBound
+      * uRushEnv;
+
+    // Delicate alternating champagne / pearl / misty-lavender silk threads
+    vec3 threadTint = hB < 0.36
+      ? champagneMist
+      : (hB < 0.72 ? lavenderMist : roseWhisper);
+    vec3 threadCol = mix(pearlWhite, threadTint, 0.42);
+
+    col += threadCol * (ribbonEnergy * 0.86);
+  }
+
+  // Soft overhead ambient pearl veil so the upper stage breathes gently
+  float topVeil = exp(-pow((1.0 - uv.y) / 0.42, 2.0))
+    * exp(-pow(sx / 1.15, 2.0))
+    * 0.032
+    * (uSettleEnv + uRushEnv * 0.8)
+    * mix(1.0, 0.6, setupDim);
+  col += mix(champagneMist, lavenderMist, uv.x) * topVeil;
+
+  // Filmic anti-banding dither (essential for ultra-subtle low-saturation dark gradients)
+  float dither = (hash21(gl_FragCoord.xy + fract(uTime)) - 0.5) / 255.0;
+  col = clamp(col + dither, 0.0, 1.0);
+
+  gl_FragColor = vec4(col, 1.0);
+}
+`;
+
+function compileShader(
+  gl: WebGLRenderingContext,
+  type: number,
+  source: string
+): WebGLShader | null {
+  const shader = gl.createShader(type);
+  if (!shader) return null;
+  gl.shaderSource(shader, source);
+  gl.compileShader(shader);
+  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+    gl.deleteShader(shader);
+    return null;
+  }
+  return shader;
+}
+
+function createShaderProgram(gl: WebGLRenderingContext): WebGLProgram | null {
+  const vs = compileShader(gl, gl.VERTEX_SHADER, VERTEX_SHADER_SRC);
+  const fs = compileShader(gl, gl.FRAGMENT_SHADER, FRAGMENT_SHADER_SRC);
+  if (!vs || !fs) {
+    if (vs) gl.deleteShader(vs);
+    if (fs) gl.deleteShader(fs);
+    return null;
+  }
+  const prog = gl.createProgram();
+  if (!prog) {
+    gl.deleteShader(vs);
+    gl.deleteShader(fs);
+    return null;
+  }
+  gl.attachShader(prog, vs);
+  gl.attachShader(prog, fs);
+  gl.linkProgram(prog);
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+
+  if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+    gl.deleteProgram(prog);
+    return null;
+  }
+  return prog;
+}
+
+export const OpticalStartupCanvas = forwardRef<
+  OpticalStartupHandle,
+  OpticalStartupCanvasProps
+>(function OpticalStartupCanvas(
+  { phase, playKey = 0, revealTargetRef },
+  ref
+) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const phaseRef = useRef(phase);
+  const phaseRef = useRef<OnboardingPhase>(phase);
+
+  const seqStartRef = useRef<number>(0);
+  const skipSnapRef = useRef<boolean>(false);
+  const rippleRef = useRef<{
+    normX: number;
+    startSec: number;
+    active: boolean;
+  }>({ normX: 0.5, startSec: -99, active: false });
+
+  const pointerRef = useRef<{
+    normX: number;
+    normY: number;
+    smoothX: number;
+    smoothY: number;
+  }>({
+    normX: 0.5,
+    normY: 0.5,
+    smoothX: 0.5,
+    smoothY: 0.5,
+  });
 
   useEffect(() => {
+    const prev = phaseRef.current;
     phaseRef.current = phase;
+
+    if (prev === "intro" && (phase === "welcome" || phase === "setup")) {
+      const elapsed = (performance.now() - seqStartRef.current) / 1000;
+      if (elapsed < 1.9) {
+        skipSnapRef.current = true;
+      }
+    }
+
+    if (phase === "complete" && prev !== "complete") {
+      const elapsed = (performance.now() - seqStartRef.current) / 1000;
+      rippleRef.current = {
+        normX: 0.5,
+        startSec: elapsed,
+        active: true,
+      };
+    }
   }, [phase]);
+
+  const replay = useCallback(() => {
+    seqStartRef.current = performance.now();
+    skipSnapRef.current = false;
+    rippleRef.current.active = false;
+  }, []);
+
+  const flash = useCallback((normX = 0.5) => {
+    const elapsed = (performance.now() - seqStartRef.current) / 1000;
+    rippleRef.current = {
+      normX: clamp01(normX),
+      startSec: elapsed,
+      active: true,
+    };
+  }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      replay,
+      flash,
+    }),
+    [replay, flash]
+  );
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext("2d", { alpha: true });
-    if (!ctx) return;
+
+    const reducedMotion =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+
+    const gl = (canvas.getContext("webgl", {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+      powerPreference: "high-performance",
+    }) ||
+      canvas.getContext("experimental-webgl")) as WebGLRenderingContext | null;
+
+    const program = gl ? createShaderProgram(gl) : null;
+    const fallbackCtx = !program ? canvas.getContext("2d") : null;
+
+    let quadBuf: WebGLBuffer | null = null;
+    let uniforms: {
+      uCssSize: WebGLUniformLocation | null;
+      uDpr: WebGLUniformLocation | null;
+      uTime: WebGLUniformLocation | null;
+      uSlitIgnite: WebGLUniformLocation | null;
+      uSlitFade: WebGLUniformLocation | null;
+      uZoom: WebGLUniformLocation | null;
+      uRushEnv: WebGLUniformLocation | null;
+      uSettleEnv: WebGLUniformLocation | null;
+      uStageMix: WebGLUniformLocation | null;
+      uPointer: WebGLUniformLocation | null;
+      uRipple: WebGLUniformLocation | null;
+    } | null = null;
+
+    if (gl && program) {
+      gl.useProgram(program);
+      quadBuf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+      gl.bufferData(
+        gl.ARRAY_BUFFER,
+        new Float32Array([-1, -1, 1, -1, -1, 1, -1, 1, 1, -1, 1, 1]),
+        gl.STATIC_DRAW
+      );
+      const aPos = gl.getAttribLocation(program, "aPos");
+      gl.enableVertexAttribArray(aPos);
+      gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+      uniforms = {
+        uCssSize: gl.getUniformLocation(program, "uCssSize"),
+        uDpr: gl.getUniformLocation(program, "uDpr"),
+        uTime: gl.getUniformLocation(program, "uTime"),
+        uSlitIgnite: gl.getUniformLocation(program, "uSlitIgnite"),
+        uSlitFade: gl.getUniformLocation(program, "uSlitFade"),
+        uZoom: gl.getUniformLocation(program, "uZoom"),
+        uRushEnv: gl.getUniformLocation(program, "uRushEnv"),
+        uSettleEnv: gl.getUniformLocation(program, "uSettleEnv"),
+        uStageMix: gl.getUniformLocation(program, "uStageMix"),
+        uPointer: gl.getUniformLocation(program, "uPointer"),
+        uRipple: gl.getUniformLocation(program, "uRipple"),
+      };
+    }
 
     let width = window.innerWidth;
     let height = window.innerHeight;
     let dpr = Math.min(window.devicePixelRatio || 1, 2);
 
     const resize = () => {
-      width = window.innerWidth;
-      height = window.innerHeight;
+      width = Math.max(1, window.innerWidth);
+      height = Math.max(1, window.innerHeight);
       dpr = Math.min(window.devicePixelRatio || 1, 2);
-      canvas.width = Math.floor(width * dpr);
-      canvas.height = Math.floor(height * dpr);
+      const pxW = Math.floor(width * dpr);
+      const pxH = Math.floor(height * dpr);
+      canvas.width = pxW;
+      canvas.height = pxH;
       canvas.style.width = `${width}px`;
       canvas.style.height = `${height}px`;
+      if (gl && program) {
+        gl.viewport(0, 0, pxW, pxH);
+      }
     };
+
     resize();
     window.addEventListener("resize", resize);
 
-    // Pre-generate deterministic luminous ribbons (light-mode daylight prism palette)
-    const ribbons: RibbonSpec[] = [
-      {
-        baseAngle: -Math.PI * 0.85,
-        spinDir: 1,
-        turns: 1.15,
-        hue: "indigo",
-        rgb: [99, 102, 241],
-        delay: 0.28,
-        duration: 1.15,
-        width: 2.1,
-      },
-      {
-        baseAngle: Math.PI * 0.15,
-        spinDir: 1,
-        turns: 1.15,
-        hue: "sky",
-        rgb: [14, 165, 233],
-        delay: 0.34,
-        duration: 1.12,
-        width: 1.9,
-      },
-      {
-        baseAngle: -Math.PI * 0.35,
-        spinDir: -1,
-        turns: 1.05,
-        hue: "violet",
-        rgb: [139, 92, 246],
-        delay: 0.4,
-        duration: 1.08,
-        width: 1.6,
-      },
-      {
-        baseAngle: Math.PI * 0.65,
-        spinDir: -1,
-        turns: 1.05,
-        hue: "cyan",
-        rgb: [56, 189, 248],
-        delay: 0.44,
-        duration: 1.06,
-        width: 1.7,
-      },
-      {
-        baseAngle: Math.PI * 0.92,
-        spinDir: 1,
-        turns: 0.9,
-        hue: "slate",
-        rgb: [100, 116, 139],
-        delay: 0.38,
-        duration: 1.1,
-        width: 1.2,
-      },
-      {
-        baseAngle: -Math.PI * 0.08,
-        spinDir: -1,
-        turns: 0.9,
-        hue: "indigo-soft",
-        rgb: [129, 140, 248],
-        delay: 0.48,
-        duration: 1.02,
-        width: 1.3,
-      },
-    ];
+    const onPointerMove = (e: PointerEvent) => {
+      pointerRef.current.normX = clamp01(e.clientX / Math.max(1, width));
+      pointerRef.current.normY = clamp01(e.clientY / Math.max(1, height));
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
 
-    // Pre-generate 68 fine prism dust particles
-    const palette: Array<[number, number, number]> = [
-      [99, 102, 241],
-      [56, 189, 248],
-      [139, 92, 246],
-      [148, 163, 184],
-      [79, 70, 229],
-    ];
-    const dusts: DustSpec[] = Array.from({ length: 68 }, (_, i) => {
-      const golden = i * 2.3999632297;
-      const frac = (i + 0.5) / 68;
-      return {
-        angle: golden,
-        distFactor: 0.24 + frac * 0.58,
-        size: 1.1 + (i % 4) * 0.55,
-        speed: 0.78 + (i % 5) * 0.1,
-        rgb: palette[i % palette.length],
-        burstAngle: golden + (i % 2 === 0 ? 0.45 : -0.45),
-        burstSpeed: 0.26 + ((i * 17) % 10) * 0.055,
-        phase: (i * 0.618) % 1,
-      };
-    });
+    seqStartRef.current = performance.now();
+    skipSnapRef.current = false;
 
-    const startMs = performance.now();
+    let smoothSetupDim = phaseRef.current === "setup" ? 1 : 0;
+    let smoothCompleteGlow = phaseRef.current === "complete" ? 1 : 0;
+    let maskCleared = false;
     let rafId = 0;
     let running = true;
 
-    const renderFrame = (nowMs: number) => {
-      if (!running || phaseRef.current === "complete") return;
-      const t = (nowMs - startMs) / 1000;
-      const currentPhase = phaseRef.current;
-
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-
-      const cx = width * 0.5;
-      const cy = height * 0.5;
-      const maxDim = Math.hypot(width, height);
-      const minDim = Math.min(width, height);
-
-      // ------------------------------------------------------------------
-      // 1. Ambient Daylight Prism Caustic Wash (gently blooms from 0.16s)
-      // ------------------------------------------------------------------
-      const washIn = easeOutCubic((t - 0.16) / 1.1);
-      const washSettle =
-        currentPhase === "setup" ? 0.52 : currentPhase === "welcome" ? 0.68 : 1.0;
-      const driftX = Math.sin(t * 0.45) * 26;
-      const driftY = Math.cos(t * 0.35) * 18;
-
-      if (washIn > 0.001) {
-        // Primary pearl-indigo daylight bloom
-        const r1 = minDim * (0.42 + washIn * 0.28);
-        const g1 = ctx.createRadialGradient(
-          cx + driftX,
-          cy - 24 + driftY,
-          0,
-          cx + driftX,
-          cy - 24 + driftY,
-          r1
-        );
-        g1.addColorStop(0, `rgba(129, 140, 248, ${0.13 * washIn * washSettle})`);
-        g1.addColorStop(0.42, `rgba(186, 230, 253, ${0.09 * washIn * washSettle})`);
-        g1.addColorStop(1, "rgba(255, 255, 255, 0)");
-        ctx.fillStyle = g1;
-        ctx.fillRect(0, 0, width, height);
-
-        // Secondary warm champagne-sky counter-wash
-        const r2 = minDim * 0.5;
-        const g2 = ctx.createRadialGradient(
-          cx - driftX * 1.2 + minDim * 0.14,
-          cy + 40 - driftY,
-          0,
-          cx - driftX * 1.2 + minDim * 0.14,
-          cy + 40 - driftY,
-          r2
-        );
-        g2.addColorStop(0, `rgba(224, 231, 255, ${0.14 * washIn * washSettle})`);
-        g2.addColorStop(0.55, `rgba(254, 243, 199, ${0.06 * washIn * washSettle})`);
-        g2.addColorStop(1, "rgba(255, 255, 255, 0)");
-        ctx.fillStyle = g2;
-        ctx.fillRect(0, 0, width, height);
-      }
-
-      // Skip opening burst layers if user clicked Skip straight into welcome/setup
-      const introActive = t < 3.45 && currentPhase !== "setup";
-
-      if (introActive) {
-        // ------------------------------------------------------------------
-        // 2. Optical Seed Ignition & 4-Point Diffraction Flare (0.16s -> 1.65s)
-        // ------------------------------------------------------------------
-        if (t >= 0.16 && t <= 1.75) {
-          const rise = easeOutCubic((t - 0.16) / 0.42);
-          const peakPulse =
-            t >= 1.24 ? Math.exp(-Math.pow((t - 1.35) / 0.16, 2)) * 0.85 : 0;
-          const fadeOut = 1 - easeOutCubic((t - 1.38) / 0.36);
-          const alpha = clamp01(rise * fadeOut + peakPulse * fadeOut);
-
-          if (alpha > 0.004) {
-            // Soft core bloom
-            const coreR = 14 + rise * 28 + peakPulse * 46;
-            const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, coreR);
-            cg.addColorStop(0, `rgba(255, 255, 255, ${0.95 * alpha})`);
-            cg.addColorStop(0.35, `rgba(99, 102, 241, ${0.38 * alpha})`);
-            cg.addColorStop(0.7, `rgba(56, 189, 248, ${0.14 * alpha})`);
-            cg.addColorStop(1, "rgba(255, 255, 255, 0)");
-            ctx.fillStyle = cg;
-            ctx.beginPath();
-            ctx.arc(cx, cy, coreR, 0, Math.PI * 2);
-            ctx.fill();
-
-            // Horizontal & vertical razor-sharp optical lens diffraction spikes
-            const spikeLenX = (36 + rise * 78 + peakPulse * 95) * alpha;
-            const spikeLenY = (24 + rise * 52 + peakPulse * 64) * alpha;
-
-            const drawSpike = (dx: number, dy: number, thickness: number) => {
-              const lg = ctx.createLinearGradient(
-                cx - dx,
-                cy - dy,
-                cx + dx,
-                cy + dy
-              );
-              lg.addColorStop(0, "rgba(99, 102, 241, 0)");
-              lg.addColorStop(0.35, `rgba(99, 102, 241, ${0.26 * alpha})`);
-              lg.addColorStop(0.5, `rgba(255, 255, 255, ${0.95 * alpha})`);
-              lg.addColorStop(0.65, `rgba(14, 165, 233, ${0.26 * alpha})`);
-              lg.addColorStop(1, "rgba(14, 165, 233, 0)");
-              ctx.strokeStyle = lg;
-              ctx.lineWidth = thickness;
-              ctx.lineCap = "round";
-              ctx.beginPath();
-              ctx.moveTo(cx - dx, cy - dy);
-              ctx.lineTo(cx + dx, cy + dy);
-              ctx.stroke();
-            };
-
-            drawSpike(spikeLenX, 0, 1.4);
-            drawSpike(0, spikeLenY, 1.2);
-          }
-        }
-
-        // ------------------------------------------------------------------
-        // 3. Six Translucent Luminous Silk Ribbons Spiraling Inward (0.28s -> 1.65s)
-        // ------------------------------------------------------------------
-        const maxOrbitR = minDim * 0.44;
-        for (const r of ribbons) {
-          const local = (t - r.delay) / r.duration;
-          if (local <= 0 || local >= 1.15) continue;
-
-          const head = easeInOutQuart(clamp01(local));
-          const tail = easeInOutQuart(clamp01(local - 0.34));
-          const envAlpha =
-            clamp01(local / 0.16) * (1 - clamp01((local - 0.88) / 0.25));
-          if (envAlpha <= 0.004 || head <= tail) continue;
-
-          const steps = 26;
-          const [cr, cg, cb] = r.rgb;
-          for (let s = 0; s < steps; s++) {
-            const f0 = tail + ((head - tail) * s) / steps;
-            const f1 = tail + ((head - tail) * (s + 1)) / steps;
-            const segAlpha = Math.pow(s / steps, 1.6) * envAlpha * 0.46;
-
-            const rad0 = maxOrbitR * Math.pow(1 - f0, 1.35);
-            const ang0 = r.baseAngle + r.spinDir * f0 * Math.PI * 2 * r.turns;
-            const x0 = cx + Math.cos(ang0) * rad0;
-            const y0 = cy + Math.sin(ang0) * rad0 * 0.86;
-
-            const rad1 = maxOrbitR * Math.pow(1 - f1, 1.35);
-            const ang1 = r.baseAngle + r.spinDir * f1 * Math.PI * 2 * r.turns;
-            const x1 = cx + Math.cos(ang1) * rad1;
-            const y1 = cy + Math.sin(ang1) * rad1 * 0.86;
-
-            ctx.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, ${segAlpha})`;
-            ctx.lineWidth = r.width * (0.45 + 0.75 * (s / steps));
-            ctx.lineCap = "round";
-            ctx.beginPath();
-            ctx.moveTo(x0, y0);
-            ctx.lineTo(x1, y1);
-            ctx.stroke();
-          }
-
-          // Bright leading bead on each light ribbon
-          const headRad = maxOrbitR * Math.pow(1 - head, 1.35);
-          const headAng = r.baseAngle + r.spinDir * head * Math.PI * 2 * r.turns;
-          const hx = cx + Math.cos(headAng) * headRad;
-          const hy = cy + Math.sin(headAng) * headRad * 0.86;
-
-          const beadGlow = ctx.createRadialGradient(hx, hy, 0, hx, hy, 9);
-          beadGlow.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, ${0.72 * envAlpha})`);
-          beadGlow.addColorStop(1, `rgba(${cr}, ${cg}, ${cb}, 0)`);
-          ctx.fillStyle = beadGlow;
-          ctx.beginPath();
-          ctx.arc(hx, hy, 9, 0, Math.PI * 2);
-          ctx.fill();
-        }
-
-        // ------------------------------------------------------------------
-        // 4. Chromatic Caustic Ripples + Ephemeral Micro-Dot Scan Field (1.30s -> 2.95s)
-        // ------------------------------------------------------------------
-        const rippleStarts = [1.3, 1.46, 1.66];
-        const rippleColors: Array<[number, number, number]> = [
-          [79, 70, 229],
-          [14, 165, 233],
-          [148, 163, 184],
-        ];
-        let primaryWaveR = -1;
-        let primaryWaveAlpha = 0;
-
-        rippleStarts.forEach((rStart, idx) => {
-          const dur = 1.25 + idx * 0.14;
-          const u = (t - rStart) / dur;
-          if (u <= 0 || u >= 1) return;
-
-          const eased = easeOutQuart(u);
-          const radius = 20 + eased * maxDim * 0.54;
-          const alpha = (1 - u) * (1 - u) * (idx === 0 ? 0.36 : 0.22);
-
-          if (idx === 0) {
-            primaryWaveR = radius;
-            primaryWaveAlpha = 1 - u;
-          }
-
-          const [cr, cg, cb] = rippleColors[idx];
-          // Outer soft halo stroke
-          ctx.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, ${alpha * 0.45})`;
-          ctx.lineWidth = idx === 0 ? 7 * (1 - u * 0.6) : 3.5;
-          ctx.beginPath();
-          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-          ctx.stroke();
-
-          // Inner razor hairline caustic edge
-          ctx.strokeStyle = `rgba(${cr}, ${cg}, ${cb}, ${alpha})`;
-          ctx.lineWidth = idx === 0 ? 1.3 : 1;
-          ctx.beginPath();
-          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-          ctx.stroke();
-        });
-
-        // Ephemeral precision dot matrix briefly illuminated ONLY where the primary optical ripple passes!
-        if (primaryWaveR > 0 && primaryWaveAlpha > 0.02) {
-          const spacing = 36;
-          const bandWidth = 86;
-          const cols = Math.ceil(width / spacing);
-          const rows = Math.ceil(height / spacing);
-          const offsetX = (width - cols * spacing) * 0.5;
-          const offsetY = (height - rows * spacing) * 0.5;
-
-          for (let gy = 0; gy <= rows; gy++) {
-            const py = offsetY + gy * spacing;
-            const dy = py - cy;
-            for (let gx = 0; gx <= cols; gx++) {
-              const px = offsetX + gx * spacing;
-              const dist = Math.hypot(px - cx, dy);
-              const delta = Math.abs(dist - primaryWaveR);
-              if (delta < bandWidth) {
-                const waveIntensity =
-                  Math.cos((delta / bandWidth) * Math.PI * 0.5) *
-                  primaryWaveAlpha;
-                if (waveIntensity > 0.03) {
-                  ctx.fillStyle = `rgba(79, 70, 229, ${waveIntensity * 0.24})`;
-                  ctx.beginPath();
-                  ctx.arc(px, py, 1.15 + waveIntensity * 0.65, 0, Math.PI * 2);
-                  ctx.fill();
-                }
-              }
-            }
-          }
-        }
-
-        // ------------------------------------------------------------------
-        // 5. Fine Prism Dust Particles (Inward convergence -> gentle crystalline drift)
-        // ------------------------------------------------------------------
-        if (t >= 0.3 && t <= 3.1) {
-          const convergeEnd = 1.36;
-          for (const d of dusts) {
-            const [cr, cg, cb] = d.rgb;
-            if (t < convergeEnd) {
-              const u = clamp01((t - 0.3) / (convergeEnd - 0.3));
-              const e = easeInOutQuart(u);
-              const dist = maxDim * 0.45 * d.distFactor * (1 - e * 0.94);
-              const ang = d.angle + e * 1.45 * d.speed;
-              const px = cx + Math.cos(ang) * dist;
-              const py = cy + Math.sin(ang) * dist * 0.88;
-              const alpha = clamp01(u / 0.25) * 0.45;
-              ctx.fillStyle = `rgba(${cr}, ${cg}, ${cb}, ${alpha})`;
-              ctx.beginPath();
-              ctx.arc(px, py, d.size * (0.7 + 0.4 * e), 0, Math.PI * 2);
-              ctx.fill();
-            } else {
-              const u = clamp01((t - convergeEnd) / 1.65);
-              const e = easeOutCubic(u);
-              const dist = 32 + e * minDim * 0.44 * d.burstSpeed * 2.1;
-              const ang = d.burstAngle + e * 0.35;
-              const px = cx + Math.cos(ang) * dist;
-              const py = cy + Math.sin(ang) * dist * 0.9;
-              const alpha = (1 - u) * (1 - u) * 0.42;
-              if (alpha > 0.01) {
-                ctx.fillStyle = `rgba(${cr}, ${cg}, ${cb}, ${alpha})`;
-                ctx.beginPath();
-                ctx.arc(px, py, d.size * (1 - u * 0.35), 0, Math.PI * 2);
-                ctx.fill();
-              }
-            }
-          }
-        }
-
-        // ------------------------------------------------------------------
-        // 6. 45° Diagonal Glass Specular Light Sweep (1.52s -> 2.48s)
-        // ------------------------------------------------------------------
-        if (t >= 1.52 && t <= 2.55) {
-          const u = clamp01((t - 1.52) / 0.98);
-          const e = easeInOutQuart(u);
-          const sweepX = -width * 0.35 + e * width * 1.7;
-          const alpha = Math.sin(u * Math.PI) * 0.45;
-
-          ctx.save();
-          ctx.translate(sweepX, height * 0.5);
-          ctx.rotate(-0.42);
-          const sg = ctx.createLinearGradient(-150, 0, 150, 0);
-          sg.addColorStop(0, "rgba(255, 255, 255, 0)");
-          sg.addColorStop(0.35, `rgba(255, 255, 255, ${alpha * 0.65})`);
-          sg.addColorStop(0.5, `rgba(255, 255, 255, ${alpha})`);
-          sg.addColorStop(0.65, `rgba(224, 231, 255, ${alpha * 0.55})`);
-          sg.addColorStop(1, "rgba(255, 255, 255, 0)");
-          ctx.fillStyle = sg;
-          ctx.fillRect(-150, -maxDim, 300, maxDim * 2);
-          ctx.restore();
-        }
-      }
-
-      // Keep running smoothly during VFX and gently settle; pause rAF when fully idle to save CPU
-      if (t < 4.2) {
-        rafId = window.requestAnimationFrame(renderFrame);
+    const clearForegroundMask = () => {
+      const el = revealTargetRef?.current;
+      if (el && !maskCleared) {
+        el.style.maskImage = "";
+        el.style.webkitMaskImage = "";
+        maskCleared = true;
       }
     };
 
-    rafId = window.requestAnimationFrame(renderFrame);
+    const render = (nowMs: number) => {
+      if (!running) return;
+
+      const t = (nowMs - seqStartRef.current) / 1000;
+      const curPhase = phaseRef.current;
+      const snapped = skipSnapRef.current || reducedMotion;
+
+      smoothSetupDim +=
+        ((curPhase === "setup" ? 1 : 0) - smoothSetupDim) * 0.07;
+      smoothCompleteGlow +=
+        ((curPhase === "complete" ? 1 : 0) - smoothCompleteGlow) * 0.075;
+
+      const ptr = pointerRef.current;
+      ptr.smoothX += (ptr.normX - ptr.smoothX) * 0.06;
+      ptr.smoothY += (ptr.normY - ptr.smoothY) * 0.06;
+
+      // Choreography envelopes:
+      // 1) Central vertical slit ignites (0.06s -> 0.50s) & dissolves as ribbons part (0.56s -> 1.42s)
+      const slitIgnite = snapped ? 1 : easeOutCubic((t - 0.06) / 0.44);
+      const slitFade = snapped ? 0 : 1 - easeInOutCubic((t - 0.56) / 0.86);
+
+      // 2) Netflix "Spectra" outward perspective zoom (0.36s -> 2.15s) -> locks at 1.0
+      const zoomProgress = snapped ? 1 : easePrismZoom((t - 0.36) / 1.78);
+      const zoom = 0.032 + 0.968 * zoomProgress;
+
+      // 3) Fine spectral silk rush bell-curve (rises 0.36s -> 0.92s, exhales smoothly -> 2.35s)
+      const rushIn = easeOutCubic((t - 0.36) / 0.52);
+      const rushOut = 1 - easeInOutCubic((t - 1.05) / 1.32);
+      const rushEnv = snapped ? 0 : clamp01(rushIn * rushOut);
+
+      // 4) Settled Gradient Bars presence
+      const settleEnv = snapped ? 1 : easeOutQuart((t - 0.52) / 1.65);
+
+      // 5) Synchronized horizontal center-outward curtain reveal on foreground UI
+      const targetEl = revealTargetRef?.current;
+      if (targetEl) {
+        if (snapped || curPhase === "setup" || curPhase === "complete" || t > 2.25) {
+          clearForegroundMask();
+        } else {
+          maskCleared = false;
+          const openProg = easeOutQuart((t - 0.62) / 1.48);
+          const innerHalf = openProg * 64;
+          const outerHalf = innerHalf + 20;
+          const lOut = Math.max(0, 50 - outerHalf).toFixed(1);
+          const lIn = Math.max(0, 50 - innerHalf).toFixed(1);
+          const rIn = Math.min(100, 50 + innerHalf).toFixed(1);
+          const rOut = Math.min(100, 50 + outerHalf).toFixed(1);
+          const maskCss = `linear-gradient(to right, rgba(0,0,0,0) ${lOut}%, rgba(0,0,0,1) ${lIn}%, rgba(0,0,0,1) ${rIn}%, rgba(0,0,0,0) ${rOut}%)`;
+          targetEl.style.maskImage = maskCss;
+          targetEl.style.webkitMaskImage = maskCss;
+        }
+      }
+
+      // Click / completion horizontal wave ripple
+      let rippleAge = 0;
+      let rippleStrength = 0;
+      if (rippleRef.current.active) {
+        rippleAge = Math.max(0, t - rippleRef.current.startSec);
+        if (rippleAge < 1.5) {
+          rippleStrength = Math.pow(1 - rippleAge / 1.5, 1.7);
+        } else {
+          rippleRef.current.active = false;
+        }
+      }
+
+      if (gl && program && uniforms) {
+        gl.useProgram(program);
+        gl.uniform2f(uniforms.uCssSize, width, height);
+        gl.uniform1f(uniforms.uDpr, dpr);
+        gl.uniform1f(uniforms.uTime, reducedMotion ? 3.2 : t);
+        gl.uniform1f(uniforms.uSlitIgnite, slitIgnite);
+        gl.uniform1f(uniforms.uSlitFade, slitFade);
+        gl.uniform1f(uniforms.uZoom, zoom);
+        gl.uniform1f(uniforms.uRushEnv, rushEnv);
+        gl.uniform1f(uniforms.uSettleEnv, settleEnv);
+        gl.uniform2f(uniforms.uStageMix, smoothSetupDim, smoothCompleteGlow);
+        gl.uniform2f(uniforms.uPointer, ptr.smoothX, ptr.smoothY);
+        gl.uniform3f(
+          uniforms.uRipple,
+          rippleRef.current.normX,
+          rippleAge,
+          rippleStrength
+        );
+        gl.drawArrays(gl.TRIANGLES, 0, 6);
+      } else if (fallbackCtx) {
+        fallbackCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        fallbackCtx.fillStyle = "#09090b";
+        fallbackCtx.fillRect(0, 0, width, height);
+
+        const totalBars = 18;
+        const barW = width / totalBars;
+        for (let i = 0; i < totalBars; i++) {
+          const mirrorIdx = i < 9 ? 8 - i : i - 9;
+          const wave =
+            0.5 + 0.5 * Math.sin(t * 0.35 + (mirrorIdx / 9) * 3.8);
+          const alpha =
+            (0.04 + Math.pow(wave, 1.8) * 0.12) *
+            settleEnv *
+            (1 - smoothSetupDim * 0.45);
+          const g = fallbackCtx.createLinearGradient(0, 0, 0, height);
+          const tint =
+            mirrorIdx % 2 === 0 ? "246, 232, 213" : "229, 221, 244";
+          g.addColorStop(0, "rgba(9, 9, 11, 0)");
+          g.addColorStop(0.5, `rgba(${tint}, ${alpha})`);
+          g.addColorStop(1, "rgba(9, 9, 11, 0)");
+          fallbackCtx.fillStyle = g;
+          fallbackCtx.fillRect(i * barW + 1, 0, Math.max(1, barW - 2), height);
+        }
+      }
+
+      if (!reducedMotion || t < 0.2) {
+        rafId = window.requestAnimationFrame(render);
+      }
+    };
+
+    rafId = window.requestAnimationFrame(render);
 
     return () => {
       running = false;
       window.cancelAnimationFrame(rafId);
       window.removeEventListener("resize", resize);
+      window.removeEventListener("pointermove", onPointerMove);
+      clearForegroundMask();
+      if (gl) {
+        if (quadBuf) gl.deleteBuffer(quadBuf);
+        if (program) gl.deleteProgram(program);
+      }
     };
-  }, [playKey]);
-
-  // Wake one-shot ripple animation when phase transitions to "complete"
-  useEffect(() => {
-    if (phase !== "complete") return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d", { alpha: true });
-    if (!ctx) return;
-
-    const start = performance.now();
-    let raf = 0;
-    const drawCompleteWave = (now: number) => {
-      const ct = (now - start) / 1000;
-      if (ct > 1.15) return;
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, width, height);
-
-      const cx = width * 0.5;
-      const cy = height * 0.5;
-      const maxDim = Math.hypot(width, height);
-      const u = clamp01(ct / 1.05);
-      const e = easeOutQuart(u);
-
-      // Soft emerald-pearl ambient glow
-      const bg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(width, height) * 0.45);
-      bg.addColorStop(0, `rgba(16, 185, 129, ${0.09 * (1 - u * 0.5)})`);
-      bg.addColorStop(1, "rgba(255, 255, 255, 0)");
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, width, height);
-
-      const rad = 24 + e * maxDim * 0.45;
-      const alpha = (1 - u) * (1 - u) * 0.34;
-      ctx.strokeStyle = `rgba(16, 185, 129, ${alpha})`;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath();
-      ctx.arc(cx, cy, rad, 0, Math.PI * 2);
-      ctx.stroke();
-
-      raf = window.requestAnimationFrame(drawCompleteWave);
-    };
-    raf = window.requestAnimationFrame(drawCompleteWave);
-    return () => window.cancelAnimationFrame(raf);
-  }, [phase]);
+  }, [playKey, revealTargetRef]);
 
   return (
-    <canvas
-      ref={canvasRef}
+    <div
       aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-0"
-    />
+      className="pointer-events-none absolute inset-0 z-0 overflow-hidden bg-[#09090b]"
+    >
+      <canvas ref={canvasRef} className="block h-full w-full" />
+    </div>
   );
-};
+});
