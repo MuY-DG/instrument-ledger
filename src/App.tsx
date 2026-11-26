@@ -3060,6 +3060,12 @@ export default function App() {
       {/* Global In-App Confirm Dialog */}
       <ConfirmDialogHost />
 
+      {/* Bottom-Center Floating Theme Status Capsule (主题：跟随系统 / 亮色 / 暗色) */}
+      <ThemeStatusCapsule
+        visible={themeCapsuleVisible}
+        preference={themePreference}
+      />
+
       {/* Sonner Stacked Toast Notifications (above Onboarding z-[120]) */}
       <Toaster
         theme={theme}
