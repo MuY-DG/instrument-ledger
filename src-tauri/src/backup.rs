@@ -27,6 +27,10 @@ pub fn create_backup(
         .query_row("SELECT COUNT(*) FROM calibration_reports", [], |r| r.get(0))
         .unwrap_or(0);
 
+    if instrument_count == 0 && report_count == 0 {
+        return Err("当前暂无台账数据，无需导出备份".to_string());
+    }
+
     let temp_snap = std::env::temp_dir().join(format!("ledger_backup_{}.db", Uuid::new_v4()));
     if temp_snap.exists() {
         let _ = fs::remove_file(&temp_snap);
@@ -240,26 +244,42 @@ fn build_unique_reset_backup_path(backup_dir: &Path) -> PathBuf {
     backup_dir.join(format!("{}_{}.zip", base, Uuid::new_v4()))
 }
 
-/// Mandatory-backup factory reset:
-/// 1. Creates & verifies a complete ZIP backup in `backup_dir` FIRST.
+/// Conditional mandatory-backup factory reset:
+/// 1. When ledger data exists (`instruments` or `calibration_reports` > 0),
+///    creates & verifies a complete ZIP backup in `backup_dir` FIRST.
 ///    If backup fails for any reason, live data is left completely untouched.
+///    When no ledger data exists, skips exporting an empty backup file.
 /// 2. Releases the SQLite file lock, wipes ledger.db (+ WAL/SHM) and attachments,
 ///    and initializes a clean uninitialized database ready for first-launch onboarding.
 pub fn reset_app_data_with_backup(
     conn_guard: &mut Connection,
     db_path: &Path,
     data_dir: &Path,
-    backup_dir: &Path,
-) -> Result<BackupResult, String> {
-    fs::create_dir_all(backup_dir)
-        .map_err(|e| format!("无法访问或创建备份目录 ({}): {}", backup_dir.display(), e))?;
+    backup_dir: Option<&Path>,
+) -> Result<Option<BackupResult>, String> {
+    let instrument_count: usize = conn_guard
+        .query_row("SELECT COUNT(*) FROM instruments", [], |r| r.get(0))
+        .unwrap_or(0);
+    let report_count: usize = conn_guard
+        .query_row("SELECT COUNT(*) FROM calibration_reports", [], |r| r.get(0))
+        .unwrap_or(0);
+    let has_data = instrument_count > 0 || report_count > 0;
 
-    let dest_zip = build_unique_reset_backup_path(backup_dir);
-    let backup_res = create_backup(conn_guard, data_dir, &dest_zip)?;
+    let backup_res = if has_data {
+        let dir = backup_dir.ok_or_else(|| "未指定备份保存目录".to_string())?;
+        fs::create_dir_all(dir)
+            .map_err(|e| format!("无法访问或创建备份目录 ({}): {}", dir.display(), e))?;
 
-    if !dest_zip.exists() || backup_res.size_bytes == 0 {
-        return Err("强制备份校验失败（备份文件为空），已中止初始化操作".to_string());
-    }
+        let dest_zip = build_unique_reset_backup_path(dir);
+        let res = create_backup(conn_guard, data_dir, &dest_zip)?;
+
+        if !dest_zip.exists() || res.size_bytes == 0 {
+            return Err("强制备份校验失败（备份文件为空），已中止初始化操作".to_string());
+        }
+        Some(res)
+    } else {
+        None
+    };
 
     // Release active SQLite file handle cleanly (essential on Windows)
     let mem_conn =
@@ -276,7 +296,11 @@ pub fn reset_app_data_with_backup(
             if let Ok(reopened) = init_db(db_path) {
                 *conn_guard = reopened;
             }
-            format!("清理旧数据库文件失败（备份已保存至 {}）: {}", dest_zip.display(), e)
+            if let Some(ref bak) = backup_res {
+                format!("清理旧数据库文件失败（备份已保存至 {}）: {}", bak.path, e)
+            } else {
+                format!("清理旧数据库文件失败: {}", e)
+            }
         })?;
     }
 
@@ -391,8 +415,9 @@ mod tests {
         .unwrap();
         fs::write(data_dir.join("images").join("photo.png"), b"img-data").unwrap();
 
-        let bak = reset_app_data_with_backup(&mut conn, &db_path, &data_dir, &downloads_dir)
-            .expect("reset with backup failed");
+        let bak = reset_app_data_with_backup(&mut conn, &db_path, &data_dir, Some(&downloads_dir))
+            .expect("reset with backup failed")
+            .expect("expected backup when data exists");
 
         assert!(Path::new(&bak.path).exists());
         assert!(bak.path.starts_with(downloads_dir.to_string_lossy().as_ref()));
@@ -416,6 +441,36 @@ mod tests {
             fs::read(data_dir.join("images").join("photo.png")).unwrap(),
             b"img-data"
         );
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_reset_app_data_skips_backup_when_empty() {
+        use crate::db::{is_account_initialized, set_setting};
+
+        let root = std::env::temp_dir().join(format!("inst_reset_empty_{}", Uuid::new_v4()));
+        let data_dir = root.join("data");
+        let downloads_dir = root.join("Downloads");
+        let db_path = data_dir.join("ledger.db");
+
+        ensure_storage_dirs(&data_dir).unwrap();
+        let mut conn = init_db(&db_path).unwrap();
+
+        set_setting(&conn, "admin_username", "qa_admin").unwrap();
+        set_setting(&conn, "admin_password_hash", "dummy_hash").unwrap();
+        set_setting(&conn, "account_initialized", "1").unwrap();
+
+        let empty_zip = root.join("empty.zip");
+        assert!(create_backup(&conn, &data_dir, &empty_zip).is_err());
+        assert!(!empty_zip.exists());
+
+        let bak = reset_app_data_with_backup(&mut conn, &db_path, &data_dir, Some(&downloads_dir))
+            .expect("reset without data failed");
+
+        assert!(bak.is_none());
+        assert!(!downloads_dir.exists());
+        assert!(!is_account_initialized(&conn).unwrap());
 
         let _ = fs::remove_dir_all(&root);
     }

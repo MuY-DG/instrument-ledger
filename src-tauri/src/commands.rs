@@ -1276,11 +1276,24 @@ pub fn get_data_dir_info(state: State<'_, AppState>) -> Result<DataDirInfo, Stri
     let db_size = fs::metadata(&state.db_path).map(|m| m.len()).unwrap_or(0);
     let img_size = dir_total_size(&state.data_dir.join("images"));
     let rep_size = dir_total_size(&state.data_dir.join("reports"));
+    let (instrument_count, report_count) = if let Ok(conn) = state.db.lock() {
+        let ic: usize = conn
+            .query_row("SELECT COUNT(*) FROM instruments", [], |r| r.get(0))
+            .unwrap_or(0);
+        let rc: usize = conn
+            .query_row("SELECT COUNT(*) FROM calibration_reports", [], |r| r.get(0))
+            .unwrap_or(0);
+        (ic, rc)
+    } else {
+        (0, 0)
+    };
 
     Ok(DataDirInfo {
         data_dir: state.data_dir.to_string_lossy().to_string(),
         db_size_bytes: db_size,
         attachments_size_bytes: img_size + rep_size,
+        instrument_count,
+        report_count,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
     })
 }
@@ -1360,11 +1373,6 @@ pub fn reset_app_with_backup(
 ) -> Result<ResetAppResult, String> {
     check_admin(&state)?;
 
-    let target_backup_dir = match backup_dir {
-        Some(ref raw) if !raw.trim().is_empty() => PathBuf::from(raw.trim()),
-        _ => resolve_default_downloads_dir(&app)?,
-    };
-
     let mut conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
     let stored_hash = get_setting(&conn, "admin_password_hash")?
         .ok_or_else(|| "管理员密码未初始化".to_string())?;
@@ -1372,11 +1380,28 @@ pub fn reset_app_with_backup(
         return Err("管理员密码错误，已取消初始化".to_string());
     }
 
+    let instrument_count: usize = conn
+        .query_row("SELECT COUNT(*) FROM instruments", [], |r| r.get(0))
+        .unwrap_or(0);
+    let report_count: usize = conn
+        .query_row("SELECT COUNT(*) FROM calibration_reports", [], |r| r.get(0))
+        .unwrap_or(0);
+
+    let target_backup_dir = if instrument_count > 0 || report_count > 0 {
+        let dir = match backup_dir {
+            Some(ref raw) if !raw.trim().is_empty() => PathBuf::from(raw.trim()),
+            _ => resolve_default_downloads_dir(&app)?,
+        };
+        Some(dir)
+    } else {
+        None
+    };
+
     let backup = reset_app_data_with_backup(
         &mut conn,
         &state.db_path,
         &state.data_dir,
-        &target_backup_dir,
+        target_backup_dir.as_deref(),
     )?;
 
     let mut session = state.session.lock().map_err(|_| "状态锁异常".to_string())?;

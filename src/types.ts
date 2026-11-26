@@ -184,7 +184,7 @@ export interface RestoreResult {
 }
 
 export interface ResetAppResult {
-  backup: BackupResult;
+  backup: BackupResult | null;
   auth: AuthStatus;
 }
 
@@ -213,5 +213,7 @@ export interface DataDirInfo {
   dataDir: string;
   dbSizeBytes: number;
   attachmentsSizeBytes: number;
+  instrumentCount: number;
+  reportCount: number;
   appVersion: string;
 }

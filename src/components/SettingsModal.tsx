@@ -62,7 +62,6 @@ import { Collapsible, ModalShell } from "@/components/ui/MotionPrimitives";
 import { PrecisionSelect, PrecisionSwitch } from "@/components/ui/FormControls";
 import {
   ActionStatusButton,
-  CopyButton,
   HoldConfirmButton,
   useActionStatus,
 } from "@/components/ui/InteractiveControls";
@@ -92,6 +91,7 @@ interface SettingsModalProps {
   accountBg: AccountBgId;
   onAccountBgChange: (next: AccountBgId) => void;
   settings: AppSettings;
+  instrumentCount?: number;
   availableUpdate?: UpdateCheckResult | null;
   updatingApp?: boolean;
   updateProgress?: UpdateDownloadProgress | null;
@@ -137,6 +137,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   accountBg,
   onAccountBgChange,
   settings,
+  instrumentCount = 0,
   availableUpdate = null,
   updatingApp = false,
   updateProgress = null,
@@ -203,7 +204,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [savingPwd, setSavingPwd] = useState(false);
 
-  // Backup / storage info & Factory Reset (Mandatory Downloads Backup)
+  // Backup / storage info & Factory Reset
   const [dirInfo, setDirInfo] = useState<DataDirInfo | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
@@ -215,6 +216,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [resetError, setResetError] = useState("");
   const [resettingApp, setResettingApp] = useState(false);
   const resetPwdRef = useRef<HTMLInputElement | null>(null);
+  const hasData = dirInfo
+    ? dirInfo.instrumentCount > 0 || dirInfo.reportCount > 0
+    : instrumentCount > 0;
 
   // Updater state
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -250,6 +254,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setResetDialogOpen(false);
       setResetPassword("");
       setResetError("");
+      setDirInfo(null);
       if (availableUpdate) {
         setUpdateResult(availableUpdate);
         setShowSourceConfig(!availableUpdate.hasUpdate);
@@ -457,6 +462,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   };
 
   const handleBackup = async () => {
+    if (!hasData) {
+      onNotify("当前暂无台账数据，无需导出备份", "error");
+      return;
+    }
     const baseName = `仪器台账备份_${getTodayStr()}.zip`;
     const sep = defaultDownloadsDir.includes("\\") ? "\\" : "/";
     const defaultPath = defaultDownloadsDir
@@ -509,7 +518,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     e?.preventDefault();
     if (resettingApp) return;
     if (!resetPassword) {
-      setResetError("请输入当前管理员密码以确认初始化");
+      setResetError("请输入当前管理员密码");
       return;
     }
 
@@ -518,7 +527,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const res = await api.resetAppWithBackup(
         resetPassword,
-        resetBackupDir || defaultDownloadsDir || undefined
+        hasData ? resetBackupDir || defaultDownloadsDir || undefined : undefined
       );
       clearMediaCache();
       setResetDialogOpen(false);
@@ -1628,205 +1637,100 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
 
                 {tab === "backup" && isAdmin && (
                   <div className="space-y-4">
-                    <div className="p-4 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] space-y-2.5">
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">
-                          本地数据目录
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            api.openDataDir().catch((e) => onNotify(String(e), "error"))
-                          }
-                          className="inline-flex items-center gap-1 text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
-                        >
-                          <FolderOpen className="h-3.5 w-3.5" />
-                          打开目录
-                        </button>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 bg-white dark:bg-[#0d0d10] px-3 py-2 rounded-lg border border-zinc-200/80 dark:border-white/[0.07]">
-                        <span className="text-[11px] font-mono text-zinc-500 dark:text-zinc-400 break-all">
-                          {dirInfo?.dataDir || "加载中..."}
-                        </span>
-                        {dirInfo?.dataDir && (
-                          <CopyButton
-                            text={dirInfo.dataDir}
-                            ariaLabel="复制本地数据目录路径"
-                            onCopied={() => onNotify("已复制数据目录路径", "success")}
-                            className="shrink-0"
-                          />
-                        )}
-                      </div>
-                      <div className="flex gap-6 text-xs text-zinc-600 dark:text-zinc-400 pt-1 font-mono tabular-nums">
-                        <span>
-                          数据库：
-                          <strong className="text-zinc-900 dark:text-zinc-100">
-                            {formatFileSize(dirInfo?.dbSizeBytes || 0)}
-                          </strong>
-                        </span>
-                        <span>
-                          附件：
-                          <strong className="text-zinc-900 dark:text-zinc-100">
-                            {formatFileSize(dirInfo?.attachmentsSizeBytes || 0)}
-                          </strong>
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="p-4 rounded-xl border border-zinc-200/90 dark:border-white/[0.08] bg-zinc-50/40 dark:bg-white/[0.02] flex flex-col justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
+                    <div className="rounded-xl border border-zinc-200/85 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] divide-y divide-zinc-200/75 dark:divide-white/[0.07]">
+                      <div className="px-4 py-3.5 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-8 w-8 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                             <Archive className="h-4 w-4" />
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <h4 className="text-sm font-semibold text-zinc-900 dark:text-white">
-                              导出备份
-                            </h4>
-                            <InfoTip content="将数据库、位置照片及校验报告打包为单个 .zip 文件，便于归档与迁移。" />
-                          </div>
+                          <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                            导出备份
+                          </span>
                         </div>
                         <ActionStatusButton
                           size="sm"
                           status={backupStatus}
-                          disabled={backingUp}
-                          idleLabel="导出"
+                          disabled={backingUp || !hasData}
+                          idleLabel={hasData ? "导出" : "暂无数据"}
                           loadingLabel="备份中..."
                           successLabel="已导出"
-                          idleIcon={<Archive className="h-3.5 w-3.5" />}
+                          idleIcon={hasData ? <Archive className="h-3.5 w-3.5" /> : undefined}
                           onClick={handleBackup}
-                          className="w-full"
+                          className="shrink-0"
                         />
                       </div>
 
-                      <div className="p-4 rounded-xl border border-zinc-200/90 dark:border-white/[0.08] bg-zinc-50/40 dark:bg-white/[0.02] flex flex-col justify-between gap-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-9 w-9 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
+                      <div className="px-4 py-3.5 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-8 w-8 rounded-lg bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center shrink-0">
                             <RotateCcw className="h-4 w-4" />
                           </div>
-                          <div className="flex items-center gap-1.5">
-                            <h4 className="text-sm font-semibold text-zinc-900 dark:text-white">
-                              还原备份
-                            </h4>
-                            <InfoTip content="导入之前导出的 .zip 备份包恢复全部记录与附件（将覆盖当前数据）。" />
-                          </div>
+                          <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                            还原备份
+                          </span>
                         </div>
                         <button
                           type="button"
                           disabled={restoring}
                           onClick={handleRestore}
-                          className="btn-tactile w-full py-2 rounded-lg border border-zinc-300 dark:border-white/[0.14] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] disabled:opacity-50 shadow-tactile text-zinc-800 dark:text-zinc-100 text-xs font-semibold"
+                          className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] disabled:opacity-50 shadow-tactile text-zinc-800 dark:text-zinc-100 text-xs font-semibold shrink-0"
                         >
-                          {restoring ? "还原中..." : "还原"}
+                          <RotateCcw className="h-3.5 w-3.5" />
+                          <span>{restoring ? "还原中..." : "还原"}</span>
+                        </button>
+                      </div>
+
+                      <div className="px-4 py-3.5 flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="h-8 w-8 rounded-lg bg-zinc-100 dark:bg-white/[0.06] border border-zinc-200/80 dark:border-white/[0.08] text-zinc-600 dark:text-zinc-300 flex items-center justify-center shrink-0">
+                            <FolderOpen className="h-4 w-4" />
+                          </div>
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                              本地数据目录
+                            </span>
+                            {dirInfo && (
+                              <InfoTip
+                                content={`数据库 ${formatFileSize(dirInfo.dbSizeBytes)} · 附件 ${formatFileSize(dirInfo.attachmentsSizeBytes)}`}
+                              />
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            api.openDataDir().catch((e) => onNotify(String(e), "error"))
+                          }
+                          className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] disabled:opacity-50 shadow-tactile text-zinc-800 dark:text-zinc-100 text-xs font-medium shrink-0"
+                        >
+                          <FolderOpen className="h-3.5 w-3.5" />
+                          <span>打开目录</span>
                         </button>
                       </div>
                     </div>
 
-                    {/* Factory Reset / Initialize App (Mandatory Backup -> System Downloads Default) */}
-                    <div className="p-4 rounded-2xl border border-rose-200/90 dark:border-rose-500/25 bg-rose-50/45 dark:bg-rose-500/[0.04] space-y-3.5">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3 min-w-0">
-                          <div className="h-9 w-9 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0 mt-0.5">
-                            <AlertTriangle className="h-4 w-4" />
-                          </div>
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <h4 className="text-sm font-semibold text-zinc-950 dark:text-white">
-                                初始化程序（恢复出厂）
-                              </h4>
-                              <span className="px-1.5 py-0.5 rounded-md bg-rose-500/10 border border-rose-500/20 text-[10px] font-medium text-rose-600 dark:text-rose-400">
-                                强制备份
-                              </span>
-                              <InfoTip content="将清空当前全部设备记录、照片、报告、管理员账号与应用锁，回到首次安装启动引导页；重置前会强制自动导出完整 .zip 备份，备份失败将中止重置。" />
-                            </div>
-                            <p className="text-[11.5px] text-zinc-500 dark:text-zinc-400 mt-1 leading-relaxed">
-                              清空所有本地数据并重新进入首次安装启动动画；执行前强制自动完整备份，之后可随时通过「还原备份」恢复。
-                            </p>
-                          </div>
+                    <div className="px-4 py-3.5 rounded-xl border border-rose-200/85 dark:border-rose-500/20 bg-rose-50/35 dark:bg-rose-500/[0.03] flex items-center justify-between gap-4">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-8 w-8 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                          <AlertTriangle className="h-4 w-4" />
                         </div>
-                      </div>
-
-                      {/* Mandatory Backup Path Box (Defaults to System Downloads) */}
-                      <div className="p-3 rounded-xl bg-white dark:bg-[#141418] border border-zinc-200/90 dark:border-white/[0.08] space-y-2">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-300">
-                            <span>强制备份保存目录</span>
-                            {(!resetBackupDir ||
-                              resetBackupDir === defaultDownloadsDir) && (
-                              <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-white/[0.07] text-[10px] text-zinc-500 dark:text-zinc-400">
-                                默认 · 系统下载目录
-                              </span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {defaultDownloadsDir &&
-                              resetBackupDir &&
-                              resetBackupDir !== defaultDownloadsDir && (
-                                <button
-                                  type="button"
-                                  onClick={() =>
-                                    setResetBackupDir(defaultDownloadsDir)
-                                  }
-                                  className="text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 transition"
-                                >
-                                  恢复默认下载目录
-                                </button>
-                              )}
-                            <button
-                              type="button"
-                              onClick={handleChooseResetBackupDir}
-                              className="text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
-                            >
-                              更改目录
-                            </button>
-                            {(resetBackupDir || defaultDownloadsDir) && (
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  api
-                                    .openFolderPath(
-                                      resetBackupDir || defaultDownloadsDir
-                                    )
-                                    .catch((e) => onNotify(String(e), "error"))
-                                }
-                                className="inline-flex items-center gap-0.5 text-[11px] text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 transition"
-                              >
-                                <FolderOpen className="h-3 w-3" />
-                                <span>打开</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between gap-2 bg-zinc-50 dark:bg-[#0d0d10] px-2.5 py-1.5 rounded-lg border border-zinc-200/80 dark:border-white/[0.06]">
-                          <span className="text-[11px] font-mono text-zinc-600 dark:text-zinc-300 break-all">
-                            {resetBackupDir ||
-                              defaultDownloadsDir ||
-                              "系统默认下载目录 (Downloads)"}
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                            初始化程序
                           </span>
-                          {(resetBackupDir || defaultDownloadsDir) && (
-                            <CopyButton
-                              text={resetBackupDir || defaultDownloadsDir}
-                              ariaLabel="复制强制备份目录路径"
-                              onCopied={() => onNotify("已复制备份目录路径", "success")}
-                              className="shrink-0"
-                            />
-                          )}
+                          <InfoTip content="清空本地数据并恢复至首次安装状态；若存在台账数据将先自动导出备份。" />
                         </div>
                       </div>
-
-                      <div className="flex items-center justify-end">
-                        <motion.button
-                          type="button"
-                          whileTap={TAP_SCALE}
-                          transition={SPRING_SNAPPY}
-                          onClick={openResetConfirmDialog}
-                          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-tactile-primary transition-colors"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                          <span>备份并初始化程序</span>
-                        </motion.button>
-                      </div>
+                      <motion.button
+                        type="button"
+                        whileTap={TAP_SCALE}
+                        transition={SPRING_SNAPPY}
+                        onClick={openResetConfirmDialog}
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-tactile-primary transition-colors shrink-0"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>初始化</span>
+                      </motion.button>
                     </div>
                   </div>
                 )}
@@ -2168,7 +2072,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
     </ModalShell>
 
-      {/* Sibling Password Confirmation Modal for Mandatory-Backup App Reset */}
+      {/* Sibling Password Confirmation Modal for App Reset */}
       <ModalShell
         open={resetDialogOpen}
         onClose={() => {
@@ -2184,14 +2088,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             <div className="h-8 w-8 rounded-xl bg-rose-500/15 border border-rose-500/25 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
               <AlertTriangle className="h-4 w-4" />
             </div>
-            <div>
-              <h3 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                确认备份并初始化程序
-              </h3>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                备份完成校验通过后才会清空数据
-              </p>
-            </div>
+            <h3 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
+              {hasData ? "备份并初始化" : "初始化程序"}
+            </h3>
           </div>
           {!resettingApp && (
             <button
@@ -2210,23 +2109,47 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           }}
           className="p-6 space-y-4"
         >
-          <div className="p-3.5 rounded-xl bg-zinc-50 dark:bg-white/[0.03] border border-zinc-200/85 dark:border-white/[0.08] space-y-1.5 text-xs">
-            <div className="font-medium text-zinc-800 dark:text-zinc-200">
-              强制备份将保存至：
+          {hasData && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <label className="text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                  备份目录
+                </label>
+                <div className="flex items-center gap-2.5">
+                  {defaultDownloadsDir &&
+                    resetBackupDir &&
+                    resetBackupDir !== defaultDownloadsDir && (
+                      <button
+                        type="button"
+                        disabled={resettingApp}
+                        onClick={() => setResetBackupDir(defaultDownloadsDir)}
+                        className="text-xs text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200 disabled:opacity-50 transition"
+                      >
+                        恢复默认
+                      </button>
+                    )}
+                  <button
+                    type="button"
+                    disabled={resettingApp}
+                    onClick={handleChooseResetBackupDir}
+                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:underline disabled:opacity-50"
+                  >
+                    更改
+                  </button>
+                </div>
+              </div>
+              <div
+                title={resetBackupDir || defaultDownloadsDir}
+                className="px-3 py-2 rounded-xl border border-zinc-200/90 dark:border-white/[0.08] bg-zinc-50 dark:bg-white/[0.03] text-xs font-mono text-zinc-600 dark:text-zinc-300 truncate"
+              >
+                {resetBackupDir || defaultDownloadsDir || "Downloads"}
+              </div>
             </div>
-            <div className="font-mono text-[11px] text-zinc-600 dark:text-zinc-400 break-all">
-              {resetBackupDir ||
-                defaultDownloadsDir ||
-                "系统默认下载目录 (Downloads)"}
-            </div>
-            <div className="text-[11px] text-zinc-400 dark:text-zinc-500 pt-0.5">
-              文件名格式：仪器台账_初始化前自动备份_YYYYMMDD_HHMMSS.zip
-            </div>
-          </div>
+          )}
 
           <div className="space-y-1.5">
             <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300">
-              验证当前管理员密码
+              管理员密码
             </label>
             <div className="relative">
               <input
@@ -2239,7 +2162,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   setResetPassword(e.target.value);
                   setResetError("");
                 }}
-                placeholder="请输入当前管理员密码"
+                placeholder="请输入管理员密码"
                 className={`${INPUT_CLS} pr-10`}
               />
               <button
@@ -2263,36 +2186,31 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
             </div>
           )}
 
-          <div className="flex items-center justify-between gap-2 pt-1">
-            <span className="text-[10.5px] text-zinc-400 dark:text-zinc-500 select-none">
-              高危操作：输入密码后长按确认
-            </span>
-            <div className="flex items-center gap-2 shrink-0">
-              <motion.button
-                type="button"
-                disabled={resettingApp}
-                whileTap={resettingApp ? undefined : TAP_SCALE}
-                transition={SPRING_SNAPPY}
-                onClick={() => setResetDialogOpen(false)}
-                className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] disabled:opacity-50 transition-colors"
-              >
-                取消
-              </motion.button>
-              <HoldConfirmButton
-                disabled={resettingApp || !resetPassword}
-                loading={resettingApp}
-                loadingLabel="正在备份并初始化..."
-                idleLabel="按住备份并初始化"
-                holdingLabel="继续按住确认重置..."
-                completedLabel="开始执行"
-                holdDurationMs={1080}
-                icon={<RotateCcw className="h-3.5 w-3.5" />}
-                onConfirm={() => {
-                  void handleConfirmResetApp();
-                }}
-                className="py-2"
-              />
-            </div>
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <motion.button
+              type="button"
+              disabled={resettingApp}
+              whileTap={resettingApp ? undefined : TAP_SCALE}
+              transition={SPRING_SNAPPY}
+              onClick={() => setResetDialogOpen(false)}
+              className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] disabled:opacity-50 transition-colors"
+            >
+              取消
+            </motion.button>
+            <HoldConfirmButton
+              disabled={resettingApp || !resetPassword}
+              loading={resettingApp}
+              loadingLabel={hasData ? "正在备份并初始化..." : "正在初始化..."}
+              idleLabel={hasData ? "按住备份并初始化" : "按住确认初始化"}
+              holdingLabel="继续按住..."
+              completedLabel="开始执行"
+              holdDurationMs={1080}
+              icon={<RotateCcw className="h-3.5 w-3.5" />}
+              onConfirm={() => {
+                void handleConfirmResetApp();
+              }}
+              className="py-2"
+            />
           </div>
         </form>
       </ModalShell>

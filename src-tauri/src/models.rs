@@ -203,7 +203,7 @@ pub struct RestoreResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResetAppResult {
-    pub backup: BackupResult,
+    pub backup: Option<BackupResult>,
     pub auth: AuthStatus,
 }
 
@@ -238,5 +238,7 @@ pub struct DataDirInfo {
     pub data_dir: String,
     pub db_size_bytes: u64,
     pub attachments_size_bytes: u64,
+    pub instrument_count: usize,
+    pub report_count: usize,
     pub app_version: String,
 }

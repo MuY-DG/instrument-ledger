@@ -140,29 +140,29 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 bg-[#09090b]/92 backdrop-blur-xl flex flex-col no-print"
+          className="fixed inset-0 z-50 bg-white/15 dark:bg-black/40 backdrop-blur-xl flex flex-col no-print"
           onClick={onClose}
         >
-          {/* Toolbar */}
+          {/* Translucent toolbar — keeps full frosted-glass stage while sharpening text & controls */}
           <div
-            className="flex items-center justify-between px-6 py-4 text-white border-b border-white/[0.08]"
+            className="flex items-center justify-between gap-4 px-6 py-4 text-zinc-900 dark:text-white border-b border-zinc-900/[0.06] dark:border-white/[0.08]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="min-w-0">
-              <h3 className="text-sm font-semibold truncate">
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-white drop-shadow-[0_1px_2px_rgba(255,255,255,0.75)] dark:drop-shadow-[0_1px_3px_rgba(0,0,0,0.6)] truncate">
                 {title || "位置大图预览"}
               </h3>
               {subtitle && (
-                <p className="text-xs text-zinc-400 flex items-center gap-1 mt-0.5">
-                  <MapPin className="h-3.5 w-3.5 text-indigo-400" />
-                  <span>{subtitle}</span>
+                <p className="text-xs text-zinc-600 dark:text-zinc-300 drop-shadow-[0_1px_1px_rgba(255,255,255,0.65)] dark:drop-shadow-none flex items-center gap-1 mt-0.5">
+                  <MapPin className="h-3.5 w-3.5 text-indigo-600 dark:text-indigo-400 shrink-0" />
+                  <span className="truncate">{subtitle}</span>
                 </p>
               )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 shrink-0">
               {/* Optical Glass Lens Toggle + Multiplier */}
-              <div className="flex items-center bg-white/[0.07] border border-white/[0.08] rounded-lg p-1 gap-1">
+              <div className="flex items-center bg-white/70 dark:bg-zinc-900/60 backdrop-blur-md border border-zinc-900/10 dark:border-white/15 shadow-sm rounded-lg p-1 gap-1">
                 <motion.button
                   type="button"
                   whileTap={TAP_SCALE}
@@ -177,8 +177,8 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                   className={cn(
                     "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium transition-colors",
                     lensEnabled
-                      ? "bg-indigo-500 text-white shadow-[0_0_16px_rgba(99,102,241,0.45)]"
-                      : "text-zinc-300 hover:bg-white/15"
+                      ? "bg-indigo-600 dark:bg-indigo-500 text-white shadow-sm"
+                      : "text-zinc-800 dark:text-zinc-100 hover:bg-zinc-900/[0.08] hover:text-zinc-950 dark:hover:bg-white/15 dark:hover:text-white"
                   )}
                   title="光学放大镜检视铭牌与细节 (快捷键 M)"
                 >
@@ -191,7 +191,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                     onClick={() =>
                       setLensZoomIdx((i) => (i + 1) % LENS_ZOOM_STEPS.length)
                     }
-                    className="px-2 py-1 rounded-md text-[11px] font-mono tabular-nums text-indigo-200 hover:bg-white/15 transition"
+                    className="px-2 py-1 rounded-md text-[11px] font-mono font-semibold tabular-nums text-indigo-700 dark:text-indigo-200 bg-indigo-500/10 dark:bg-indigo-400/15 hover:bg-indigo-500/20 dark:hover:bg-white/15 transition"
                     title="切换放大倍率（也可滚轮调节）"
                   >
                     {lensZoom}×
@@ -199,18 +199,18 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                 )}
               </div>
 
-              <div className="flex items-center bg-white/[0.07] border border-white/[0.08] rounded-lg p-1 gap-1">
+              <div className="flex items-center bg-white/70 dark:bg-zinc-900/60 backdrop-blur-md border border-zinc-900/10 dark:border-white/15 shadow-sm rounded-lg p-1 gap-0.5 text-zinc-800 dark:text-zinc-100">
                 <button
                   type="button"
                   onClick={() =>
                     setScale((s) => Math.max(0.5, +(s - 0.25).toFixed(2)))
                   }
-                  className="p-1.5 rounded hover:bg-white/15 transition"
+                  className="p-1.5 rounded-md hover:bg-zinc-900/[0.08] hover:text-zinc-950 dark:hover:bg-white/15 dark:hover:text-white transition"
                   title="缩小 (-)"
                 >
                   <ZoomOut className="h-3.5 w-3.5" />
                 </button>
-                <span className="text-xs font-mono tabular-nums w-11 text-center">
+                <span className="text-xs font-mono font-medium tabular-nums w-12 text-center text-zinc-900 dark:text-zinc-100 select-none">
                   {Math.round(scale * 100)}%
                 </span>
                 <button
@@ -218,7 +218,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                   onClick={() =>
                     setScale((s) => Math.min(3, +(s + 0.25).toFixed(2)))
                   }
-                  className="p-1.5 rounded hover:bg-white/15 transition"
+                  className="p-1.5 rounded-md hover:bg-zinc-900/[0.08] hover:text-zinc-950 dark:hover:bg-white/15 dark:hover:text-white transition"
                   title="放大 (+)"
                 >
                   <ZoomIn className="h-3.5 w-3.5" />
@@ -226,7 +226,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                 <button
                   type="button"
                   onClick={() => setRotation((r) => (r + 90) % 360)}
-                  className="p-1.5 rounded hover:bg-white/15 transition"
+                  className="p-1.5 rounded-md hover:bg-zinc-900/[0.08] hover:text-zinc-950 dark:hover:bg-white/15 dark:hover:text-white transition"
                   title="顺时针旋转 90°"
                 >
                   <RotateCw className="h-3.5 w-3.5" />
@@ -239,7 +239,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                     setLensEnabled(false);
                     setLensVisible(false);
                   }}
-                  className="p-1.5 rounded hover:bg-white/15 transition"
+                  className="p-1.5 rounded-md hover:bg-zinc-900/[0.08] hover:text-zinc-950 dark:hover:bg-white/15 dark:hover:text-white transition"
                   title="重置视图"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
@@ -248,7 +248,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="p-2 rounded-lg bg-white/[0.07] hover:bg-white/15 border border-white/[0.08] transition"
+                className="p-2 rounded-lg bg-white/70 hover:bg-white/90 text-zinc-800 hover:text-zinc-950 dark:bg-zinc-900/60 dark:hover:bg-zinc-800/80 dark:text-zinc-100 dark:hover:text-white backdrop-blur-md border border-zinc-900/10 dark:border-white/15 shadow-sm transition"
                 title="关闭 (Esc)"
               >
                 <X className="h-4 w-4" />
@@ -280,7 +280,9 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
             }}
           >
             {loading ? (
-              <div className="text-zinc-400 text-xs">正在加载高清现场图...</div>
+              <div className="text-zinc-500 dark:text-zinc-400 text-xs">
+                正在加载高清现场图...
+              </div>
             ) : src ? (
               <motion.img
                 ref={imgRef}
@@ -300,12 +302,14 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                   if (lensEnabled) updateLensFromPointer(e.clientX, e.clientY);
                 }}
                 className={cn(
-                  "max-h-[80vh] max-w-[85vw] object-contain rounded-xl shadow-2xl select-none",
+                  "max-h-[80vh] max-w-[85vw] object-contain rounded-xl ring-1 ring-black/[0.08] dark:ring-white/[0.1] shadow-[0_24px_64px_-12px_rgba(15,23,42,0.22)] dark:shadow-2xl select-none",
                   lensEnabled && "cursor-crosshair"
                 )}
               />
             ) : (
-              <div className="text-zinc-400 text-xs">图片加载失败</div>
+              <div className="text-zinc-500 dark:text-zinc-400 text-xs">
+                图片加载失败
+              </div>
             )}
 
             {/* Floating Hint Pill when Optical Lens is enabled */}

@@ -36,7 +36,6 @@ import { api, clearMediaCache } from "@/lib/api";
 import { exportJsskExcel, uint8ArrayToBase64 } from "@/lib/excel";
 import {
   buildInstrumentStatusMap,
-  formatFileSize,
   getTodayStr,
   summarizeExpiryAlerts,
 } from "@/lib/status";
@@ -980,20 +979,23 @@ export default function App() {
     startupUpdateCheckedRef.current = false;
     setAuth(res.auth);
 
-    const fileName = res.backup.path.split(/[/\\]/).pop() || res.backup.path;
-    toast.success(
-      `已自动备份（${res.backup.instrumentCount} 台设备 · ${formatFileSize(res.backup.sizeBytes)}）并完成初始化`,
-      {
-        description: `备份文件：${fileName}`,
-        duration: 9000,
-        action: {
-          label: "打开备份目录",
-          onClick: () => {
-            api.openFolderPath(res.backup.path).catch(() => {});
+    if (res.backup) {
+      const backupPath = res.backup.path;
+      toast.success(
+        `已自动备份 ${res.backup.instrumentCount} 台设备并完成初始化`,
+        {
+          duration: 7000,
+          action: {
+            label: "打开目录",
+            onClick: () => {
+              api.openFolderPath(backupPath).catch(() => {});
+            },
           },
-        },
-      }
-    );
+        }
+      );
+    } else {
+      toast.success("已完成初始化");
+    }
   }, []);
 
   const handleLogout = async () => {
@@ -1209,6 +1211,7 @@ export default function App() {
             defaultDocTitle={settings.docTitle}
             defaultDocCode={settings.docCode}
             onCompleted={(nextAuth) => {
+              setAccountBg(loadAccountBg());
               setAuth(nextAuth);
               refreshAll();
               toast.success(`欢迎使用，管理员「${nextAuth.username}」已就绪`);
@@ -2727,6 +2730,7 @@ export default function App() {
         accountBg={accountBg}
         onAccountBgChange={handleAccountBgChange}
         settings={settings}
+        instrumentCount={instruments.length}
         availableUpdate={availableUpdate}
         updatingApp={updatingApp}
         updateProgress={updateProgress}
