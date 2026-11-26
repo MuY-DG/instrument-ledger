@@ -11,7 +11,7 @@ import React, {
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { EASE_PRECISION } from "@/lib/motion";
-import { cn } from "@/lib/utils";
+import { cn, getTitlebarSafeTop } from "@/lib/utils";
 
 export type TooltipPlacement = "top" | "bottom" | "right" | "left";
 
@@ -75,9 +75,10 @@ function computeTooltipCoords(
 
   const vw = window.innerWidth;
   const vh = window.innerHeight;
+  const topMargin = getTitlebarSafeTop() + VIEWPORT_MARGIN;
 
   let actual: TooltipPlacement = preferred;
-  const canTop = rect.top - tipHeight - GAP >= VIEWPORT_MARGIN;
+  const canTop = rect.top - tipHeight - GAP >= topMargin;
   const canBottom = rect.bottom + tipHeight + GAP <= vh - VIEWPORT_MARGIN;
   const canRight = rect.right + tipWidth + GAP <= vw - VIEWPORT_MARGIN;
   const canLeft = rect.left - tipWidth - GAP >= VIEWPORT_MARGIN;
@@ -98,13 +99,13 @@ function computeTooltipCoords(
     );
     top =
       actual === "top"
-        ? Math.max(VIEWPORT_MARGIN, rect.top - tipHeight - GAP)
+        ? Math.max(topMargin, rect.top - tipHeight - GAP)
         : Math.min(vh - tipHeight - VIEWPORT_MARGIN, rect.bottom + GAP);
   } else {
     const rawTop = rect.top + rect.height / 2 - tipHeight / 2;
     top = Math.min(
-      Math.max(VIEWPORT_MARGIN, rawTop),
-      Math.max(VIEWPORT_MARGIN, vh - tipHeight - VIEWPORT_MARGIN)
+      Math.max(topMargin, rawTop),
+      Math.max(topMargin, vh - tipHeight - VIEWPORT_MARGIN)
     );
     left =
       actual === "right"

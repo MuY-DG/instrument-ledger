@@ -271,7 +271,7 @@ export const ModalShell: React.FC<ModalShellProps> = ({
             {...MODAL_SURFACE_MOTION}
             onClick={(e) => e.stopPropagation()}
             className={cn(
-              "relative bg-white dark:bg-[#121216] rounded-2xl shadow-modal-light dark:shadow-popover border border-zinc-200/90 dark:border-white/[0.1] overflow-hidden",
+              "relative max-h-full bg-white dark:bg-[#121216] rounded-2xl shadow-modal-light dark:shadow-popover border border-zinc-200/90 dark:border-white/[0.1] overflow-hidden",
               panelClassName
             )}
           >

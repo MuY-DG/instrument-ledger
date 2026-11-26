@@ -20,9 +20,9 @@ use crate::db::{
     DEFAULT_ADMIN_SESSION_DAYS, DEFAULT_ADMIN_TITLE, DEFAULT_GITHUB_REPO,
 };
 use crate::models::{
-    AddReportInput, AppSettings, AuthStatus, BackupResult, CalibrationReport, DataDirInfo,
-    ImportResult, Instrument, InstrumentInput, ResetAppResult, RestoreResult, SettingsUpdateInput,
-    UpdateCheckResult,
+    AddReportInput, AppSettings, AuthStatus, BackupResult, BatchOperationResult,
+    BatchUpdateInstrumentsInput, CalibrationReport, DataDirInfo, ImportResult, Instrument,
+    InstrumentInput, ResetAppResult, RestoreResult, SettingsUpdateInput, UpdateCheckResult,
 };
 use crate::storage::{
     dir_total_size, mime_from_ext, remove_stored_file, resolve_stored_path, save_image_from_base64,
@@ -741,6 +741,255 @@ pub fn delete_instrument(state: State<'_, AppState>, id: i64) -> Result<(), Stri
     let _ = fs::remove_dir_all(inst_report_dir);
 
     Ok(())
+}
+
+#[tauri::command]
+pub fn batch_delete_instruments(
+    state: State<'_, AppState>,
+    ids: Vec<i64>,
+) -> Result<BatchOperationResult, String> {
+    check_admin(&state)?;
+
+    let mut unique_ids = Vec::with_capacity(ids.len());
+    let mut seen = std::collections::HashSet::with_capacity(ids.len());
+    for id in ids {
+        if id > 0 && seen.insert(id) {
+            unique_ids.push(id);
+        }
+    }
+    if unique_ids.is_empty() {
+        return Ok(BatchOperationResult { affected_count: 0 });
+    }
+
+    let mut conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let mut files_to_remove: Vec<String> = Vec::new();
+    let mut deleted_ids: Vec<i64> = Vec::new();
+
+    {
+        let tx = conn
+            .transaction()
+            .map_err(|e| format!("开启批量删除事务失败: {}", e))?;
+
+        for id in &unique_ids {
+            let Ok(existing) = query_instrument_by_id(&tx, *id) else {
+                continue;
+            };
+            let reports = query_reports_for_instrument(&tx, *id)?;
+            tx.execute("DELETE FROM instruments WHERE id = ?1", params![id])
+                .map_err(|e| format!("批量删除仪器失败: {}", e))?;
+
+            if !existing.photo_path.trim().is_empty() {
+                files_to_remove.push(existing.photo_path);
+            }
+            for r in reports {
+                if !r.stored_path.trim().is_empty() {
+                    files_to_remove.push(r.stored_path);
+                }
+            }
+            deleted_ids.push(*id);
+        }
+
+        tx.commit()
+            .map_err(|e| format!("提交批量删除事务失败: {}", e))?;
+    }
+
+    for rel in files_to_remove {
+        remove_stored_file(&state.data_dir, &rel);
+    }
+    for id in &deleted_ids {
+        let inst_report_dir = state.data_dir.join("reports").join(id.to_string());
+        let _ = fs::remove_dir_all(inst_report_dir);
+    }
+
+    Ok(BatchOperationResult {
+        affected_count: deleted_ids.len(),
+    })
+}
+
+#[tauri::command]
+pub fn batch_update_instruments(
+    state: State<'_, AppState>,
+    input: BatchUpdateInstrumentsInput,
+) -> Result<BatchOperationResult, String> {
+    check_admin(&state)?;
+
+    let mut unique_ids = Vec::with_capacity(input.ids.len());
+    let mut seen = std::collections::HashSet::with_capacity(input.ids.len());
+    for id in &input.ids {
+        if *id > 0 && seen.insert(*id) {
+            unique_ids.push(*id);
+        }
+    }
+    if unique_ids.is_empty() {
+        return Ok(BatchOperationResult { affected_count: 0 });
+    }
+
+    let mut conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("开启批量编辑事务失败: {}", e))?;
+
+    let mut next_gauge_seq: i64 = tx
+        .query_row(
+            "SELECT COALESCE(MAX(seq_no), 0) FROM instruments WHERE category = 'gauge'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+    let mut next_fixture_seq: i64 = tx
+        .query_row(
+            "SELECT COALESCE(MAX(seq_no), 0) FROM instruments WHERE category = 'fixture'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap_or(0);
+
+    let now = now_iso();
+    let mut affected = 0usize;
+
+    for id in unique_ids {
+        let Ok(existing) = query_instrument_by_id(&tx, id) else {
+            continue;
+        };
+
+        let new_category = match input.category.as_deref().map(str::trim) {
+            Some("fixture") => "fixture".to_string(),
+            Some("gauge") => "gauge".to_string(),
+            _ => existing.category.clone(),
+        };
+
+        let new_seq_no = if new_category != existing.category {
+            if new_category == "fixture" {
+                next_fixture_seq += 1;
+                next_fixture_seq
+            } else {
+                next_gauge_seq += 1;
+                next_gauge_seq
+            }
+        } else {
+            existing.seq_no
+        };
+
+        let new_department = input
+            .department
+            .as_deref()
+            .map(|v| v.trim().to_string())
+            .unwrap_or(existing.department);
+
+        let new_location = input
+            .location
+            .as_deref()
+            .map(|v| v.trim().to_string())
+            .unwrap_or(existing.location);
+
+        let new_cal_agency = input
+            .cal_agency
+            .as_deref()
+            .map(|v| v.trim().to_string())
+            .unwrap_or(existing.cal_agency);
+
+        let (new_cal_type, new_exempt) = match input.calibration_type.as_deref().map(str::trim) {
+            Some("exempt") => ("exempt".to_string(), true),
+            Some("internal") => (
+                "internal".to_string(),
+                input.exempt_calibration.unwrap_or(false),
+            ),
+            Some("external") => (
+                "external".to_string(),
+                input.exempt_calibration.unwrap_or(false),
+            ),
+            _ => match input.exempt_calibration {
+                Some(true) => ("exempt".to_string(), true),
+                Some(false) => {
+                    let ct = if existing.calibration_type == "exempt" {
+                        "external".to_string()
+                    } else {
+                        existing.calibration_type.clone()
+                    };
+                    (ct, false)
+                }
+                None => (existing.calibration_type.clone(), existing.exempt_calibration),
+            },
+        };
+
+        let new_last_cal = input
+            .last_cal_date
+            .as_deref()
+            .map(|v| v.trim().to_string())
+            .unwrap_or_else(|| existing.last_cal_date.clone());
+
+        let new_cycle = input
+            .cal_cycle_months
+            .map(|m| m.max(0))
+            .unwrap_or(existing.cal_cycle_months);
+
+        let recalc_needed = input.last_cal_date.is_some()
+            || input.cal_cycle_months.is_some()
+            || (existing.exempt_calibration && !new_exempt);
+
+        let new_next_cal = if new_exempt {
+            String::new()
+        } else if recalc_needed {
+            calc_next_cal_date(&new_last_cal, new_cycle)
+        } else {
+            existing.next_cal_date
+        };
+
+        let new_remark = match input.remark_mode.as_deref().map(str::trim) {
+            Some("clear") => String::new(),
+            Some("replace") => input
+                .remark
+                .as_deref()
+                .map(|v| v.trim().to_string())
+                .unwrap_or_default(),
+            Some("append") => {
+                let addition = input.remark.as_deref().map(str::trim).unwrap_or("");
+                let current = existing.remark.trim();
+                if addition.is_empty() {
+                    existing.remark
+                } else if current.is_empty() {
+                    addition.to_string()
+                } else {
+                    format!("{}；{}", current, addition)
+                }
+            }
+            _ => existing.remark,
+        };
+
+        tx.execute(
+            "UPDATE instruments SET
+                category = ?1, seq_no = ?2, department = ?3, location = ?4,
+                calibration_type = ?5, last_cal_date = ?6, cal_cycle_months = ?7,
+                next_cal_date = ?8, exempt_calibration = ?9, remark = ?10,
+                cal_agency = ?11, updated_at = ?12
+             WHERE id = ?13",
+            params![
+                new_category,
+                new_seq_no,
+                new_department,
+                new_location,
+                new_cal_type,
+                new_last_cal,
+                new_cycle,
+                new_next_cal,
+                if new_exempt { 1 } else { 0 },
+                new_remark,
+                new_cal_agency,
+                now,
+                id,
+            ],
+        )
+        .map_err(|e| format!("批量更新仪器失败: {}", e))?;
+
+        affected += 1;
+    }
+
+    tx.commit()
+        .map_err(|e| format!("提交批量编辑事务失败: {}", e))?;
+
+    Ok(BatchOperationResult {
+        affected_count: affected,
+    })
 }
 
 #[tauri::command]

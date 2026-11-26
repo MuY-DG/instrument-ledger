@@ -9,7 +9,7 @@ import {
   TAP_SCALE,
   TAP_SCALE_SUBTLE,
 } from "@/lib/motion";
-import { cn } from "@/lib/utils";
+import { cn, getTitlebarSafeTop } from "@/lib/utils";
 
 /* ============================================================================
  * 1. PrecisionSwitch — Tactile spring toggle with subtle thumb squish
@@ -79,21 +79,30 @@ export const PrecisionSwitch: React.FC<PrecisionSwitchProps> = ({
 
 interface PrecisionCheckboxProps {
   checked: boolean;
-  onChange: (checked: boolean) => void;
+  indeterminate?: boolean;
+  onChange: (checked: boolean, event: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
+  ariaLabel?: string;
+  title?: string;
   className?: string;
   label?: React.ReactNode;
 }
 
 export const PrecisionCheckbox: React.FC<PrecisionCheckboxProps> = ({
   checked,
+  indeterminate = false,
   onChange,
   disabled = false,
+  ariaLabel,
+  title,
   className,
   label,
 }) => {
+  const active = checked || indeterminate;
+
   return (
     <label
+      title={title}
       className={cn(
         "inline-flex items-center gap-2 select-none group",
         disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer",
@@ -103,36 +112,50 @@ export const PrecisionCheckbox: React.FC<PrecisionCheckboxProps> = ({
       <motion.button
         type="button"
         role="checkbox"
-        aria-checked={checked}
+        aria-checked={indeterminate && !checked ? "mixed" : checked}
+        aria-label={ariaLabel}
         disabled={disabled}
         whileTap={disabled ? undefined : { scale: 0.88 }}
         transition={SPRING_SNAPPY}
         onClick={(e) => {
           e.preventDefault();
-          if (!disabled) onChange(!checked);
+          if (!disabled) onChange(!checked, e);
         }}
         className={cn(
           "relative h-[17px] w-[17px] rounded-[5px] border flex items-center justify-center shrink-0 transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/35",
-          checked
+          active
             ? "bg-zinc-900 border-zinc-900 dark:bg-white dark:border-white shadow-[0_1px_2px_rgba(15,23,42,0.18)]"
             : "bg-white dark:bg-white/[0.04] border-zinc-300/95 dark:border-white/[0.18] group-hover:border-zinc-400 dark:group-hover:border-white/35 shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
         )}
       >
         <svg viewBox="0 0 12 12" className="h-3 w-3" fill="none">
-          <motion.path
-            d="M2.5 6.2L4.9 8.6L9.5 3.6"
-            stroke="currentColor"
-            strokeWidth="1.9"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="text-white dark:text-zinc-950"
-            initial={false}
-            animate={{
-              pathLength: checked ? 1 : 0,
-              opacity: checked ? 1 : 0,
-            }}
-            transition={{ duration: 0.18, ease: EASE_PRECISION }}
-          />
+          {indeterminate && !checked ? (
+            <motion.path
+              d="M2.75 6H9.25"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              className="text-white dark:text-zinc-950"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: 1 }}
+              transition={{ duration: 0.16, ease: EASE_PRECISION }}
+            />
+          ) : (
+            <motion.path
+              d="M2.5 6.2L4.9 8.6L9.5 3.6"
+              stroke="currentColor"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="text-white dark:text-zinc-950"
+              initial={false}
+              animate={{
+                pathLength: checked ? 1 : 0,
+                opacity: checked ? 1 : 0,
+              }}
+              transition={{ duration: 0.18, ease: EASE_PRECISION }}
+            />
+          )}
         </svg>
       </motion.button>
       {label}
@@ -184,6 +207,7 @@ export function PrecisionSelect<T extends string | number = string>({
     bottom?: number;
     left: number;
     minWidth: number;
+    maxHeight: number;
     openUp: boolean;
   } | null>(null);
 
@@ -194,8 +218,16 @@ export function PrecisionSelect<T extends string | number = string>({
     if (!el) return;
     const rect = el.getBoundingClientRect();
     const estHeight = Math.min(264, options.length * 32 + 12);
+    const titlebarSafeTop = getTitlebarSafeTop();
     const spaceBelow = window.innerHeight - rect.bottom - 10;
-    const openUp = spaceBelow < estHeight && rect.top > estHeight;
+    const spaceAbove = rect.top - titlebarSafeTop - 10;
+    const openUp =
+      spaceBelow < estHeight &&
+      (spaceAbove >= estHeight || spaceAbove > spaceBelow);
+    const maxHeight = Math.min(
+      256,
+      Math.max(120, (openUp ? spaceAbove : spaceBelow) - 6)
+    );
     const minWidth = Math.max(rect.width, 136);
     const rawLeft = align === "right" ? rect.right - minWidth : rect.left;
     const left = Math.max(
@@ -207,6 +239,7 @@ export function PrecisionSelect<T extends string | number = string>({
         bottom: window.innerHeight - rect.top + 6,
         left,
         minWidth,
+        maxHeight,
         openUp: true,
       });
     } else {
@@ -214,6 +247,7 @@ export function PrecisionSelect<T extends string | number = string>({
         top: rect.bottom + 6,
         left,
         minWidth,
+        maxHeight,
         openUp: false,
       });
     }
@@ -327,10 +361,11 @@ export function PrecisionSelect<T extends string | number = string>({
                   bottom: pos.bottom,
                   left: pos.left,
                   minWidth: pos.minWidth,
+                  maxHeight: pos.maxHeight,
                   transformOrigin: pos.openUp ? "bottom center" : "top center",
                 }}
                 className={cn(
-                  "z-[180] max-h-64 overflow-y-auto rounded-xl bg-white dark:bg-[#16161b] border border-zinc-200/90 dark:border-white/[0.11] shadow-modal-light dark:shadow-popover p-1 no-print",
+                  "z-[180] overflow-y-auto rounded-xl bg-white dark:bg-[#16161b] border border-zinc-200/90 dark:border-white/[0.11] shadow-modal-light dark:shadow-popover p-1 no-print",
                   menuClassName
                 )}
               >

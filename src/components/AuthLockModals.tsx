@@ -830,10 +830,10 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
       onClose={onClose}
       closeOnEsc
       zIndexClass="z-[70]"
-      panelClassName="w-full max-w-md"
+      panelClassName="w-full max-w-md flex flex-col"
     >
             {/* Header */}
-            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/55 dark:bg-white/[0.015] flex items-center justify-between">
+            <div className="shrink-0 px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/55 dark:bg-white/[0.015] flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <div className="h-8 w-8 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
                   <Lock className="h-4 w-4" />
@@ -854,7 +854,7 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
               </button>
             </div>
 
-            <form onSubmit={handleSubmit} className="p-6 space-y-5">
+            <form onSubmit={handleSubmit} className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
               {/* PIN Length Selector */}
               <div className="flex items-center justify-between gap-3">
                 <span className="text-xs font-medium text-zinc-700 dark:text-zinc-300">

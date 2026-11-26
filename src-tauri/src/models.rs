@@ -97,6 +97,29 @@ pub struct ImportResult {
     pub mode: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchUpdateInstrumentsInput {
+    pub ids: Vec<i64>,
+    pub category: Option<String>,
+    pub department: Option<String>,
+    pub location: Option<String>,
+    pub calibration_type: Option<String>,
+    pub exempt_calibration: Option<bool>,
+    pub last_cal_date: Option<String>,
+    pub cal_cycle_months: Option<i64>,
+    pub cal_agency: Option<String>,
+    /// "replace" | "append" | "clear"
+    pub remark_mode: Option<String>,
+    pub remark: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BatchOperationResult {
+    pub affected_count: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct WarningThreshold {

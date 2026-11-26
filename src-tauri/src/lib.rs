@@ -189,6 +189,8 @@ pub fn run() {
             commands::create_instrument,
             commands::update_instrument,
             commands::delete_instrument,
+            commands::batch_delete_instruments,
+            commands::batch_update_instruments,
             commands::batch_import_instruments,
             commands::list_reports,
             commands::add_report,

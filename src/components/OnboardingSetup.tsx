@@ -18,6 +18,7 @@ import {
 import { api } from "@/lib/api";
 import {
   ACCOUNT_BG_PRESETS,
+  LIGHT_TONE_MESH_IDS,
   saveAccountBg,
   type GrainMeshId,
 } from "@/lib/accountBackgrounds";
@@ -69,9 +70,6 @@ const ONBOARDING_QUICK_IDS: ReadonlyArray<GrainMeshId> = [
   "4",
   "9",
 ];
-
-// Bright pastel palettes where dark ink hero text reads crisper than white text
-const LIGHT_TONE_MESH_IDS = new Set<GrainMeshId>(["3", "5", "8", "9", "11"]);
 
 // Accent stop pairs per palette for subtle emblem / BorderBeam harmony
 const PALETTE_ACCENTS: Record<GrainMeshId, { from: string; to: string }> = {
@@ -563,8 +561,8 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Top-Right Skip / Replay & Preview Exit Pills */}
-      <div className="fixed top-6 right-7 z-30 flex items-center gap-2">
+      {/* Top-Right Skip / Replay & Preview Exit Pills (clear of macOS top drag strip) */}
+      <div className="fixed top-[max(1.5rem,calc(var(--titlebar-safe-top,0px)+0.75rem))] right-7 z-30 flex items-center gap-2">
         <AnimatePresence mode="wait">
           {stage === "intro" && showSkip ? (
             <motion.button

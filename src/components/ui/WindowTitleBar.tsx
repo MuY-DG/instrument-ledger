@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useLayoutEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isMacPlatform } from "@/components/AuthLockModals";
 import { isTauriEnvironment } from "@/lib/themeTransition";
@@ -35,6 +35,7 @@ export const WindowTitleBar: React.FC<WindowTitleBarProps> = ({
   useEffect(() => {
     if (!enabled) {
       document.documentElement.style.setProperty("--titlebar-h", "0px");
+      document.documentElement.style.setProperty("--titlebar-safe-top", "0px");
       return;
     }
 
@@ -68,12 +69,15 @@ export const WindowTitleBar: React.FC<WindowTitleBarProps> = ({
     };
   }, [enabled]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
+    const safeTop =
+      enabled && !isFullscreen ? `${MAC_TITLEBAR_HEIGHT_PX}px` : "0px";
     const h =
       enabled && !isFullscreen && !minimalDragOnly
         ? `${MAC_TITLEBAR_HEIGHT_PX}px`
         : "0px";
     document.documentElement.style.setProperty("--titlebar-h", h);
+    document.documentElement.style.setProperty("--titlebar-safe-top", safeTop);
   }, [enabled, isFullscreen, minimalDragOnly]);
 
   if (!enabled || isFullscreen) {

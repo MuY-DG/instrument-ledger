@@ -2,6 +2,7 @@ import React, { useMemo } from "react";
 import { motion } from "motion/react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PrecisionSelect, type SelectOption } from "@/components/ui/FormControls";
+import { SlidingNumber } from "@/components/ui/MotionPrimitives";
 import { SPRING_SNAPPY, TAP_SCALE_ICON } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -14,7 +15,7 @@ export const PAGE_SIZE_OPTIONS: ReadonlyArray<SelectOption<PageSizeOption>> = [
   { value: 50, label: "50 条/页" },
   { value: 100, label: "100 条/页" },
   { value: 200, label: "200 条/页" },
-  { value: "all", label: "全部", hint: "虚拟滚动" },
+  { value: "all", label: "全部" },
 ];
 
 export function parseStoredPageSize(raw: string): PageSizeOption {
@@ -64,8 +65,8 @@ interface TablePaginationProps {
   currentPage: number;
   totalPages: number;
   totalItems: number;
+  categoryTotal?: number;
   pageSize: PageSizeOption;
-  isVirtualActive: boolean;
   onPageChange: (page: number) => void;
   onPageSizeChange: (nextSize: PageSizeOption) => void;
 }
@@ -74,34 +75,44 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
   currentPage,
   totalPages,
   totalItems,
+  categoryTotal,
   pageSize,
-  isVirtualActive,
   onPageChange,
   onPageSizeChange,
 }) => {
   const isShowAll = pageSize === "all";
+  const isFiltered =
+    typeof categoryTotal === "number" && categoryTotal !== totalItems;
   const pageTokens = useMemo(
     () => (isShowAll ? [] : buildPageTokens(currentPage, totalPages)),
     [isShowAll, currentPage, totalPages]
   );
 
-  if (totalItems === 0) {
-    return null;
-  }
-
   return (
     <div className="flex items-center gap-2.5">
-      {isShowAll && isVirtualActive && (
-        <span
-          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-indigo-500/[0.08] dark:bg-indigo-400/[0.12] border border-indigo-500/20 dark:border-indigo-400/20 text-[10.5px] font-medium text-indigo-600 dark:text-indigo-300"
-          title="当前以「全部」模式展示，已启用方向前瞻虚拟滚动引擎"
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 dark:bg-indigo-400" />
-          <span>虚拟滚动</span>
-        </span>
-      )}
+      {/* Compact total count readout capsule integrated alongside pagination */}
+      <div
+        className="h-7 px-2.5 rounded-lg bg-zinc-200/55 dark:bg-white/[0.05] border border-zinc-200/75 dark:border-white/[0.07] inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 select-none"
+        title={
+          isFiltered
+            ? `当前筛选共 ${totalItems} 条，本分类总计 ${categoryTotal} 条`
+            : `共 ${totalItems} 条设备记录`
+        }
+      >
+        <span>共</span>
+        <SlidingNumber
+          value={totalItems}
+          className="font-mono font-semibold text-zinc-800 dark:text-zinc-100"
+        />
+        {isFiltered && (
+          <span className="font-mono tabular-nums text-zinc-400 dark:text-zinc-500">
+            / {categoryTotal}
+          </span>
+        )}
+        <span>条</span>
+      </div>
 
-      {!isShowAll && totalPages > 1 && (
+      {totalItems > 0 && !isShowAll && totalPages > 1 && (
         <nav
           aria-label="台账分页导航"
           className="inline-flex items-center gap-0.5"
@@ -169,15 +180,17 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
         </nav>
       )}
 
-      <PrecisionSelect<PageSizeOption>
-        value={pageSize}
-        options={PAGE_SIZE_OPTIONS}
-        onChange={onPageSizeChange}
-        size="xs"
-        align="right"
-        className="h-7 px-2 py-0 text-[11px] font-mono min-w-[92px]"
-        menuClassName="min-w-[146px]"
-      />
+      {totalItems > 0 && (
+        <PrecisionSelect<PageSizeOption>
+          value={pageSize}
+          options={PAGE_SIZE_OPTIONS}
+          onChange={onPageSizeChange}
+          size="xs"
+          align="right"
+          className="h-7 px-2 py-0 text-[11px] font-mono min-w-[88px]"
+          menuClassName="min-w-[112px]"
+        />
+      )}
     </div>
   );
 };

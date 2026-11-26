@@ -5,6 +5,8 @@ import type {
   AuthStatus,
   BackupResult,
   Base64FilePayload,
+  BatchOperationResult,
+  BatchUpdateInstrumentsInput,
   CalibrationReport,
   CloseBehavior,
   DataDirInfo,
@@ -130,6 +132,10 @@ export const api = {
   updateInstrument: (id: number, input: InstrumentInput) =>
     invoke<Instrument>("update_instrument", { id, input }),
   deleteInstrument: (id: number) => invoke<void>("delete_instrument", { id }),
+  batchDeleteInstruments: (ids: number[]) =>
+    invoke<BatchOperationResult>("batch_delete_instruments", { ids }),
+  batchUpdateInstruments: (input: BatchUpdateInstrumentsInput) =>
+    invoke<BatchOperationResult>("batch_update_instruments", { input }),
   batchImportInstruments: (rows: InstrumentInput[], replaceExisting: boolean) =>
     invoke<ImportResult>("batch_import_instruments", { rows, replaceExisting }),
 

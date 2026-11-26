@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { AlertCircle } from "lucide-react";
 import { useMorphTooltip } from "@/components/ui/MorphTooltip";
-import { cn } from "@/lib/utils";
+import { cn, getTitlebarSafeTop } from "@/lib/utils";
 
 interface InfoTipProps {
   content: React.ReactNode;
@@ -72,7 +72,8 @@ export const InfoTip: React.FC<InfoTipProps> = ({
     const tipWidth = tooltipRef.current?.offsetWidth ?? 240;
     const tipHeight = tooltipRef.current?.offsetHeight ?? 44;
 
-    const canPlaceTop = rect.top - tipHeight - GAP >= VIEWPORT_MARGIN;
+    const topMargin = getTitlebarSafeTop() + VIEWPORT_MARGIN;
+    const canPlaceTop = rect.top - tipHeight - GAP >= topMargin;
     const canPlaceBottom =
       rect.bottom + tipHeight + GAP <= window.innerHeight - VIEWPORT_MARGIN;
 
@@ -91,7 +92,7 @@ export const InfoTip: React.FC<InfoTipProps> = ({
     const left = Math.min(Math.max(VIEWPORT_MARGIN, rawLeft), maxLeft);
     const top =
       actualPlacement === "top"
-        ? Math.max(VIEWPORT_MARGIN, rect.top - tipHeight - GAP)
+        ? Math.max(topMargin, rect.top - tipHeight - GAP)
         : Math.min(
             window.innerHeight - tipHeight - VIEWPORT_MARGIN,
             rect.bottom + GAP

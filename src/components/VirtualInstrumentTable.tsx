@@ -6,6 +6,7 @@ import { getThresholdVisuals } from "@/lib/thresholdColors";
 import { cn } from "@/lib/utils";
 import { LocationThumb } from "@/components/LocationThumb";
 import { StatusBadge } from "@/components/StatusBadge";
+import { PrecisionCheckbox } from "@/components/ui/FormControls";
 import { CopyButton } from "@/components/ui/InteractiveControls";
 import type { CategoryTab, Instrument } from "@/types";
 
@@ -21,10 +22,9 @@ const OVERSCAN_TRAIL = 10;
 // avoiding unnecessary reconciliations on smooth frame-by-frame scrolling.
 const REFILL_STEP = 4;
 
-// Pixel-aligned CSS Grid matching the previous 9-column table-fixed proportions
-// (fixed utility columns + 22:16:18 elastic columns, min total <= 1040px)
+// Pixel-aligned CSS Grid with leading selection checkbox column + sequence + 3 elastic columns + utility columns
 const TABLE_GRID_COLS =
-  "grid-cols-[54px_minmax(150px,22fr)_minmax(112px,16fr)_minmax(124px,18fr)_126px_108px_122px_132px_108px]";
+  "grid-cols-[44px_46px_minmax(144px,22fr)_minmax(110px,16fr)_minmax(122px,18fr)_124px_106px_120px_130px_104px]";
 
 interface WindowRange {
   start: number;
@@ -60,6 +60,8 @@ interface InstrumentRowProps {
   showCategoryBadge: boolean;
   isAdmin: boolean;
   isActive: boolean;
+  isSelected: boolean;
+  onToggleSelect: (id: number, shiftKey: boolean) => void;
   onView: (inst: Instrument) => void;
   onEdit: (inst: Instrument) => void;
   onDelete: (inst: Instrument) => void;
@@ -77,6 +79,8 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
     showCategoryBadge,
     isAdmin,
     isActive,
+    isSelected,
+    onToggleSelect,
     onView,
     onEdit,
     onDelete,
@@ -119,20 +123,49 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
     return (
       <div
         role="row"
+        aria-selected={isSelected}
         onClick={() => onView(inst)}
         style={rowStyle}
         className={cn(
           "group grid items-center border-b border-zinc-100 dark:border-white/[0.05] text-sm cursor-pointer transition-colors duration-150",
           TABLE_GRID_COLS,
           isActive
-            ? "bg-indigo-50/70 dark:bg-indigo-500/[0.08]"
-            : "hover:bg-zinc-50/90 dark:hover:bg-white/[0.025]"
+            ? "bg-indigo-50/75 dark:bg-indigo-500/[0.11]"
+            : isSelected
+              ? "bg-indigo-50/45 dark:bg-indigo-500/[0.065] hover:bg-indigo-50/75 dark:hover:bg-indigo-500/[0.1]"
+              : "hover:bg-zinc-50/90 dark:hover:bg-white/[0.025]"
         )}
       >
+        {/* Row Selection Checkbox (supports Shift+Click range selection) */}
+        <div
+          role="cell"
+          className="h-full pl-5 pr-1 flex items-center justify-center"
+          onClick={(e) => {
+            e.stopPropagation();
+            if ((e.target as HTMLElement).closest("button")) return;
+            if (e.shiftKey) {
+              window.getSelection()?.removeAllRanges();
+            }
+            onToggleSelect(inst.id, e.shiftKey);
+          }}
+        >
+          <PrecisionCheckbox
+            checked={isSelected}
+            ariaLabel={`选择 ${inst.name}`}
+            title="勾选以进行批量操作（按住 Shift 可连续多选）"
+            onChange={(_next, e) => {
+              if (e.shiftKey) {
+                window.getSelection()?.removeAllRanges();
+              }
+              onToggleSelect(inst.id, e.shiftKey);
+            }}
+          />
+        </div>
+
         {/* Sequence Number */}
         <div
           role="cell"
-          className="py-2.5 pl-6 pr-2 font-mono tabular-nums text-[11.5px] text-zinc-400 dark:text-zinc-600 whitespace-nowrap"
+          className="py-2.5 px-1.5 font-mono tabular-nums text-[11.5px] text-zinc-400 dark:text-zinc-600 whitespace-nowrap"
         >
           {String(rowNumber).padStart(2, "0")}
         </div>
@@ -352,12 +385,16 @@ interface VirtualInstrumentTableProps {
   activeTab: CategoryTab;
   isAdmin: boolean;
   activeInstrumentId: number | null;
+  selectedIds: ReadonlySet<number>;
+  selectAllLabel?: string;
   resetScrollKey: string;
   /** Starting 0-based index offset used for display row numbering across pages */
   rowOffset?: number;
   /** Enable virtualized rendering when item count exceeds virtualizeThreshold */
   virtualize?: boolean;
   virtualizeThreshold?: number;
+  onToggleSelect: (id: number, shiftKey: boolean) => void;
+  onToggleSelectAllVisible: () => void;
   onView: (inst: Instrument) => void;
   onEdit: (inst: Instrument) => void;
   onDelete: (inst: Instrument) => void;
@@ -380,10 +417,14 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
   activeTab,
   isAdmin,
   activeInstrumentId,
+  selectedIds,
+  selectAllLabel = "全选当前页",
   resetScrollKey,
   rowOffset = 0,
   virtualize = true,
   virtualizeThreshold = DEFAULT_VIRTUALIZE_THRESHOLD,
+  onToggleSelect,
+  onToggleSelectAllVisible,
   onView,
   onEdit,
   onDelete,
@@ -545,7 +586,20 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
   );
 
   const showCategoryBadge = activeTab === "all";
+  const hasSelection = selectedIds.size > 0;
   const totalHeight = total * ROW_HEIGHT;
+
+  const visibleSelectedCount = useMemo(() => {
+    if (selectedIds.size === 0 || items.length === 0) return 0;
+    let count = 0;
+    for (let i = 0; i < items.length; i++) {
+      if (selectedIds.has(items[i].id)) count++;
+    }
+    return count;
+  }, [items, selectedIds]);
+
+  const allVisibleSelected = total > 0 && visibleSelectedCount === total;
+  const someVisibleSelected = visibleSelectedCount > 0 && visibleSelectedCount < total;
 
   return (
     <div
@@ -553,7 +607,11 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
       onScroll={shouldVirtualize ? handleScroll : undefined}
       className="flex-1 overflow-auto overscroll-y-contain"
     >
-      <div role="table" aria-rowcount={total} className="w-full min-w-[1040px] text-left">
+      <div
+        role="table"
+        aria-rowcount={total}
+        className={cn("w-full min-w-[1050px] text-left", hasSelection && "pb-16")}
+      >
         {/* Solid opaque sticky header — eliminates per-frame WKWebView backdrop-filter readback */}
         <div
           role="rowgroup"
@@ -566,7 +624,20 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
               TABLE_GRID_COLS
             )}
           >
-            <div role="columnheader" className="py-2.5 pl-6 pr-2 font-mono">
+            <div
+              role="columnheader"
+              className="py-2.5 pl-5 pr-1 flex items-center justify-center"
+            >
+              <PrecisionCheckbox
+                checked={allVisibleSelected}
+                indeterminate={someVisibleSelected}
+                disabled={total === 0}
+                ariaLabel={allVisibleSelected ? "取消全选当前列表" : selectAllLabel}
+                title={allVisibleSelected ? "取消全选" : selectAllLabel}
+                onChange={() => onToggleSelectAllVisible()}
+              />
+            </div>
+            <div role="columnheader" className="py-2.5 px-1.5 font-mono">
               #
             </div>
             <div role="columnheader" className="py-2.5 px-3">
@@ -615,6 +686,8 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
                 showCategoryBadge={showCategoryBadge}
                 isAdmin={isAdmin}
                 isActive={activeInstrumentId === inst.id}
+                isSelected={selectedIds.has(inst.id)}
+                onToggleSelect={onToggleSelect}
                 onView={onView}
                 onEdit={onEdit}
                 onDelete={onDelete}

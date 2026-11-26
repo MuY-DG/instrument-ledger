@@ -49,7 +49,7 @@ export const UpdateBannerToast: React.FC<UpdateBannerToastProps> = ({
           animate={{ opacity: 1, x: 0, scale: 1 }}
           exit={{ opacity: 0, x: 112, scale: 0.98 }}
           transition={{ type: "spring", stiffness: 360, damping: 32 }}
-          className="fixed top-16 right-5 z-40 w-[364px] max-w-[calc(100vw-2rem)] rounded-2xl border border-zinc-200/90 dark:border-white/[0.12] bg-white dark:bg-zinc-900 shadow-modal-light dark:shadow-elevated overflow-hidden"
+          className="fixed top-[calc(var(--titlebar-h,0px)+4rem)] right-5 z-40 w-[364px] max-w-[calc(100vw-2rem)] rounded-2xl border border-zinc-200/90 dark:border-white/[0.12] bg-white dark:bg-zinc-900 shadow-modal-light dark:shadow-elevated overflow-hidden no-print"
           role="status"
           aria-live="polite"
         >

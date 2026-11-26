@@ -102,6 +102,26 @@ export interface ImportResult {
   mode: string;
 }
 
+export type BatchRemarkMode = "replace" | "append" | "clear";
+
+export interface BatchUpdateInstrumentsInput {
+  ids: number[];
+  category?: LedgerCategory;
+  department?: string;
+  location?: string;
+  calibrationType?: CalibrationType;
+  exemptCalibration?: boolean;
+  lastCalDate?: string;
+  calCycleMonths?: number;
+  calAgency?: string;
+  remarkMode?: BatchRemarkMode;
+  remark?: string;
+}
+
+export interface BatchOperationResult {
+  affectedCount: number;
+}
+
 export interface AppSettings {
   adminUsername: string;
   adminTitle: string;

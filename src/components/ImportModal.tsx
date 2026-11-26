@@ -134,9 +134,9 @@ export const ImportModal: React.FC<ImportModalProps> = ({
       open={openModal}
       onClose={resetAndClose}
       closeOnEsc
-      panelClassName="w-full max-w-2xl"
+      panelClassName="w-full max-w-2xl flex flex-col"
     >
-            <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between">
+            <div className="shrink-0 px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
@@ -153,7 +153,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               </button>
             </div>
 
-            <div className="p-6 space-y-5">
+            <div className="flex-1 min-h-0 overflow-y-auto p-6 space-y-5">
               <PrecisionFileDropZone
                 active={openModal}
                 iconKind="excel"
@@ -298,7 +298,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               )}
             </div>
 
-            <div className="px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between gap-2.5">
+            <div className="shrink-0 px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between gap-2.5">
               <span className="text-[11px] text-rose-600 dark:text-rose-400 font-medium">
                 {parsed && replaceExisting && existingCount > 0
                   ? `将清空现有 ${existingCount} 条记录，长按右侧按钮确认覆盖`

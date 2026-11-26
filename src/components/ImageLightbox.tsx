@@ -46,6 +46,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
   const [lensZoomIdx, setLensZoomIdx] = useState(1); // default 2.75x
   const [lensVisible, setLensVisible] = useState(false);
   const [lensSample, setLensSample] = useState<LensSample | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const imgRef = useRef<HTMLImageElement | null>(null);
 
   const lensZoom = LENS_ZOOM_STEPS[lensZoomIdx];
@@ -97,7 +98,8 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
 
   const updateLensFromPointer = (clientX: number, clientY: number) => {
     const img = imgRef.current;
-    if (!img || !lensEnabled) return;
+    const overlay = overlayRef.current;
+    if (!img || !overlay || !lensEnabled) return;
     const rect = img.getBoundingClientRect();
     const inside =
       clientX >= rect.left &&
@@ -110,10 +112,11 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
       return;
     }
 
+    const overlayRect = overlay.getBoundingClientRect();
     const cx = rect.left + rect.width / 2;
     const cy = rect.top + rect.height / 2;
-    const targetX = clientX - LENS_SIZE / 2;
-    const targetY = clientY - LENS_SIZE / 2;
+    const targetX = clientX - overlayRect.left - LENS_SIZE / 2;
+    const targetY = clientY - overlayRect.top - LENS_SIZE / 2;
     if (!lensVisible) {
       rawX.jump(targetX);
       rawY.jump(targetY);
@@ -136,16 +139,17 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
     <AnimatePresence>
       {photoPath && (
         <motion.div
+          ref={overlayRef}
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.18 }}
-          className="fixed inset-0 z-50 bg-white/15 dark:bg-black/40 backdrop-blur-xl flex flex-col no-print"
+          className="fixed inset-x-0 bottom-0 top-[var(--titlebar-h,0px)] z-50 overflow-hidden bg-white/15 dark:bg-black/40 backdrop-blur-xl flex flex-col no-print"
           onClick={onClose}
         >
           {/* Translucent toolbar — keeps full frosted-glass stage while sharpening text & controls */}
           <div
-            className="flex items-center justify-between gap-4 px-6 py-4 text-zinc-900 dark:text-white border-b border-zinc-900/[0.06] dark:border-white/[0.08]"
+            className="shrink-0 flex items-center justify-between gap-4 px-6 py-4 text-zinc-900 dark:text-white border-b border-zinc-900/[0.06] dark:border-white/[0.08]"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="min-w-0">
@@ -302,7 +306,7 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                   if (lensEnabled) updateLensFromPointer(e.clientX, e.clientY);
                 }}
                 className={cn(
-                  "max-h-[80vh] max-w-[85vw] object-contain rounded-xl ring-1 ring-black/[0.08] dark:ring-white/[0.1] shadow-[0_24px_64px_-12px_rgba(15,23,42,0.22)] dark:shadow-2xl select-none",
+                  "max-h-[calc(80vh-var(--titlebar-h,0px))] max-w-[85vw] object-contain rounded-xl ring-1 ring-black/[0.08] dark:ring-white/[0.1] shadow-[0_24px_64px_-12px_rgba(15,23,42,0.22)] dark:shadow-2xl select-none",
                   lensEnabled && "cursor-crosshair"
                 )}
               />
@@ -311,85 +315,85 @@ export const ImageLightbox: React.FC<ImageLightboxProps> = ({
                 图片加载失败
               </div>
             )}
+          </div>
 
-            {/* Floating Hint Pill when Optical Lens is enabled */}
-            <AnimatePresence>
-              {lensEnabled && !lensVisible && src && (
-                <motion.div
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  transition={{ duration: 0.18 }}
-                  className="pointer-events-none fixed bottom-7 left-1/2 -translate-x-1/2 px-3.5 py-1.5 rounded-full bg-zinc-900/90 border border-white/15 text-[11px] text-zinc-200 backdrop-blur-md shadow-elevated"
-                >
-                  移动鼠标至图片任意区域检视细节 · 滚轮切换倍率 ({lensZoom}×) · 按 M 关闭
-                </motion.div>
-              )}
-            </AnimatePresence>
+          {/* Floating Hint Pill when Optical Lens is enabled */}
+          <AnimatePresence>
+            {lensEnabled && !lensVisible && src && (
+              <motion.div
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: 8 }}
+                transition={{ duration: 0.18 }}
+                className="pointer-events-none absolute bottom-7 left-1/2 -translate-x-1/2 z-[60] px-3.5 py-1.5 rounded-full bg-zinc-900/90 border border-white/15 text-[11px] text-zinc-200 backdrop-blur-md shadow-elevated"
+              >
+                移动鼠标至图片任意区域检视细节 · 滚轮切换倍率 ({lensZoom}×) · 按 M 关闭
+              </motion.div>
+            )}
+          </AnimatePresence>
 
-            {/* Optical Water-Drop Glass Lens Portal Overlay */}
-            <AnimatePresence>
-              {lensEnabled && lensVisible && lensSample && src && (
-                <motion.div
-                  aria-hidden="true"
-                  initial={{ opacity: 0, scale: 0.72 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.78 }}
-                  transition={SPRING_SNAPPY}
+          {/* Optical Water-Drop Glass Lens Overlay (positioned relative to lightbox to avoid backdrop-filter fixed-block offset) */}
+          <AnimatePresence>
+            {lensEnabled && lensVisible && lensSample && src && (
+              <motion.div
+                aria-hidden="true"
+                initial={{ opacity: 0, scale: 0.72 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.78 }}
+                transition={SPRING_SNAPPY}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: LENS_SIZE,
+                  height: LENS_SIZE,
+                  x: lensX,
+                  y: lensY,
+                }}
+                className="pointer-events-none z-[65] rounded-full overflow-hidden border border-white/35 bg-[#0b0b0e] shadow-[0_24px_60px_rgba(0,0,0,0.68),0_0_0_1px_rgba(255,255,255,0.12),inset_0_0_24px_rgba(255,255,255,0.18)]"
+              >
+                {/* Pixel-exact magnified image surface (supports scale & 90° rotations) */}
+                <img
+                  src={src}
+                  alt=""
+                  draggable={false}
                   style={{
-                    position: "fixed",
+                    position: "absolute",
                     top: 0,
                     left: 0,
-                    width: LENS_SIZE,
-                    height: LENS_SIZE,
-                    x: lensX,
-                    y: lensY,
+                    width: lensSample.baseW,
+                    height: lensSample.baseH,
+                    maxWidth: "none",
+                    maxHeight: "none",
+                    transformOrigin: "center center",
+                    transform: `translate(${LENS_SIZE / 2 - lensSample.dx * lensZoom - lensSample.baseW / 2}px, ${LENS_SIZE / 2 - lensSample.dy * lensZoom - lensSample.baseH / 2}px) scale(${scale * lensZoom}) rotate(${rotation}deg)`,
                   }}
-                  className="pointer-events-none z-[65] rounded-full overflow-hidden border border-white/35 bg-[#0b0b0e] shadow-[0_24px_60px_rgba(0,0,0,0.68),0_0_0_1px_rgba(255,255,255,0.12),inset_0_0_24px_rgba(255,255,255,0.18)]"
-                >
-                  {/* Pixel-exact magnified image surface (supports scale & 90° rotations) */}
-                  <img
-                    src={src}
-                    alt=""
-                    draggable={false}
-                    style={{
-                      position: "absolute",
-                      top: 0,
-                      left: 0,
-                      width: lensSample.baseW,
-                      height: lensSample.baseH,
-                      maxWidth: "none",
-                      maxHeight: "none",
-                      transformOrigin: "center center",
-                      transform: `translate(${LENS_SIZE / 2 - lensSample.dx * lensZoom - lensSample.baseW / 2}px, ${LENS_SIZE / 2 - lensSample.dy * lensZoom - lensSample.baseH / 2}px) scale(${scale * lensZoom}) rotate(${rotation}deg)`,
-                    }}
-                    className="select-none pointer-events-none"
-                  />
+                  className="select-none pointer-events-none"
+                />
 
-                  {/* Subtle glass specular curvature sheen & inner rim refraction */}
-                  <div
-                    className="absolute inset-0 rounded-full pointer-events-none"
-                    style={{
-                      background:
-                        "radial-gradient(circle at 30% 24%, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 36%, transparent 62%), radial-gradient(circle at 50% 50%, transparent 72%, rgba(0,0,0,0.28) 100%)",
-                      boxShadow: "inset 0 1.5px 3px rgba(255,255,255,0.4)",
-                    }}
-                  />
+                {/* Subtle glass specular curvature sheen & inner rim refraction */}
+                <div
+                  className="absolute inset-0 rounded-full pointer-events-none"
+                  style={{
+                    background:
+                      "radial-gradient(circle at 30% 24%, rgba(255,255,255,0.22) 0%, rgba(255,255,255,0.04) 36%, transparent 62%), radial-gradient(circle at 50% 50%, transparent 72%, rgba(0,0,0,0.28) 100%)",
+                    boxShadow: "inset 0 1.5px 3px rgba(255,255,255,0.4)",
+                  }}
+                />
 
-                  {/* Minimalist precision optical reticle */}
-                  <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                    <span className="h-3.5 w-px bg-white/45 shadow-[0_0_3px_rgba(0,0,0,0.8)]" />
-                    <span className="absolute w-3.5 h-px bg-white/45 shadow-[0_0_3px_rgba(0,0,0,0.8)]" />
-                  </div>
+                {/* Minimalist precision optical reticle */}
+                <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <span className="h-3.5 w-px bg-white/45 shadow-[0_0_3px_rgba(0,0,0,0.8)]" />
+                  <span className="absolute w-3.5 h-px bg-white/45 shadow-[0_0_3px_rgba(0,0,0,0.8)]" />
+                </div>
 
-                  {/* Magnification Readout Pill */}
-                  <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-black/65 backdrop-blur-md border border-white/15 text-[10px] font-mono tabular-nums text-white/95">
-                    {(scale * lensZoom).toFixed(1)}×
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
+                {/* Magnification Readout Pill */}
+                <div className="absolute bottom-2.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full bg-black/65 backdrop-blur-md border border-white/15 text-[10px] font-mono tabular-nums text-white/95">
+                  {(scale * lensZoom).toFixed(1)}×
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
         </motion.div>
       )}
     </AnimatePresence>

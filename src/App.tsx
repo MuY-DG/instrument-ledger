@@ -16,6 +16,7 @@ import {
   CalendarClock,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CloudDownload,
   Download,
@@ -27,8 +28,6 @@ import {
   Lock,
   LogIn,
   LogOut,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Printer,
   Search,
@@ -54,6 +53,8 @@ import {
 import { cn } from "@/lib/utils";
 import { OnboardingSetup } from "@/components/OnboardingSetup";
 import { VirtualInstrumentTable } from "@/components/VirtualInstrumentTable";
+import { BatchActionBar } from "@/components/BatchActionBar";
+import { BatchEditModal } from "@/components/BatchEditModal";
 import {
   DEFAULT_PAGE_SIZE,
   TablePagination,
@@ -99,11 +100,13 @@ import {
   useActionStatus,
 } from "@/components/ui/InteractiveControls";
 import {
+  LIGHT_TONE_MESH_IDS,
   isGrainMeshId,
   loadAccountBg,
   saveAccountBg,
   type AccountBgId,
 } from "@/lib/accountBackgrounds";
+import { SilkFlowCanvas } from "@/components/ui/SilkFlowCanvas";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   getNextThemePreference,
@@ -303,11 +306,24 @@ export default function App() {
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [printMounted, setPrintMounted] = useState(false);
+  const [printOverrideItems, setPrintOverrideItems] = useState<Instrument[] | null>(
+    null
+  );
+
+  // Multi-row selection & batch operations state
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(() => new Set());
+  const lastSelectedIdRef = useRef<number | null>(null);
+  const [batchEditOpen, setBatchEditOpen] = useState(false);
+  const [batchDeleting, setBatchDeleting] = useState(false);
+  const [batchExporting, setBatchExporting] = useState(false);
 
   // Mount PrintLedgerView strictly on demand (eliminates hundreds of hidden DOM nodes)
   useEffect(() => {
     const onBeforePrint = () => setPrintMounted(true);
-    const onAfterPrint = () => setPrintMounted(false);
+    const onAfterPrint = () => {
+      setPrintMounted(false);
+      setPrintOverrideItems(null);
+    };
     window.addEventListener("beforeprint", onBeforePrint);
     window.addEventListener("afterprint", onAfterPrint);
     return () => {
@@ -1155,15 +1171,147 @@ export default function App() {
     );
   }, [deferredFilteredInstruments, isShowAll, pageStartIndex, pageSize]);
 
+  // Keep selected IDs strictly scoped to currently visible filtered records (prevents accidental edits/deletes on hidden items)
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const validSet = new Set(filteredInstruments.map((i) => i.id));
+      let changed = false;
+      const next = new Set<number>();
+      prev.forEach((id) => {
+        if (validSet.has(id)) next.add(id);
+        else changed = true;
+      });
+      return changed ? next : prev;
+    });
+  }, [filteredInstruments]);
+
+  const selectedInstruments = useMemo(() => {
+    if (selectedIds.size === 0) return [];
+    return filteredInstruments.filter((i) => selectedIds.has(i.id));
+  }, [filteredInstruments, selectedIds]);
+
+  const allVisibleSelected = useMemo(() => {
+    if (pagedInstruments.length === 0 || selectedIds.size === 0) return false;
+    for (let i = 0; i < pagedInstruments.length; i++) {
+      if (!selectedIds.has(pagedInstruments[i].id)) return false;
+    }
+    return true;
+  }, [pagedInstruments, selectedIds]);
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    lastSelectedIdRef.current = null;
+  }, []);
+
+  const handleToggleSelect = useCallback(
+    (id: number, shiftKey: boolean) => {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        const anchorId = lastSelectedIdRef.current;
+        if (shiftKey && anchorId !== null && anchorId !== id) {
+          const list = deferredFilteredInstruments;
+          const startIdx = list.findIndex((item) => item.id === anchorId);
+          const endIdx = list.findIndex((item) => item.id === id);
+          if (startIdx !== -1 && endIdx !== -1) {
+            const lo = Math.min(startIdx, endIdx);
+            const hi = Math.max(startIdx, endIdx);
+            const shouldSelect = !prev.has(id);
+            for (let i = lo; i <= hi; i++) {
+              if (shouldSelect) next.add(list[i].id);
+              else next.delete(list[i].id);
+            }
+            return next;
+          }
+        }
+        if (next.has(id)) next.delete(id);
+        else next.add(id);
+        return next;
+      });
+      lastSelectedIdRef.current = id;
+    },
+    [deferredFilteredInstruments]
+  );
+
+  const handleToggleSelectAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      if (pagedInstruments.length === 0) return prev;
+      let allChecked = true;
+      for (let i = 0; i < pagedInstruments.length; i++) {
+        if (!prev.has(pagedInstruments[i].id)) {
+          allChecked = false;
+          break;
+        }
+      }
+      const next = new Set(prev);
+      if (allChecked) {
+        for (let i = 0; i < pagedInstruments.length; i++) {
+          next.delete(pagedInstruments[i].id);
+        }
+      } else {
+        for (let i = 0; i < pagedInstruments.length; i++) {
+          next.add(pagedInstruments[i].id);
+        }
+      }
+      return next;
+    });
+    lastSelectedIdRef.current = null;
+  }, [pagedInstruments]);
+
+  const handleSelectAllFiltered = useCallback(() => {
+    setSelectedIds(new Set(filteredInstruments.map((i) => i.id)));
+    lastSelectedIdRef.current = null;
+  }, [filteredInstruments]);
+
+  // Esc clears active table selection when no overlay/modal is open
+  useEffect(() => {
+    if (
+      selectedIds.size === 0 ||
+      batchEditOpen ||
+      drawerOpen ||
+      commandOpen ||
+      settingsModalOpen ||
+      alertModalOpen ||
+      importModalOpen ||
+      loginModalOpen ||
+      Boolean(lightboxState) ||
+      Boolean(reportInstrument) ||
+      appLockSetupState.open ||
+      closePromptOpen ||
+      onboardingPreviewOpen ||
+      auth.isLocked
+    ) {
+      return;
+    }
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        clearSelection();
+      }
+    };
+    window.addEventListener("keydown", onEsc);
+    return () => window.removeEventListener("keydown", onEsc);
+  }, [
+    selectedIds.size,
+    batchEditOpen,
+    drawerOpen,
+    commandOpen,
+    settingsModalOpen,
+    alertModalOpen,
+    importModalOpen,
+    loginModalOpen,
+    lightboxState,
+    reportInstrument,
+    appLockSetupState.open,
+    closePromptOpen,
+    onboardingPreviewOpen,
+    auth.isLocked,
+    clearSelection,
+  ]);
+
   // "全部" mode activates the refactored virtual engine (> 50 rows);
   // numeric pages (30/50/100) render natively with zero flash, while 200/page
   // automatically engages virtualization if > 120 rows are present.
   const virtualizeThreshold = isShowAll ? 50 : 120;
-  const isVirtualActive = pagedInstruments.length > virtualizeThreshold;
-  const pageRangeStart = totalFilteredCount > 0 ? pageStartIndex + 1 : 0;
-  const pageRangeEnd = isShowAll
-    ? totalFilteredCount
-    : Math.min(totalFilteredCount, pageStartIndex + pagedInstruments.length);
 
   const handlePageSizeChange = useCallback(
     (nextSize: PageSizeOption) => {
@@ -1188,6 +1336,9 @@ export default function App() {
     setAlertModalOpen(false);
     setCommandOpen(false);
     setImportModalOpen(false);
+    setBatchEditOpen(false);
+    setSelectedIds(new Set());
+    lastSelectedIdRef.current = null;
     setReportInstrument(null);
     setLightboxState(null);
     setUpdatePopupOpen(false);
@@ -1285,16 +1436,29 @@ export default function App() {
     [notify]
   );
 
-  const handleExportExcel = async (onlyFiltered: boolean) => {
+  const handleExportExcel = async (
+    scope: "all" | "filtered" | "selected"
+  ) => {
     setExportMenuOpen(false);
-    const list = onlyFiltered ? filteredInstruments : instruments;
+    const list =
+      scope === "selected"
+        ? selectedInstruments
+        : scope === "filtered"
+          ? filteredInstruments
+          : instruments;
     if (list.length === 0) {
       notify("当前没有可导出的台账记录", "error");
       return;
     }
 
+    const isBatch = scope === "selected";
     try {
-      const suffix = onlyFiltered ? "筛选结果" : "完整双台账";
+      const suffix =
+        scope === "selected"
+          ? `已选${list.length}项`
+          : scope === "filtered"
+            ? "筛选结果"
+            : "完整双台账";
       const dest = await save({
         title: "导出监视与测量管理台账 Excel",
         defaultPath: `${settings.docCode || "JSSK-MPR-170"}_${settings.docTitle || "仪器台账"}_${suffix}_${getTodayStr()}.xlsx`,
@@ -1302,7 +1466,9 @@ export default function App() {
       });
       if (!dest) return;
 
-      setExportStatus("loading");
+      if (isBatch) setBatchExporting(true);
+      else setExportStatus("loading");
+
       let logoPayload: { mime: string; base64: string } | null = null;
       if (settings.companyLogoPath) {
         try {
@@ -1316,15 +1482,57 @@ export default function App() {
       const bytes = await exportJsskExcel(list, settings, logoPayload);
       const b64 = uint8ArrayToBase64(bytes);
       await api.writeExternalFileBase64(dest, b64);
-      setExportSuccess();
+      if (!isBatch) setExportSuccess();
       notify(`Excel 台账已导出（共 ${list.length} 条记录）`, "success");
     } catch (err) {
-      setExportStatus("idle");
+      if (!isBatch) setExportStatus("idle");
       notify(`导出 Excel 失败：${String(err)}`, "error");
+    } finally {
+      if (isBatch) setBatchExporting(false);
     }
   };
 
-  const handlePrint = useCallback(() => {
+  const handleBatchDelete = useCallback(async () => {
+    if (batchDeleting || selectedInstruments.length === 0) return;
+    const count = selectedInstruments.length;
+    const totalReports = selectedInstruments.reduce(
+      (sum, inst) => sum + inst.reportCount,
+      0
+    );
+    const ok = await confirmDialog({
+      title: `批量删除 ${count} 台设备`,
+      description: `确定永久删除已选中的 ${count} 台设备记录？${
+        totalReports > 0
+          ? `将同时清理关联的位置照片及 ${totalReports} 份校验报告，`
+          : "将同时清理关联的位置照片，"
+      }此操作不可恢复。`,
+      confirmText: "按住批量删除",
+      destructive: true,
+      holdToConfirm: true,
+    });
+    if (!ok) return;
+
+    const ids = selectedInstruments.map((i) => i.id);
+    const idSet = new Set(ids);
+    setBatchDeleting(true);
+    try {
+      const res = await api.batchDeleteInstruments(ids);
+      setInstruments((prev) => prev.filter((i) => !idSet.has(i.id)));
+      clearSelection();
+      if (editingInstrument && idSet.has(editingInstrument.id)) {
+        setDrawerOpen(false);
+        setEditingInstrument(null);
+      }
+      notify(`已批量删除 ${res.affectedCount} 台设备记录`, "success");
+    } catch (err) {
+      notify(`批量删除失败：${String(err)}`, "error");
+    } finally {
+      setBatchDeleting(false);
+    }
+  }, [batchDeleting, selectedInstruments, clearSelection, editingInstrument, notify]);
+
+  const handlePrint = useCallback((itemsOverride?: Instrument[]) => {
+    setPrintOverrideItems(itemsOverride ?? null);
     setPrintMounted(true);
     window.requestAnimationFrame(() => {
       window.requestAnimationFrame(() => {
@@ -1489,18 +1697,19 @@ export default function App() {
           transition={{ duration: 0.32, ease: EASE_PRECISION }}
           className="flex-1 flex min-h-0 no-print"
         >
-          {/* Left Collapsible Desktop Navigation Sidebar */}
+          {/* Left Collapsible Desktop Navigation Sidebar + Edge-Mounted Mid-Height Toggle */}
+          <div className="relative shrink-0 flex h-full z-20">
           <motion.aside
             initial={false}
             animate={{ width: sidebarCollapsed ? 64 : 248 }}
             transition={SPRING_SMOOTH}
-            className="shrink-0 bg-[#f4f5f7] dark:bg-[#0d0d10] border-r border-zinc-200/85 dark:border-white/[0.07] flex flex-col select-none overflow-hidden"
+            className="h-full bg-[#f4f5f7] dark:bg-[#0d0d10] border-r border-zinc-200/85 dark:border-white/[0.07] flex flex-col select-none overflow-hidden"
           >
-            {/* Brand Identity & Collapse Trigger */}
+            {/* Brand Identity */}
             <div
               className={cn(
                 "pt-4 pb-3 flex items-center gap-2",
-                sidebarCollapsed ? "px-2 justify-center flex-col gap-2" : "px-4 justify-between"
+                sidebarCollapsed ? "px-2 justify-center" : "px-4"
               )}
             >
               <div className="flex items-center gap-2.5 min-w-0">
@@ -1545,27 +1754,9 @@ export default function App() {
                     <div className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 truncate tracking-tight">
                       {settings.docTitle || "监视与测量管理台账"}
                     </div>
-                    <div className="text-[10.5px] font-mono text-zinc-500 dark:text-zinc-500 truncate">
-                      {settings.docCode} · Ver.{settings.docVersion}
-                    </div>
                   </div>
                 )}
               </div>
-
-              {!sidebarCollapsed && (
-                <MorphTooltip content="折叠侧边栏 (⌘B)" placement="right">
-                  <motion.button
-                    type="button"
-                    whileTap={TAP_SCALE_ICON}
-                    transition={SPRING_SNAPPY}
-                    onClick={toggleSidebar}
-                    aria-label="折叠侧边栏"
-                    className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] transition-colors shrink-0"
-                  >
-                    <PanelLeftClose className="h-3.5 w-3.5" />
-                  </motion.button>
-                </MorphTooltip>
-              )}
             </div>
 
             {/* Command Palette Quick Trigger */}
@@ -1875,25 +2066,33 @@ export default function App() {
                         whileTap={TAP_SCALE_ICON}
                         transition={SPRING_SNAPPY}
                         onClick={() => openSettingsTab("account")}
-                        data-av={
+                        className={cn(
+                          "relative h-9 w-9 rounded-xl border shadow-tactile flex items-center justify-center overflow-hidden",
                           !avatarDataUrl && isGrainMeshId(accountBg)
-                            ? accountBg
-                            : undefined
-                        }
-                        className="h-9 w-9 rounded-xl bg-white dark:bg-white/[0.05] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile flex items-center justify-center overflow-hidden"
+                            ? "border-black/10 dark:border-white/15"
+                            : "bg-white dark:bg-white/[0.05] border-zinc-200/85 dark:border-white/[0.08]"
+                        )}
                       >
+                        {!avatarDataUrl && isGrainMeshId(accountBg) && (
+                          <SilkFlowCanvas
+                            paletteId={accountBg}
+                            paused={auth.isLocked || onboardingPreviewOpen}
+                          />
+                        )}
                         {avatarDataUrl ? (
                           <img
                             src={avatarDataUrl}
                             alt="头像"
-                            className="h-full w-full object-cover"
+                            className="relative z-10 h-full w-full object-cover"
                           />
                         ) : (
                           <span
                             className={cn(
-                              "text-xs font-semibold uppercase",
+                              "relative z-10 text-xs font-semibold uppercase",
                               isGrainMeshId(accountBg)
-                                ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
+                                ? LIGHT_TONE_MESH_IDS.has(accountBg)
+                                  ? "text-zinc-950 drop-shadow-[0_1px_1px_rgba(255,255,255,0.45)]"
+                                  : "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
                                 : "text-emerald-700 dark:text-emerald-400"
                             )}
                           >
@@ -1917,19 +2116,6 @@ export default function App() {
                   )}
 
                   <div className="flex flex-col items-center gap-1 w-full">
-                    <MorphTooltip placement="right" content="展开侧边栏 (⌘B)">
-                      <motion.button
-                        type="button"
-                        whileTap={TAP_SCALE_ICON}
-                        transition={SPRING_SNAPPY}
-                        onClick={toggleSidebar}
-                        aria-label="展开侧边栏"
-                        className="h-8 w-9 rounded-lg text-zinc-500 hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white hover:bg-zinc-200/65 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors"
-                      >
-                        <PanelLeftOpen className="h-3.5 w-3.5" />
-                      </motion.button>
-                    </MorphTooltip>
-
                     <MorphTooltip
                       placement="right"
                       content={
@@ -2006,77 +2192,108 @@ export default function App() {
                 </>
               ) : (
                 <>
-                  {auth.isAdmin ? (
-                    <div
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => openSettingsTab("account")}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          openSettingsTab("account");
-                        }
-                      }}
-                      title="账号与背景设置"
-                      className="btn-tactile relative overflow-hidden px-2.5 py-2 rounded-xl bg-white hover:bg-zinc-50/90 dark:bg-white/[0.04] dark:hover:bg-white/[0.07] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile flex items-center justify-between gap-2 cursor-pointer"
-                    >
-                      {/* Subtle grainy mesh ambient tint matching selected account cover */}
-                      {isGrainMeshId(accountBg) && (
-                        <>
-                          <span
-                            aria-hidden="true"
-                            data-av={accountBg}
-                            className="pointer-events-none absolute inset-0 opacity-[0.14] dark:opacity-[0.22]"
-                          />
-                          <span
-                            aria-hidden="true"
-                            data-av={accountBg}
-                            className="pointer-events-none absolute inset-y-0 left-0 w-[3px]"
-                          />
-                        </>
-                      )}
-                      <div className="relative z-10 flex items-center gap-2 min-w-0">
-                        {avatarDataUrl ? (
-                          <img
-                            src={avatarDataUrl}
-                            alt="头像"
-                            className="h-7 w-7 rounded-full object-cover border border-white/80 dark:border-white/20 shadow-sm shrink-0"
-                          />
-                        ) : (
-                          <div
-                            data-av={isGrainMeshId(accountBg) ? accountBg : undefined}
-                            className={cn(
-                              "h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold uppercase shrink-0",
-                              isGrainMeshId(accountBg)
-                                ? "text-white ring-1 ring-white/50 shadow-sm [text-shadow:0_1px_2px_rgba(0,0,0,0.3)]"
-                                : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
-                            )}
-                          >
-                            {auth.username.slice(0, 1) || "A"}
-                          </div>
+                  {auth.isAdmin ? (() => {
+                    const useSilk = isGrainMeshId(accountBg);
+                    const isLightSilk = useSilk && LIGHT_TONE_MESH_IDS.has(accountBg);
+                    return (
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => openSettingsTab("account")}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            openSettingsTab("account");
+                          }
+                        }}
+                        title="账号与背景设置"
+                        className={cn(
+                          "btn-tactile group relative overflow-hidden px-2.5 py-2 rounded-xl border flex items-center justify-between gap-2 cursor-pointer",
+                          useSilk
+                            ? isLightSilk
+                              ? "border-black/[0.08] dark:border-white/20 shadow-[0_2px_8px_-2px_rgba(15,23,42,0.12),inset_0_1px_0_rgba(255,255,255,0.45)]"
+                              : "border-black/10 dark:border-white/15 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.2),inset_0_1px_0_rgba(255,255,255,0.28)]"
+                            : "bg-white hover:bg-zinc-50/90 dark:bg-white/[0.04] dark:hover:bg-white/[0.07] border-zinc-200/85 dark:border-white/[0.08] shadow-tactile"
                         )}
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate">
-                            {auth.username}
+                      >
+                        {/* Flowing post-Netflix liquid-silk background matching onboarding */}
+                        {useSilk && (
+                          <>
+                            <SilkFlowCanvas
+                              paletteId={accountBg}
+                              paused={auth.isLocked || onboardingPreviewOpen}
+                            />
+                            <span
+                              aria-hidden="true"
+                              className={cn(
+                                "pointer-events-none absolute inset-0 transition-opacity duration-200",
+                                isLightSilk
+                                  ? "bg-gradient-to-r from-white/25 via-white/10 to-white/22 group-hover:opacity-80"
+                                  : "bg-gradient-to-r from-black/24 via-black/12 to-black/22 group-hover:opacity-80"
+                              )}
+                            />
+                          </>
+                        )}
+                        <div className="relative z-10 flex items-center gap-2 min-w-0">
+                          {avatarDataUrl ? (
+                            <img
+                              src={avatarDataUrl}
+                              alt="头像"
+                              className="h-7 w-7 rounded-full object-cover border border-white/80 dark:border-white/25 shadow-sm shrink-0"
+                            />
+                          ) : (
+                            <div
+                              className={cn(
+                                "h-7 w-7 rounded-full flex items-center justify-center text-[11px] font-semibold uppercase shrink-0",
+                                useSilk
+                                  ? isLightSilk
+                                    ? "bg-white/60 backdrop-blur-md text-zinc-900 ring-1 ring-white/80 shadow-sm"
+                                    : "bg-white/20 backdrop-blur-md text-white ring-1 ring-white/45 shadow-sm [text-shadow:0_1px_2px_rgba(0,0,0,0.28)]"
+                                  : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20"
+                              )}
+                            >
+                              {auth.username.slice(0, 1) || "A"}
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div
+                              className={cn(
+                                "text-xs font-medium truncate",
+                                useSilk
+                                  ? isLightSilk
+                                    ? "text-zinc-950 font-semibold [text-shadow:0_1px_1px_rgba(255,255,255,0.45)]"
+                                    : "text-white font-semibold [text-shadow:0_1px_2px_rgba(0,0,0,0.3)]"
+                                  : "text-zinc-900 dark:text-zinc-100"
+                              )}
+                            >
+                              {auth.username}
+                            </div>
                           </div>
                         </div>
+                        <MorphTooltip content="退出登录" placement="top">
+                          <motion.button
+                            type="button"
+                            whileTap={TAP_SCALE_ICON}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleLogout();
+                            }}
+                            className={cn(
+                              "relative z-10 p-1.5 rounded-lg transition",
+                              useSilk
+                                ? isLightSilk
+                                  ? "text-zinc-800/80 hover:text-zinc-950 hover:bg-black/[0.08]"
+                                  : "text-white/85 hover:text-white hover:bg-black/20"
+                                : "text-zinc-500 hover:text-zinc-800 dark:text-zinc-300 dark:hover:text-white hover:bg-white/70 dark:hover:bg-white/[0.1]"
+                            )}
+                            aria-label="退出登录"
+                          >
+                            <LogOut className="h-3.5 w-3.5" />
+                          </motion.button>
+                        </MorphTooltip>
                       </div>
-                      <MorphTooltip content="退出登录" placement="top">
-                        <motion.button
-                          type="button"
-                          whileTap={TAP_SCALE_ICON}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleLogout();
-                          }}
-                          className="relative z-10 p-1.5 rounded-lg text-zinc-500 hover:text-zinc-800 dark:text-zinc-300 dark:hover:text-white hover:bg-white/70 dark:hover:bg-white/[0.1] transition"
-                          aria-label="退出登录"
-                        >
-                          <LogOut className="h-3.5 w-3.5" />
-                        </motion.button>
-                      </MorphTooltip>
-                    </div>
-                  ) : (
+                    );
+                  })() : (
                     <motion.button
                       type="button"
                       whileTap={TAP_SCALE}
@@ -2209,8 +2426,37 @@ export default function App() {
             </div>
           </motion.aside>
 
+          {/* Edge-Mounted Vertical-Center Sidebar Collapse / Expand Handle */}
+          <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-1/2 z-20">
+            <MorphTooltip
+              placement="right"
+              content={sidebarCollapsed ? "展开侧边栏 (⌘B)" : "折叠侧边栏 (⌘B)"}
+            >
+              <motion.button
+                type="button"
+                whileHover={{ scale: 1.06 }}
+                whileTap={TAP_SCALE_ICON}
+                transition={SPRING_SNAPPY}
+                onClick={toggleSidebar}
+                aria-label={sidebarCollapsed ? "展开侧边栏" : "折叠侧边栏"}
+                aria-expanded={!sidebarCollapsed}
+                className="h-10 w-5 rounded-full bg-white dark:bg-[#16161b] hover:bg-zinc-50 dark:hover:bg-[#202028] border border-zinc-200/95 hover:border-zinc-300 dark:border-white/[0.12] dark:hover:border-white/[0.24] text-zinc-400 hover:text-zinc-900 dark:text-zinc-500 dark:hover:text-white shadow-tactile hover:shadow-surface flex items-center justify-center transition-colors cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40"
+              >
+                <motion.span
+                  initial={false}
+                  animate={{ rotate: sidebarCollapsed ? 180 : 0 }}
+                  transition={SPRING_SNAPPY}
+                  className="flex items-center justify-center"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </motion.span>
+              </motion.button>
+            </MorphTooltip>
+          </div>
+          </div>
+
           {/* Main Workspace Canvas */}
-          <div className="flex-1 flex flex-col min-w-0 bg-white dark:bg-[#09090b]">
+          <div className="relative flex-1 flex flex-col min-w-0 bg-white dark:bg-[#09090b]">
             {/* Minimalist Workspace Header */}
             <header className="h-14 px-6 border-b border-zinc-200/80 dark:border-white/[0.07] flex items-center justify-between gap-4 shrink-0 bg-white/90 dark:bg-[#09090b]">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -2427,7 +2673,7 @@ export default function App() {
                       >
                         <button
                           type="button"
-                          onClick={() => handleExportExcel(false)}
+                          onClick={() => handleExportExcel("all")}
                           className="w-full px-3 py-2 rounded-lg text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100/90 dark:hover:bg-white/[0.06] flex items-center justify-between gap-2 transition-colors"
                         >
                           <span className="inline-flex items-center gap-2 font-medium">
@@ -2438,7 +2684,7 @@ export default function App() {
                         </button>
                         <button
                           type="button"
-                          onClick={() => handleExportExcel(true)}
+                          onClick={() => handleExportExcel("filtered")}
                           className="w-full px-3 py-2 rounded-lg text-left text-xs text-zinc-700 dark:text-zinc-200 hover:bg-zinc-100/90 dark:hover:bg-white/[0.06] flex items-center gap-2 transition-colors"
                         >
                           <Download className="h-3.5 w-3.5 text-indigo-500 shrink-0" />
@@ -2446,6 +2692,18 @@ export default function App() {
                             导出当前视图 ({filteredInstruments.length})
                           </span>
                         </button>
+                        {selectedInstruments.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => handleExportExcel("selected")}
+                            className="w-full px-3 py-2 rounded-lg text-left text-xs text-indigo-600 dark:text-indigo-300 hover:bg-indigo-500/10 flex items-center gap-2 transition-colors"
+                          >
+                            <Download className="h-3.5 w-3.5 shrink-0" />
+                            <span className="font-medium">
+                              导出已选设备 ({selectedInstruments.length})
+                            </span>
+                          </button>
+                        )}
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -2455,7 +2713,7 @@ export default function App() {
                   type="button"
                   whileTap={TAP_SCALE}
                   transition={SPRING_SNAPPY}
-                  onClick={handlePrint}
+                  onClick={() => handlePrint()}
                   className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-zinc-700 dark:text-zinc-200 text-xs font-medium transition-colors"
                 >
                   <Printer className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-400" />
@@ -2776,10 +3034,14 @@ export default function App() {
                 activeInstrumentId={
                   drawerOpen ? (editingInstrument?.id ?? null) : null
                 }
+                selectedIds={selectedIds}
+                selectAllLabel={isShowAll ? "全选当前列表" : "全选当前页"}
                 rowOffset={pageStartIndex}
                 virtualize={isShowAll || pagedInstruments.length > 120}
                 virtualizeThreshold={virtualizeThreshold}
                 resetScrollKey={`${activeTab}|${statusFilter}|${expiryFilter}|${deptFilter}|${calTypeFilter}|${sortMode}|${pageSize}|${safePage}`}
+                onToggleSelect={handleToggleSelect}
+                onToggleSelectAllVisible={handleToggleSelectAllVisible}
                 onView={openViewDrawer}
                 onEdit={openEditDrawer}
                 onDelete={handleDelete}
@@ -2788,32 +3050,26 @@ export default function App() {
               />
             )}
 
+            {/* Floating Batch Action Dock when one or more rows are selected */}
+            <BatchActionBar
+              selectedCount={selectedInstruments.length}
+              totalFilteredCount={filteredInstruments.length}
+              allVisibleSelected={allVisibleSelected}
+              isAdmin={auth.isAdmin}
+              exporting={batchExporting}
+              deleting={batchDeleting}
+              onSelectAllFiltered={handleSelectAllFiltered}
+              onClearSelection={clearSelection}
+              onBatchEdit={() => setBatchEditOpen(true)}
+              onBatchExport={() => handleExportExcel("selected")}
+              onBatchPrint={() => handlePrint(selectedInstruments)}
+              onBatchDelete={handleBatchDelete}
+            />
+
             {/* Minimalist Desktop Status Bar & Pagination */}
             <footer className="h-11 px-6 border-t border-zinc-200/80 dark:border-white/[0.07] bg-zinc-50/75 dark:bg-[#0c0c0f] flex items-center justify-between gap-4 text-[11px] text-zinc-400 dark:text-zinc-500 shrink-0 select-none">
-              <div className="flex items-center gap-2 font-mono tabular-nums min-w-0">
-                <span className="truncate">
-                  {!isShowAll && totalFilteredCount > 0
-                    ? `第 ${pageRangeStart}–${pageRangeEnd} 项 · 共 ${totalFilteredCount} / ${categoryScoped.length} 项`
-                    : `共 ${totalFilteredCount} / ${categoryScoped.length} 项`}
-                </span>
-                <InfoTip
-                  placement="top"
-                  content="下次校验日期自动按「上次校验 + 周期(月) - 1天」计算"
-                />
-              </div>
-
-              <div className="flex items-center gap-3 shrink-0">
-                <TablePagination
-                  currentPage={safePage}
-                  totalPages={totalPages}
-                  totalItems={totalFilteredCount}
-                  pageSize={pageSize}
-                  isVirtualActive={isVirtualActive}
-                  onPageChange={setCurrentPage}
-                  onPageSizeChange={handlePageSizeChange}
-                />
-
-                <div className="hidden xl:flex items-center gap-2.5 pl-2.5 border-l border-zinc-200/80 dark:border-white/[0.07]">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="hidden md:flex items-center gap-2.5">
                   <span className="inline-flex items-center gap-1">
                     <KeycapBadge onClick={() => setCommandOpen(true)}>⌘K</KeycapBadge>
                     <span>检索</span>
@@ -2827,6 +3083,22 @@ export default function App() {
                     <span>侧栏</span>
                   </span>
                 </div>
+                <InfoTip
+                  placement="top"
+                  content="下次校验日期自动按「上次校验 + 周期(月) - 1天」计算"
+                />
+              </div>
+
+              <div className="flex items-center gap-3 shrink-0">
+                <TablePagination
+                  currentPage={safePage}
+                  totalPages={totalPages}
+                  totalItems={totalFilteredCount}
+                  categoryTotal={categoryScoped.length}
+                  pageSize={pageSize}
+                  onPageChange={setCurrentPage}
+                  onPageSizeChange={handlePageSizeChange}
+                />
               </div>
             </footer>
           </div>
@@ -2836,7 +3108,7 @@ export default function App() {
       {/* Dedicated Landscape A4 Print View (Mounted strictly when printing) */}
       {printMounted && (
         <PrintLedgerView
-          instruments={filteredInstruments}
+          instruments={printOverrideItems ?? filteredInstruments}
           settings={settings}
           activeCategory={activeTab}
           logoDataUrl={logoDataUrl}
@@ -2861,8 +3133,8 @@ export default function App() {
         onOpenAlerts={() => openAlertModal()}
         onCreateInstrument={openCreateDrawer}
         onOpenImport={() => setImportModalOpen(true)}
-        onExportAll={() => handleExportExcel(false)}
-        onPrint={handlePrint}
+        onExportAll={() => handleExportExcel("all")}
+        onPrint={() => handlePrint()}
         onLock={handleLock}
         onOpenSettings={openSettingsTab}
         onSelectThemePreference={(pref) => handleSelectThemePreference(pref)}
@@ -3033,6 +3305,20 @@ export default function App() {
         existingCount={instruments.length}
         onClose={() => setImportModalOpen(false)}
         onImported={() => refreshAll()}
+        onNotify={notify}
+      />
+
+      {/* Batch Edit Modal (Admin only) */}
+      <BatchEditModal
+        open={batchEditOpen && auth.isAdmin}
+        selectedInstruments={selectedInstruments}
+        allInstruments={instruments}
+        onClose={() => setBatchEditOpen(false)}
+        onUpdated={(affectedCount) => {
+          clearSelection();
+          refreshAll();
+          notify(`已批量更新 ${affectedCount} 台设备记录`, "success");
+        }}
         onNotify={notify}
       />
 
