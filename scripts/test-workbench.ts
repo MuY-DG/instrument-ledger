@@ -64,6 +64,31 @@ import {
   buildSpcExcelBlob,
   buildSpcSummaryText,
 } from "../src/workbench/tools/spc-cpk/core/export";
+import {
+  evaluateMeasurement,
+  lookupIso2768Angular,
+  lookupIso2768Geom,
+  lookupIso2768Linear,
+} from "../src/workbench/tools/iso-tolerance/core/iso2768";
+import {
+  getItMicrons,
+  parseIso286Notation,
+  recommendItGradesForTolerance,
+  resolveIso286Fit,
+  resolveIso286Zone,
+} from "../src/workbench/tools/iso-tolerance/core/iso286Engine";
+import {
+  resolveChecksheetItem,
+  summarizeChecksheet,
+} from "../src/workbench/tools/iso-tolerance/core/inspector";
+import { CHECKSHEET_SCENE_PRESETS } from "../src/workbench/tools/iso-tolerance/core/presets";
+import {
+  buildChecksheetExcelBlob,
+  buildChecksheetSummaryText,
+  buildFitSummaryText,
+  buildIso2768SummaryText,
+  buildToleranceHistoryExcelBlob,
+} from "../src/workbench/tools/iso-tolerance/core/export";
 
 async function main() {
   // 1. Registry checks
@@ -571,6 +596,161 @@ async function main() {
     "Re-importing exported SPC Excel workbook should recover raw measurements column"
   );
   console.log("✅ CPK / SPC Process Capability (AIAG constants, 6 presets, Nelson 8 rules, AD normality & 3-sheet Excel roundtrip) passed");
+
+  // 15. ISO 2768 & ISO 286 Tolerance / Fits Quick Reference audit
+  const isoTool = getWorkbenchToolById("iso-tolerance");
+  assert.ok(
+    isoTool && isoTool.status === "ready" && isoTool.keepAlive && typeof isoTool.load === "function",
+    "iso-tolerance tool should be registered as ready with lazy loader"
+  );
+
+  // ISO 2768-1 Linear, Chamfer & Angular golden checks
+  const lin25m = lookupIso2768Linear(25, "m", "linear");
+  assert.equal(lin25m.toleranceMm, 0.2);
+  assert.equal(lin25m.lowerLimitMm, 24.8);
+  assert.equal(lin25m.upperLimitMm, 25.2);
+  assert.equal(lookupIso2768Linear(2, "v", "linear").toleranceMm, null, "ISO 2768-1 v is undefined for 0.5..3 mm");
+  assert.equal(lookupIso2768Linear(2500, "f", "linear").toleranceMm, null, "ISO 2768-1 f is undefined for >2000..4000 mm");
+  assert.equal(lookupIso2768Linear(0.3, "m", "linear").toleranceMm, null, "<0.5 mm must not match general table");
+  assert.equal(lookupIso2768Linear(5, "c", "chamfer").toleranceMm, 1.0);
+  assert.equal(lookupIso2768Linear(8, "m", "chamfer").toleranceMm, 1.0);
+
+  const ang45 = lookupIso2768Angular(45, 30, "m");
+  assert.equal(ang45.toleranceArcMin, 30);
+  assert.equal(ang45.toleranceDms, "±0°30'");
+  assert.equal(ang45.toleranceDeg, 0.5);
+  assert.ok(ang45.chordDeviationMm > 0.25 && ang45.chordDeviationMm < 0.27);
+
+  // ISO 2768-2 GD&T & derived circularity / parallelism caps
+  const geom150K = lookupIso2768Geom(150, "K", "m");
+  assert.equal(geom150K.straightnessFlatness.valueMm, 0.4);
+  assert.equal(geom150K.perpendicularity.valueMm, 0.6);
+  assert.equal(geom150K.symmetry.valueMm, 0.6);
+  assert.equal(geom150K.runout.valueMm, 0.2);
+  assert.equal(geom150K.derivedCircularityMaxMm, 0.2, "Circularity capped by circular runout 0.2 mm");
+  assert.equal(geom150K.derivedParallelismMaxMm, 1.0, "Parallelism = max(size band 1.0, flatness 0.4)");
+
+  // ISO 286-1 IT grade checks (0..500 & >500..3150 mm)
+  assert.equal(getItMicrons(25, "6"), 13);
+  assert.equal(getItMicrons(25, "7"), 21);
+  assert.equal(getItMicrons(50, "7"), 25);
+  assert.equal(getItMicrons(600, "7"), 70);
+  assert.equal(getItMicrons(600, "5"), null, "IT5 is not defined above 500 mm in ISO 286-1 Table 1");
+
+  // ISO 286-2 Golden fit checks & Hole-basis <-> Shaft-basis mathematical equivalence (Delta rule proof!)
+  const fit25g6 = resolveIso286Fit({ nominalMm: 25, holeLetter: "H", holeGrade: "7", shaftLetter: "g", shaftGrade: "6" });
+  assert.equal(fit25g6.valid, true);
+  assert.equal(fit25g6.fitNature, "clearance");
+  assert.equal(fit25g6.hole.upperDevMicrons, 21);
+  assert.equal(fit25g6.hole.lowerDevMicrons, 0);
+  assert.equal(fit25g6.shaft.upperDevMicrons, -7);
+  assert.equal(fit25g6.shaft.lowerDevMicrons, -20);
+  assert.equal(fit25g6.minClearanceMicrons, 7);
+  assert.equal(fit25g6.maxClearanceMicrons, 41);
+
+  // H7/k6 vs K7/h6 exact equivalence at Ø25
+  const h7k6 = resolveIso286Fit({ nominalMm: 25, holeLetter: "H", holeGrade: "7", shaftLetter: "k", shaftGrade: "6" });
+  const k7h6 = resolveIso286Fit({ nominalMm: 25, holeLetter: "K", holeGrade: "7", shaftLetter: "h", shaftGrade: "6" });
+  assert.equal(h7k6.fitNature, "transition");
+  assert.equal(k7h6.hole.upperDevMicrons, 6);
+  assert.equal(k7h6.hole.lowerDevMicrons, -15);
+  assert.equal(h7k6.maxClearanceMicrons, k7h6.maxClearanceMicrons);
+  assert.equal(h7k6.minClearanceMicrons, k7h6.minClearanceMicrons);
+
+  // H7/m6 vs M7/h6 exact equivalence at Ø25
+  const h7m6 = resolveIso286Fit({ nominalMm: 25, holeLetter: "H", holeGrade: "7", shaftLetter: "m", shaftGrade: "6" });
+  const m7h6 = resolveIso286Fit({ nominalMm: 25, holeLetter: "M", holeGrade: "7", shaftLetter: "h", shaftGrade: "6" });
+  assert.equal(m7h6.hole.upperDevMicrons, 0);
+  assert.equal(m7h6.hole.lowerDevMicrons, -21);
+  assert.equal(h7m6.maxClearanceMicrons, m7h6.maxClearanceMicrons);
+  assert.equal(h7m6.minClearanceMicrons, m7h6.minClearanceMicrons);
+
+  // H7/j6 vs J7/h6 exact equivalence at Ø25
+  const h7j6 = resolveIso286Fit({ nominalMm: 25, holeLetter: "H", holeGrade: "7", shaftLetter: "j", shaftGrade: "6" });
+  const j7h6 = resolveIso286Fit({ nominalMm: 25, holeLetter: "J", holeGrade: "7", shaftLetter: "h", shaftGrade: "6" });
+  assert.equal(h7j6.maxClearanceMicrons, j7h6.maxClearanceMicrons);
+  assert.equal(h7j6.minClearanceMicrons, j7h6.minClearanceMicrons);
+
+  // H7/p6 vs P7/h6 exact interference equivalence at Ø40
+  const h7p6 = resolveIso286Fit({ nominalMm: 40, holeLetter: "H", holeGrade: "7", shaftLetter: "p", shaftGrade: "6" });
+  const p7h6 = resolveIso286Fit({ nominalMm: 40, holeLetter: "P", holeGrade: "7", shaftLetter: "h", shaftGrade: "6" });
+  assert.equal(h7p6.fitNature, "interference");
+  assert.equal(h7p6.minInterferenceMicrons, 1);
+  assert.equal(h7p6.maxInterferenceMicrons, 42);
+  assert.equal(p7h6.minInterferenceMicrons, 1);
+  assert.equal(p7h6.maxInterferenceMicrons, 42);
+  assert.ok(h7p6.shrinkFitThermal && h7p6.shrinkFitThermal.steelMaxDeltaC > 0);
+
+  // ISO 286-1 special rules: js7 half-micron, M6 at 250-315, N9 > 3 vs <= 3, large >500 mm, invalid range guards
+  const js7_25 = resolveIso286Zone({ nominalMm: 25, featureType: "shaft", letter: "js", grade: "7" });
+  assert.equal(js7_25.upperDevMicrons, 10.5);
+  assert.equal(js7_25.lowerDevMicrons, -10.5);
+
+  const m6_280 = resolveIso286Zone({ nominalMm: 280, featureType: "hole", letter: "M", grade: "6" });
+  assert.equal(m6_280.upperDevMicrons, -9);
+  assert.equal(m6_280.lowerDevMicrons, -41);
+
+  const n9_25 = resolveIso286Zone({ nominalMm: 25, featureType: "hole", letter: "N", grade: "9" });
+  assert.equal(n9_25.upperDevMicrons, 0);
+  assert.equal(n9_25.lowerDevMicrons, -52);
+
+  const n9_2 = resolveIso286Zone({ nominalMm: 2, featureType: "hole", letter: "N", grade: "9" });
+  assert.equal(n9_2.upperDevMicrons, -4);
+  assert.equal(n9_2.lowerDevMicrons, -29);
+
+  const fit600 = resolveIso286Fit({ nominalMm: 600, holeLetter: "H", holeGrade: "7", shaftLetter: "g", shaftGrade: "6" });
+  assert.equal(fit600.valid, true);
+  assert.equal(fit600.hole.upperDevMicrons, 70);
+  assert.equal(fit600.shaft.upperDevMicrons, -22);
+  assert.equal(fit600.shaft.lowerDevMicrons, -66);
+
+  assert.equal(resolveIso286Zone({ nominalMm: 20, featureType: "shaft", letter: "t", grade: "6" }).valid, false);
+  assert.equal(resolveIso286Zone({ nominalMm: 15, featureType: "shaft", letter: "cd", grade: "7" }).valid, false);
+  assert.equal(resolveIso286Zone({ nominalMm: 25, featureType: "hole", letter: "J", grade: "5" }).valid, false);
+
+  // Notation parser & reverse IT grade recommender
+  const parsedNote = parseIso286Notation("Ø25 H7/g6");
+  assert.ok(parsedNote && parsedNote.nominalMm === 25 && parsedNote.hole?.letter === "H" && parsedNote.shaft?.letter === "g");
+  const revIt = recommendItGradesForTolerance(25, 0.03);
+  assert.ok(revIt.length > 0 && (revIt[0].grade === "7" || revIt[0].grade === "8"));
+
+  // Measurement evaluator (ok / warning / ng)
+  assert.equal(evaluateMeasurement({ measured: 25.05, nominal: 25, lowerLimit: 24.8, upperLimit: 25.2 }).verdict, "ok");
+  assert.equal(evaluateMeasurement({ measured: 25.18, nominal: 25, lowerLimit: 24.8, upperLimit: 25.2 }).verdict, "warning");
+  assert.equal(evaluateMeasurement({ measured: 25.25, nominal: 25, lowerLimit: 24.8, upperLimit: 25.2 }).verdict, "ng");
+
+  // Batch checksheet presets, text summaries & Excel export
+  for (const preset of CHECKSHEET_SCENE_PRESETS) {
+    const resolved = preset.items.map((it) => resolveChecksheetItem(it));
+    assert.ok(resolved.every((r) => r.error === null), `Preset ${preset.id} should resolve cleanly`);
+    const sum = summarizeChecksheet(resolved);
+    assert.equal(sum.overallVerdict, "PASS", `Preset ${preset.id} should pass`);
+  }
+
+  const firstRows = CHECKSHEET_SCENE_PRESETS[0].items.map((it) => resolveChecksheetItem(it));
+  assert.ok(buildIso2768SummaryText({ linearClass: "m", geomClass: "K", linearEval: lin25m, geomEval: geom150K }).includes("ISO 2768-mK"));
+  assert.ok(buildFitSummaryText({ fit: fit25g6 }).includes("H7/g6"));
+  assert.ok(buildChecksheetSummaryText(firstRows, CHECKSHEET_SCENE_PRESETS[0].meta).includes("尺寸公差检核报告"));
+
+  const tolXlsxBlob = await buildChecksheetExcelBlob(firstRows, CHECKSHEET_SCENE_PRESETS[0].meta, fit25g6);
+  assert.ok(tolXlsxBlob.size > 3000, "Generated tolerance checksheet Excel should be non-empty");
+  const histXlsxBlob = await buildToleranceHistoryExcelBlob([
+    {
+      id: "hist-1",
+      createdAt: "2026-11-28 15:00",
+      title: CHECKSHEET_SCENE_PRESETS[0].meta.partName,
+      kind: "checksheet",
+      meta: CHECKSHEET_SCENE_PRESETS[0].meta,
+      items: CHECKSHEET_SCENE_PRESETS[0].items,
+      okCount: 6,
+      warningCount: 1,
+      ngCount: 0,
+      pendingCount: 0,
+      overallVerdict: "PASS",
+    },
+  ]);
+  assert.ok(histXlsxBlob.size > 3000, "Generated tolerance history Excel should be non-empty");
+  console.log("✅ ISO 2768 & ISO 286 Tolerance / Fits (2768-1/2, 286-1/2 Δ-rule equivalence, IT matrix, presets & Excel export) passed");
 }
 
 main().catch((err) => {

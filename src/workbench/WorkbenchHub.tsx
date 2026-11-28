@@ -26,6 +26,7 @@ import { WORKBENCH_TOOLS } from "./registry";
 import { getDraftCacheStats } from "./tools/pdf-balloon/core/drafts";
 import { loadInspectionHistory } from "./tools/aql-sampling/core/storage";
 import { loadSpcHistory } from "./tools/spc-cpk/core/storage";
+import { loadToleranceHistory } from "./tools/iso-tolerance/core/storage";
 
 interface WorkbenchHubProps {
   runningToolIds: string[];
@@ -51,10 +52,12 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
   const [cacheStats, setCacheStats] = useState<WorkbenchCacheStats | null>(null);
   const [aqlHistoryCount, setAqlHistoryCount] = useState<number>(0);
   const [spcHistoryCount, setSpcHistoryCount] = useState<number>(0);
+  const [tolHistoryCount, setTolHistoryCount] = useState<number>(0);
 
   useEffect(() => {
     setAqlHistoryCount(loadInspectionHistory().length);
     setSpcHistoryCount(loadSpcHistory().length);
+    setTolHistoryCount(loadToleranceHistory().length);
   }, [runningToolIds.length]);
 
   useEffect(() => {
@@ -354,6 +357,14 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
                               {spcHistoryCount > 0
                                 ? `${spcHistoryCount} 条本地 CPK 分析记录 · AIAG SPC & GB/T 4091`
                                 : "AIAG SPC / GB/T 4091 离线统计与控制图引擎"}
+                            </span>
+                          )}
+                          {tool.id === "iso-tolerance" && (
+                            <span className="inline-flex items-center gap-1 font-mono tabular-nums">
+                              <FileText className="h-3 w-3 text-zinc-400" />
+                              {tolHistoryCount > 0
+                                ? `${tolHistoryCount} 条本地公差检核归档 · ISO 2768 & ISO 286`
+                                : "ISO 2768-1/2 & ISO 286-1/2 (GB/T 1804/1800) 离线引擎"}
                             </span>
                           )}
                         </div>
