@@ -42,7 +42,6 @@ import {
   UI_SCALE_MIN,
   UI_SCALE_PRESETS,
   clampUiScale,
-  computeAutoUiScale,
 } from "@/lib/uiScale";
 import { cn } from "@/lib/utils";
 import { confirmDialog } from "@/components/ConfirmDialog";
@@ -77,6 +76,7 @@ interface AppearanceSettingsTabProps {
   settings: AppSettings;
   isAdmin: boolean;
   themePreference: ThemePreference;
+  autoUiZoom: number;
   onSelectThemePreference: (pref: ThemePreference, triggerEl?: HTMLElement | null) => void;
   onAppearanceChange: (patch: AppearancePreferencesInput) => Promise<AppSettings | null>;
   onSettingsChanged: (next: AppSettings) => void;
@@ -91,6 +91,7 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
   settings,
   isAdmin,
   themePreference,
+  autoUiZoom,
   onSelectThemePreference,
   onAppearanceChange,
   onSettingsChanged,
@@ -232,11 +233,9 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
         ? pendingLogo.previewUrl
         : savedLogoPreview;
 
-  const autoRecommendedZoom = useMemo(() => computeAutoUiScale(), []);
-  const draftEffectiveZoom =
-    draftScaleMode === "auto" ? autoRecommendedZoom : draftScale;
+  const draftEffectiveZoom = draftScaleMode === "auto" ? autoUiZoom : draftScale;
   const draftZoomPct = Math.round(draftEffectiveZoom * 100);
-  const autoZoomPct = Math.round(autoRecommendedZoom * 100);
+  const autoZoomPct = Math.round(autoUiZoom * 100);
 
   const persistedSidebarConfig = useMemo(
     () => parseSidebarNavConfig(settings.sidebarNavConfig),

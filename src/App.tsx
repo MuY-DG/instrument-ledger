@@ -135,8 +135,8 @@ import {
   applyUiZoom,
   clampUiScale,
   getStoredUiScalePref,
-  resolveEffectiveUiScale,
   saveStoredUiScalePref,
+  watchAutoUiScale,
 } from "@/lib/uiScale";
 import { parseSidebarNavConfig } from "@/lib/sidebarConfig";
 import { WorkbenchShell } from "@/workbench/WorkbenchShell";
@@ -336,10 +336,9 @@ export default function App() {
   const [uiScaleManual, setUiScaleManual] = useState<number>(
     () => getStoredUiScalePref().scale
   );
-  const [effectiveUiZoom, setEffectiveUiZoom] = useState<number>(() => {
-    const stored = getStoredUiScalePref();
-    return resolveEffectiveUiScale(stored.mode, stored.scale);
-  });
+  const [autoUiZoom, setAutoUiZoom] = useState<number | null>(null);
+  const uiZoomTarget = uiScaleMode === "auto" ? autoUiZoom : uiScaleManual;
+  const effectiveUiZoom = uiZoomTarget ?? 1.0;
 
   const locale = resolveLocale(uiLanguage);
   const isEn = locale === "en";
@@ -348,20 +347,15 @@ export default function App() {
     [locale]
   );
 
-  // Sync & apply native WebView zoom immediately and on window resize when in Auto mode
+  useEffect(() => watchAutoUiScale(setAutoUiZoom), []);
+
   useEffect(() => {
-    const syncZoom = () => {
-      const target = resolveEffectiveUiScale(uiScaleMode, uiScaleManual);
-      setEffectiveUiZoom(target);
-      void applyUiZoom(target);
-    };
     saveStoredUiScalePref({ mode: uiScaleMode, scale: uiScaleManual });
-    syncZoom();
-    if (uiScaleMode !== "auto") return;
-    const onResize = () => syncZoom();
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
   }, [uiScaleMode, uiScaleManual]);
+
+  useEffect(() => {
+    if (uiZoomTarget !== null) void applyUiZoom(uiZoomTarget);
+  }, [uiZoomTarget]);
 
   const handleAccountBgChange = useCallback((next: AccountBgId) => {
     setAccountBg(next);
@@ -4159,6 +4153,7 @@ export default function App() {
         accountBg={accountBg}
         onAccountBgChange={handleAccountBgChange}
         themePreference={themePreference}
+        autoUiZoom={autoUiZoom ?? 1.0}
         onSelectThemePreference={handleSelectThemePreference}
         onAppearanceChange={applyAppearancePatch}
         settings={settings}

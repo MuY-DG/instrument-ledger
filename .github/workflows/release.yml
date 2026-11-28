@@ -78,6 +78,7 @@ jobs:
           pnpm build
           pnpm test:excel
           pnpm test:markdown
+          pnpm test:ui-scale
 
       - name: Run Rust backend tests
         shell: bash

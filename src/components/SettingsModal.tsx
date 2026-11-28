@@ -101,6 +101,7 @@ interface SettingsModalProps {
   accountBg: AccountBgId;
   onAccountBgChange: (next: AccountBgId) => void;
   themePreference: ThemePreference;
+  autoUiZoom: number;
   onSelectThemePreference: (pref: ThemePreference, triggerEl?: HTMLElement | null) => void;
   onAppearanceChange: (patch: AppearancePreferencesInput) => Promise<AppSettings | null>;
   settings: AppSettings;
@@ -162,6 +163,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   accountBg,
   onAccountBgChange,
   themePreference,
+  autoUiZoom,
   onSelectThemePreference,
   onAppearanceChange,
   settings,
@@ -1399,6 +1401,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     settings={settings}
                     isAdmin={isAdmin}
                     themePreference={themePreference}
+                    autoUiZoom={autoUiZoom}
                     onSelectThemePreference={onSelectThemePreference}
                     onAppearanceChange={onAppearanceChange}
                     onSettingsChanged={onSettingsChanged}
@@ -1877,7 +1880,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <span className="text-lg font-semibold font-mono tabular-nums text-zinc-950 dark:text-white leading-none">
-                              v{dirInfo?.appVersion || "1.5.1"}
+                              v{dirInfo?.appVersion || "1.5.2"}
                             </span>
                             {updateResult?.hasUpdate ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-[11px] font-medium text-sky-700 dark:text-sky-300">
@@ -2178,7 +2181,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             <div className="space-y-2 max-h-[300px] overflow-y-auto pr-0.5">
                               {releaseHistory.map((rel) => {
                                 const isCurrent =
-                                  rel.version === (dirInfo?.appVersion || "1.5.1");
+                                  rel.version === (dirInfo?.appVersion || "1.5.2");
                                 const isOpen = expandedReleaseTag === rel.tagName;
                                 return (
                                   <div

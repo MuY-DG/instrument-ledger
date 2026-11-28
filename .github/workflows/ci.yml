@@ -50,6 +50,7 @@ jobs:
           pnpm build
           pnpm test:excel
           pnpm test:markdown
+          pnpm test:ui-scale
 
       - name: Rust unit tests
         shell: bash

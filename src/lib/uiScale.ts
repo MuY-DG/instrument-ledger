@@ -1,3 +1,4 @@
+import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { isTauriEnvironment } from "@/lib/themeTransition";
 import type { UiScaleMode } from "@/types";
 
@@ -24,18 +25,9 @@ export function clampUiScale(value: number): number {
 /**
  * Computes the adaptive default UI zoom factor so that Windows displays
  * achieve the same comfortable visual readability as macOS Retina displays:
- * - macOS: 1.00 (100% native logical layout)
- * - Windows / Linux: automatically compensates for 100% / 125% / 150% OS DPI
- *   so 11–13px UI typography & dense ledger tables are effortless to read.
+ * Screen and window widths are in logical pixels before WebView zoom.
  */
-export function computeAutoUiScale(): number {
-  if (isMacOS()) return 1.0;
-  if (typeof window === "undefined") return 1.0;
-
-  const dpr = window.devicePixelRatio || 1;
-  const screenW = window.screen?.width || 1920;
-  const innerW = window.innerWidth || 1400;
-
+function computeAutoUiScale(dpr: number, screenW: number, innerW: number): number {
   let target = 1.0;
   if (dpr <= 1.05) {
     // Windows 100% DPI (1080p / 2K desktop monitor looks very small at 1.0)
@@ -59,8 +51,68 @@ export function computeAutoUiScale(): number {
   return clampUiScale(target);
 }
 
-export function resolveEffectiveUiScale(mode: UiScaleMode, manualScale: number): number {
-  return mode === "auto" ? computeAutoUiScale() : clampUiScale(manualScale);
+export function watchAutoUiScale(onChange: (scale: number) => void): (() => void) | void {
+  if (isMacOS() || typeof window === "undefined") {
+    onChange(1.0);
+    return;
+  }
+
+  if (!isTauriEnvironment()) {
+    const update = () => onChange(computeAutoUiScale(
+      window.devicePixelRatio || 1,
+      window.screen?.width || 1920,
+      window.innerWidth || 1400
+    ));
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }
+
+  // WebView zoom can trigger DOM resize and change viewport width and DPR.
+  // OS window events and sizes keep those changes out of the calculation.
+  const appWindow = getCurrentWindow();
+  let disposed = false;
+  let revision = 0;
+  let resizeTimer: number | undefined;
+  const logError = (error: unknown) => console.warn("Could not read native UI scale", error);
+
+  const update = async (requestRevision: number) => {
+    try {
+      const [scaleFactor, size, monitor] = await Promise.all([
+        appWindow.scaleFactor(),
+        appWindow.innerSize(),
+        currentMonitor(),
+      ]);
+      if (!disposed && requestRevision === revision && size.width > 0) {
+        const screenWidth = monitor ? monitor.size.width / monitor.scaleFactor : 1920;
+        onChange(computeAutoUiScale(scaleFactor, screenWidth, size.width / scaleFactor));
+      }
+    } catch (error) {
+      logError(error);
+    }
+  };
+
+  const scheduleUpdate = () => {
+    if (disposed) return;
+    window.clearTimeout(resizeTimer);
+    const requestRevision = ++revision;
+    resizeTimer = window.setTimeout(() => void update(requestRevision), 120);
+  };
+
+  const listeners = [
+    appWindow.onResized(scheduleUpdate),
+    appWindow.onMoved(scheduleUpdate),
+    appWindow.onScaleChanged(scheduleUpdate),
+  ].map((listener) => listener.catch(logError));
+  void update(revision);
+
+  return () => {
+    disposed = true;
+    window.clearTimeout(resizeTimer);
+    for (const listener of listeners) {
+      void listener.then((unlisten) => unlisten?.()).catch(logError);
+    }
+  };
 }
 
 export function getStoredUiScalePref(): StoredUiScalePref {
