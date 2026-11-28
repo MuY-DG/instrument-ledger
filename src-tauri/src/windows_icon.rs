@@ -248,8 +248,10 @@ mod tests {
         let ico = save_icon(&app_data, include_bytes!("../icons/icon-obsidian.png")).unwrap();
         let icon = wide_path(&ico);
         let _com = ComApartment::init().unwrap();
-        let executable = std::env::current_exe().unwrap().canonicalize().unwrap();
+        let executable = std::env::current_exe().unwrap();
+        // Shell Link expects a regular DOS path, while canonicalize adds the verbatim prefix.
         let exe_path = wide_path(&executable);
+        let executable = executable.canonicalize().unwrap();
         let link = app_data.join("Renamed Shortcut.lnk");
         let link_path = wide_path(&link);
         let link_path = PCWSTR(link_path.as_ptr());
