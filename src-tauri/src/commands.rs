@@ -22,11 +22,18 @@ use crate::db::{
 use crate::models::{
     AddReportInput, AppSettings, AuthStatus, BackupResult, BatchOperationResult,
     BatchUpdateInstrumentsInput, CalibrationReport, DataDirInfo, ImportResult, Instrument,
-    InstrumentInput, ResetAppResult, RestoreResult, SettingsUpdateInput, UpdateCheckResult,
+    InstrumentInput, ResetAppResult, RestoreResult, SaveSyncConfigInput, SettingsUpdateInput,
+    SyncActionResult, SyncConfigView, SyncProgressEvent, SyncStatusResult, SyncTestResult,
+    TestSyncConfigInput, UpdateCheckResult,
 };
 use crate::storage::{
     dir_total_size, mime_from_ext, remove_stored_file, resolve_stored_path, save_image_from_base64,
     save_image_from_path, save_report_from_base64, save_report_from_path,
+};
+use crate::sync_engine::{
+    apply_pulled_snapshot_locally, apply_sync_config_update, build_clean_sync_db_snapshot,
+    check_remote_sync_status, compute_local_ledger_summary, download_pull_payload, execute_push,
+    load_sync_config, resolve_test_config, save_sync_config_file, test_s3_sync_connection,
 };
 use crate::updater::{check_github_release, download_and_install_update, PendingUpdate};
 use crate::workbench_store::{
@@ -43,6 +50,7 @@ pub struct AppState {
     pub session: Mutex<SessionState>,
     pub pending_update: Mutex<Option<PendingUpdate>>,
     pub allow_exit: AtomicBool,
+    pub sync_in_flight: AtomicBool,
     pub data_dir: PathBuf,
     pub db_path: PathBuf,
 }
@@ -1966,6 +1974,251 @@ pub async fn download_and_launch_update(
         state.allow_exit.store(false, Ordering::SeqCst);
     }
     res
+}
+
+// ---------------- S3-Compatible Cloud Sync (Optional E2EE) ----------------
+
+struct SyncBusyGuard<'a>(&'a AtomicBool);
+
+impl<'a> SyncBusyGuard<'a> {
+    fn acquire(flag: &'a AtomicBool) -> Result<Self, String> {
+        if flag
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err("已有同步任务正在进行中，请稍候".to_string());
+        }
+        Ok(Self(flag))
+    }
+}
+
+impl Drop for SyncBusyGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+#[tauri::command]
+pub fn get_sync_config(state: State<'_, AppState>) -> Result<SyncConfigView, String> {
+    check_unlocked(&state)?;
+    let cfg = load_sync_config(&state.data_dir);
+    Ok(cfg.to_view())
+}
+
+#[tauri::command]
+pub fn save_sync_config(
+    state: State<'_, AppState>,
+    input: SaveSyncConfigInput,
+) -> Result<SyncConfigView, String> {
+    check_admin(&state)?;
+    let existing = load_sync_config(&state.data_dir);
+    let updated = apply_sync_config_update(&existing, input)?;
+    save_sync_config_file(&state.data_dir, &updated)?;
+    Ok(updated.to_view())
+}
+
+#[tauri::command]
+pub async fn test_sync_connection(
+    state: State<'_, AppState>,
+    input: TestSyncConfigInput,
+) -> Result<SyncTestResult, String> {
+    check_admin(&state)?;
+    let stored = load_sync_config(&state.data_dir);
+    let (creds, e2ee_enabled, passphrase) = resolve_test_config(&stored, input)?;
+    test_s3_sync_connection(creds, e2ee_enabled, &passphrase).await
+}
+
+#[tauri::command]
+pub async fn check_sync_status(state: State<'_, AppState>) -> Result<SyncStatusResult, String> {
+    check_unlocked(&state)?;
+    let cfg = load_sync_config(&state.data_dir);
+    let local = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        compute_local_ledger_summary(&conn)?
+    };
+    check_remote_sync_status(&cfg, &local).await
+}
+
+async fn run_push_internal(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    force: bool,
+) -> Result<SyncActionResult, String> {
+    let mut cfg = load_sync_config(&state.data_dir);
+    let (db_bytes, local) = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        build_clean_sync_db_snapshot(&conn)?
+    };
+    execute_push(app, &mut cfg, &state.data_dir, db_bytes, local, force).await
+}
+
+async fn run_pull_internal(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    force: bool,
+) -> Result<SyncActionResult, String> {
+    let mut cfg = load_sync_config(&state.data_dir);
+    let local = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        compute_local_ledger_summary(&conn)?
+    };
+
+    let prepared = download_pull_payload(app, &cfg, &state.data_dir, &local, force).await?;
+
+    let _ = app.emit(
+        "sync-progress",
+        SyncProgressEvent {
+            phase: "applying".to_string(),
+            message: "正在安全应用云端台账与附件...".to_string(),
+            current: 1,
+            total: 1,
+            percent: 94.0,
+        },
+    );
+
+    let create_safety_backup = local.instrument_count > 0 || local.report_count > 0;
+    let apply_res = {
+        let mut conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        apply_pulled_snapshot_locally(
+            &mut conn,
+            &state.db_path,
+            &state.data_dir,
+            &prepared.staged_db_path,
+            &prepared.staged_blobs_dir,
+            &prepared.manifest.blobs,
+            create_safety_backup,
+        )
+    };
+    let _ = fs::remove_dir_all(&prepared.staging_root);
+    let safety_backup_path = apply_res?;
+
+    // Compute exact post-apply canonical hash and update local sync cursor
+    let (final_hash, final_ic, final_rc) = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        let s = compute_local_ledger_summary(&conn)?;
+        (s.canonical_hash, s.instrument_count, s.report_count)
+    };
+
+    let now = now_iso();
+    cfg.last_synced_rev = prepared.manifest.revision;
+    cfg.last_synced_db_hash = final_hash;
+    cfg.last_synced_at = now.clone();
+    save_sync_config_file(&state.data_dir, &cfg)?;
+
+    let _ = app.emit(
+        "sync-progress",
+        SyncProgressEvent {
+            phase: "done".to_string(),
+            message: "拉取完成".to_string(),
+            current: 1,
+            total: 1,
+            percent: 100.0,
+        },
+    );
+
+    Ok(SyncActionResult {
+        direction: "pull".to_string(),
+        revision: prepared.manifest.revision,
+        instrument_count: final_ic,
+        report_count: final_rc,
+        transferred_blobs: prepared.downloaded_blobs,
+        skipped_blobs: prepared.skipped_blobs,
+        db_bytes: prepared.manifest.db_compressed_bytes,
+        encrypted: prepared.manifest.encryption.is_some(),
+        synced_at: now,
+        safety_backup_path,
+        message: format!(
+            "拉取成功（版本 r{}，下载 {} 个附件，复用 {} 个本地附件）",
+            prepared.manifest.revision, prepared.downloaded_blobs, prepared.skipped_blobs
+        ),
+    })
+}
+
+#[tauri::command]
+pub async fn sync_push(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    force: Option<bool>,
+) -> Result<SyncActionResult, String> {
+    check_admin(&state)?;
+    let _guard = SyncBusyGuard::acquire(&state.sync_in_flight)?;
+    run_push_internal(&app, &state, force.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub async fn sync_pull(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    force: Option<bool>,
+) -> Result<SyncActionResult, String> {
+    check_admin(&state)?;
+    let _guard = SyncBusyGuard::acquire(&state.sync_in_flight)?;
+    run_pull_internal(&app, &state, force.unwrap_or(false)).await
+}
+
+#[tauri::command]
+pub async fn sync_now(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SyncActionResult, String> {
+    check_admin(&state)?;
+    let _guard = SyncBusyGuard::acquire(&state.sync_in_flight)?;
+
+    let cfg = load_sync_config(&state.data_dir);
+    if !cfg.is_configured() || !cfg.enabled {
+        return Err("请先配置并启用 S3 云端同步".to_string());
+    }
+
+    let local = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        compute_local_ledger_summary(&conn)?
+    };
+    let status = check_remote_sync_status(&cfg, &local).await?;
+
+    if let Some(ref pwd_err) = status.passphrase_error {
+        return Err(pwd_err.clone());
+    }
+
+    match status.state.as_str() {
+        "up_to_date" => {
+            let synced_at = if let Some(remote_rev) = status.remote_revision {
+                if cfg.last_synced_rev != remote_rev || cfg.last_synced_db_hash != local.canonical_hash {
+                    let mut updated_cfg = cfg.clone();
+                    let now = now_iso();
+                    updated_cfg.last_synced_rev = remote_rev;
+                    updated_cfg.last_synced_db_hash = local.canonical_hash.clone();
+                    updated_cfg.last_synced_at = now.clone();
+                    let _ = save_sync_config_file(&state.data_dir, &updated_cfg);
+                    now
+                } else if cfg.last_synced_at.is_empty() {
+                    now_iso()
+                } else {
+                    cfg.last_synced_at.clone()
+                }
+            } else if cfg.last_synced_at.is_empty() {
+                now_iso()
+            } else {
+                cfg.last_synced_at.clone()
+            };
+            Ok(SyncActionResult {
+                direction: "noop".to_string(),
+                revision: status.remote_revision.unwrap_or(cfg.last_synced_rev),
+                instrument_count: local.instrument_count,
+                report_count: local.report_count,
+                transferred_blobs: 0,
+                skipped_blobs: local.referenced_blobs.len(),
+                db_bytes: 0,
+                encrypted: status.remote_encrypted,
+                synced_at,
+                safety_backup_path: None,
+                message: status.summary,
+            })
+        }
+        "local_ahead" => run_push_internal(&app, &state, false).await,
+        "remote_ahead" => run_pull_internal(&app, &state, false).await,
+        "conflict" => Err(format!("CONFLICT:{}", status.summary)),
+        _ => Err(status.summary),
+    }
 }
 
 #[cfg(test)]

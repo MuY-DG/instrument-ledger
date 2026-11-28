@@ -15,7 +15,13 @@ import type {
   InstrumentInput,
   ResetAppResult,
   RestoreResult,
+  SaveSyncConfigInput,
   SettingsUpdateInput,
+  SyncActionResult,
+  SyncConfigView,
+  SyncStatusResult,
+  SyncTestResult,
+  TestSyncConfigInput,
   UpdateCheckResult,
   WorkbenchCachePruneResult,
   WorkbenchCacheStats,
@@ -346,4 +352,17 @@ export const api = {
       githubRepoOverride: githubRepoOverride ?? null,
       proxyOverride: proxyOverride ?? null,
     }),
+
+  // S3-Compatible Cloud Sync
+  getSyncConfig: () => invoke<SyncConfigView>("get_sync_config"),
+  saveSyncConfig: (input: SaveSyncConfigInput) =>
+    invoke<SyncConfigView>("save_sync_config", { input }),
+  testSyncConnection: (input: TestSyncConfigInput) =>
+    invoke<SyncTestResult>("test_sync_connection", { input }),
+  checkSyncStatus: () => invoke<SyncStatusResult>("check_sync_status"),
+  syncPush: (force?: boolean) =>
+    invoke<SyncActionResult>("sync_push", { force: force ?? false }),
+  syncPull: (force?: boolean) =>
+    invoke<SyncActionResult>("sync_pull", { force: force ?? false }),
+  syncNow: () => invoke<SyncActionResult>("sync_now"),
 };

@@ -5,6 +5,7 @@ import { KeycapBadge } from "@/components/ui/InteractiveControls";
 import {
   BellRing,
   Check,
+  Cloud,
   CloudDownload,
   FileSpreadsheet,
   Gauge,
@@ -55,8 +56,18 @@ interface CommandPaletteProps {
   onPrint: () => void;
   onLock: () => void;
   onOpenSettings: (
-    tab: "account" | "general" | "window" | "alerts" | "applock" | "backup" | "update"
+    tab:
+      | "account"
+      | "general"
+      | "window"
+      | "alerts"
+      | "applock"
+      | "sync"
+      | "backup"
+      | "update"
   ) => void;
+  syncConfigured?: boolean;
+  onSyncNow?: () => void;
   onSelectThemePreference: (pref: ThemePreference) => void;
   onLoginOrLogout: () => void;
   onOpenWorkbenchHub: () => void;
@@ -81,6 +92,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onPrint,
   onLock,
   onOpenSettings,
+  syncConfigured = false,
+  onSyncNow,
   onSelectThemePreference,
   onLoginOrLogout,
   onOpenWorkbenchHub,
@@ -271,6 +284,34 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                         <Settings className="h-3.5 w-3.5 text-zinc-400" />
                         <span>系统设置</span>
                       </span>
+                    </Command.Item>
+                  )}
+
+                  {isAdmin && syncConfigured && onSyncNow && (
+                    <Command.Item
+                      value="云端同步 立即同步 s3 sync"
+                      onSelect={() => runAndClose(onSyncNow)}
+                      className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <Cloud className="h-3.5 w-3.5 text-indigo-500" />
+                        <span>云端同步：立即同步</span>
+                      </span>
+                      <span className="text-[10px] text-zinc-400">S3</span>
+                    </Command.Item>
+                  )}
+
+                  {isAdmin && (
+                    <Command.Item
+                      value="云端同步设置 s3 加密 配置 sync settings"
+                      onSelect={() => runAndClose(() => onOpenSettings("sync"))}
+                      className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
+                    >
+                      <span className="flex items-center gap-2.5">
+                        <Cloud className="h-3.5 w-3.5 text-sky-500" />
+                        <span>云端同步设置</span>
+                      </span>
+                      <span className="text-[10px] text-zinc-400">管理员</span>
                     </Command.Item>
                   )}
 

@@ -338,14 +338,17 @@ pub fn reset_app_data_with_backup(
         })?;
     }
 
-    // Wipe and recreate attachment & workbench cache folders
-    for folder in ["images", "reports", "workbench"] {
+    // Wipe and recreate attachment & workbench cache folders, plus local sync config
+    for folder in ["images", "reports", "workbench", "sync_backups"] {
         let dir = data_dir.join(folder);
         if dir.exists() {
             let _ = fs::remove_dir_all(&dir);
         }
-        fs::create_dir_all(&dir).map_err(|e| format!("重建附件目录失败: {}", e))?;
+        if folder != "sync_backups" {
+            fs::create_dir_all(&dir).map_err(|e| format!("重建附件目录失败: {}", e))?;
+        }
     }
+    crate::sync_engine::remove_sync_config_file(data_dir);
     ensure_storage_dirs(data_dir)?;
 
     // Re-initialize brand new empty database (account_initialized unset)

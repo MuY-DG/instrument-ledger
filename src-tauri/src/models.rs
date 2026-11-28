@@ -272,3 +272,126 @@ pub struct DataDirInfo {
     pub report_count: usize,
     pub app_version: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncConfigView {
+    pub enabled: bool,
+    pub configured: bool,
+    pub provider_preset: String,
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub prefix: String,
+    pub access_key_id: String,
+    pub has_secret_access_key: bool,
+    pub secret_access_key_hint: String,
+    pub force_path_style: bool,
+    pub e2ee_enabled: bool,
+    pub has_e2ee_passphrase: bool,
+    pub check_on_startup: bool,
+    pub device_id: String,
+    pub device_name: String,
+    pub last_synced_rev: u64,
+    pub last_synced_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveSyncConfigInput {
+    pub enabled: bool,
+    pub provider_preset: String,
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub prefix: String,
+    pub access_key_id: String,
+    pub secret_access_key: Option<String>,
+    pub clear_secret_access_key: Option<bool>,
+    pub force_path_style: bool,
+    pub e2ee_enabled: bool,
+    pub e2ee_passphrase: Option<String>,
+    pub clear_e2ee_passphrase: Option<bool>,
+    pub check_on_startup: bool,
+    pub device_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestSyncConfigInput {
+    pub endpoint: String,
+    pub region: String,
+    pub bucket: String,
+    pub prefix: String,
+    pub access_key_id: String,
+    pub secret_access_key: Option<String>,
+    pub force_path_style: bool,
+    pub e2ee_enabled: bool,
+    pub e2ee_passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncTestResult {
+    pub ok: bool,
+    pub message: String,
+    pub has_remote_data: bool,
+    pub remote_revision: Option<u64>,
+    pub remote_instrument_count: Option<usize>,
+    pub remote_report_count: Option<usize>,
+    pub remote_updated_at: Option<String>,
+    pub remote_device_name: Option<String>,
+    pub remote_encrypted: bool,
+    pub passphrase_verified: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatusResult {
+    pub configured: bool,
+    pub enabled: bool,
+    /// "unconfigured" | "disabled" | "up_to_date" | "local_ahead" | "remote_ahead" | "conflict"
+    pub state: String,
+    pub summary: String,
+    pub local_instrument_count: usize,
+    pub local_report_count: usize,
+    pub local_changed: bool,
+    pub last_synced_rev: u64,
+    pub last_synced_at: String,
+    pub remote_revision: Option<u64>,
+    pub remote_updated_at: Option<String>,
+    pub remote_device_name: Option<String>,
+    pub remote_instrument_count: Option<usize>,
+    pub remote_report_count: Option<usize>,
+    pub remote_encrypted: bool,
+    pub local_e2ee_enabled: bool,
+    pub encryption_mismatch: bool,
+    pub passphrase_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncActionResult {
+    /// "push" | "pull" | "noop"
+    pub direction: String,
+    pub revision: u64,
+    pub instrument_count: usize,
+    pub report_count: usize,
+    pub transferred_blobs: usize,
+    pub skipped_blobs: usize,
+    pub db_bytes: u64,
+    pub encrypted: bool,
+    pub synced_at: String,
+    pub safety_backup_path: Option<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncProgressEvent {
+    pub phase: String,
+    pub message: String,
+    pub current: usize,
+    pub total: usize,
+    pub percent: f64,
+}

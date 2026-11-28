@@ -29,3 +29,8 @@ uuid = { version = "1", features = ["v4"] }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 walkdir = "2"
 base64 = "0.22"
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider", "http2", "system-proxy"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+ring = "0.17"
+hex = "0.4"
+flate2 = "1"

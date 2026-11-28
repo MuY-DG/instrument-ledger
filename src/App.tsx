@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Cloud,
   CloudDownload,
   Download,
   Eye,
@@ -76,6 +77,7 @@ import { ImportModal } from "@/components/ImportModal";
 import { PrintLedgerView } from "@/components/PrintLedgerView";
 import { CommandPalette } from "@/components/CommandPalette";
 import { UpdateBannerToast } from "@/components/UpdateBannerToast";
+import { SyncBannerToast, SyncConflictModal } from "@/components/SyncOverlay";
 import { ExpiryAlertModal } from "@/components/ExpiryAlertModal";
 import { ConfirmDialogHost, confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
@@ -138,6 +140,10 @@ import type {
   ResetAppResult,
   SortMode,
   StatusFilter,
+  SyncActionResult,
+  SyncConfigView,
+  SyncProgressEvent,
+  SyncStatusResult,
   UpdateCheckResult,
   UpdateDownloadProgress,
 } from "@/types";
@@ -433,6 +439,15 @@ export default function App() {
   const [updateProgress, setUpdateProgress] = useState<UpdateDownloadProgress | null>(null);
   const startupUpdateCheckedRef = useRef(false);
 
+  // S3-compatible cloud sync state (manual button + startup check)
+  const [syncConfig, setSyncConfig] = useState<SyncConfigView | null>(null);
+  const [syncStatus, setSyncStatus] = useState<SyncStatusResult | null>(null);
+  const [syncing, setSyncing] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<SyncProgressEvent | null>(null);
+  const [syncBannerOpen, setSyncBannerOpen] = useState(false);
+  const [syncConflictOpen, setSyncConflictOpen] = useState(false);
+  const startupSyncCheckedRef = useRef(false);
+
   // Sync resolved theme to <html> synchronously before browser paint / View Transition capture
   useLayoutEffect(() => {
     const root = document.documentElement;
@@ -674,6 +689,10 @@ export default function App() {
         const list = await api.listInstruments();
         setInstruments(list);
         setInstrumentsLoaded(true);
+        api
+          .getSyncConfig()
+          .then(setSyncConfig)
+          .catch(() => {});
       }
     } catch (err) {
       notify(`加载数据失败：${String(err)}`, "error");
@@ -827,18 +846,179 @@ export default function App() {
     return () => window.removeEventListener("click", close);
   }, [exportMenuOpen]);
 
-  // Listen for updater download/install progress events globally
+  // Listen for updater & cloud sync progress events globally
   useEffect(() => {
-    const unlistenPromise = listen<UpdateDownloadProgress>(
-      "update-download-progress",
-      (event) => {
+    const unlisteners = [
+      listen<UpdateDownloadProgress>("update-download-progress", (event) => {
         setUpdateProgress(event.payload);
-      }
-    );
+      }),
+      listen<SyncProgressEvent>("sync-progress", (event) => {
+        setSyncProgress(event.payload);
+      }),
+    ];
     return () => {
-      unlistenPromise.then((fn) => fn());
+      unlisteners.forEach((p) => p.then((fn) => fn()));
     };
   }, []);
+
+  // Silent startup S3 sync check once after startup finishes
+  useEffect(() => {
+    if (
+      startupSyncCheckedRef.current ||
+      booting ||
+      !auth.isInitialized ||
+      auth.isLocked
+    ) {
+      return;
+    }
+    startupSyncCheckedRef.current = true;
+    const timer = window.setTimeout(async () => {
+      try {
+        const cfg = await api.getSyncConfig();
+        setSyncConfig(cfg);
+        if (!cfg.enabled || !cfg.configured || !cfg.checkOnStartup) {
+          return;
+        }
+        const status = await api.checkSyncStatus();
+        setSyncStatus(status);
+        if (
+          status.state === "remote_ahead" ||
+          status.state === "conflict" ||
+          Boolean(status.passphraseError)
+        ) {
+          setSyncBannerOpen(true);
+        }
+      } catch {
+        // Silently ignore offline/network errors on startup
+      }
+    }, 1800);
+
+    return () => window.clearTimeout(timer);
+  }, [booting, auth.isInitialized, auth.isLocked]);
+
+  const finalizeSyncSuccess = useCallback(
+    async (res: SyncActionResult) => {
+      setSyncBannerOpen(false);
+      setSyncConflictOpen(false);
+      if (res.direction === "pull") {
+        clearMediaCache();
+        await refreshAll();
+      }
+      try {
+        const [cfg, st] = await Promise.all([
+          api.getSyncConfig(),
+          api.checkSyncStatus(),
+        ]);
+        setSyncConfig(cfg);
+        setSyncStatus(st);
+      } catch {
+        // ignore follow-up status refresh error
+      }
+      if (res.safetyBackupPath) {
+        const bakPath = res.safetyBackupPath;
+        toast.success(res.message, {
+          duration: 6500,
+          action: {
+            label: "打开备份目录",
+            onClick: () => {
+              api.openFolderPath(bakPath).catch(() => {});
+            },
+          },
+        });
+      } else {
+        toast.success(res.message);
+      }
+    },
+    [refreshAll]
+  );
+
+  const handleSyncFailure = useCallback(
+    async (err: unknown) => {
+      const msg = String(err);
+      if (msg.includes("CONFLICT:")) {
+        try {
+          const st = await api.checkSyncStatus();
+          setSyncStatus(st);
+        } catch {
+          // ignore
+        }
+        setSyncBannerOpen(false);
+        setSyncConflictOpen(true);
+        return;
+      }
+      notify(`同步失败：${msg}`, "error");
+    },
+    [notify]
+  );
+
+  const handleSyncNow = useCallback(async () => {
+    if (syncing) return;
+    setSyncing(true);
+    setSyncProgress({
+      phase: "checking",
+      message: "正在检查云端状态...",
+      current: 0,
+      total: 1,
+      percent: 5,
+    });
+    try {
+      const res = await api.syncNow();
+      await finalizeSyncSuccess(res);
+    } catch (err) {
+      await handleSyncFailure(err);
+    } finally {
+      setSyncing(false);
+      setSyncProgress(null);
+    }
+  }, [syncing, finalizeSyncSuccess, handleSyncFailure]);
+
+  const handleSyncPush = useCallback(
+    async (force = false) => {
+      if (syncing) return;
+      setSyncing(true);
+      setSyncProgress({
+        phase: "preparing",
+        message: "正在打包本地台账快照...",
+        current: 0,
+        total: 1,
+        percent: 5,
+      });
+      try {
+        const res = await api.syncPush(force);
+        await finalizeSyncSuccess(res);
+      } catch (err) {
+        await handleSyncFailure(err);
+      } finally {
+        setSyncing(false);
+        setSyncProgress(null);
+      }
+    },
+    [syncing, finalizeSyncSuccess, handleSyncFailure]
+  );
+
+  const handleSyncPull = useCallback(
+    async (force = false) => {
+      if (syncing) return;
+      setSyncing(true);
+      setSyncProgress({
+        phase: "checking",
+        message: "正在读取云端台账...",
+        current: 0,
+        total: 1,
+        percent: 5,
+      });
+      try {
+        const res = await api.syncPull(force);
+        await finalizeSyncSuccess(res);
+      } catch (err) {
+        await handleSyncFailure(err);
+      } finally {
+        setSyncing(false);
+        setSyncProgress(null);
+      }
+    },
+    [syncing, finalizeSyncSuccess, handleSyncFailure]
+  );
 
   // Silent background update check once after startup finishes
   useEffect(() => {
@@ -1374,6 +1554,7 @@ export default function App() {
       appLockSetupState.open ||
       closePromptOpen ||
       onboardingPreviewOpen ||
+      syncConflictOpen ||
       auth.isLocked
     ) {
       return;
@@ -1399,6 +1580,7 @@ export default function App() {
     appLockSetupState.open,
     closePromptOpen,
     onboardingPreviewOpen,
+    syncConflictOpen,
     auth.isLocked,
     activeWorkspace,
     clearSelection,
@@ -1442,6 +1624,10 @@ export default function App() {
     setReportInstrument(null);
     setLightboxState(null);
     setUpdatePopupOpen(false);
+    setSyncConfig(null);
+    setSyncStatus(null);
+    setSyncBannerOpen(false);
+    setSyncConflictOpen(false);
     setLoginModalOpen(false);
     setClosePromptOpen(false);
     setInstruments([]);
@@ -1475,6 +1661,7 @@ export default function App() {
     setMutedToday(false);
     startupAlertCheckedRef.current = false;
     startupUpdateCheckedRef.current = false;
+    startupSyncCheckedRef.current = false;
     setAuth(res.auth);
 
     if (res.backup) {
@@ -1772,6 +1959,7 @@ export default function App() {
     appLockSetupState.open ||
     closePromptOpen ||
     onboardingPreviewOpen ||
+    syncConflictOpen ||
     auth.isLocked;
 
   const resetAllFilters = () => {
@@ -2861,6 +3049,98 @@ export default function App() {
 
               {/* Primary Action Toolbar */}
               <div className="flex items-center gap-2 shrink-0">
+                {/* Manual S3 Cloud Sync Trigger (Admin) */}
+                {auth.isAdmin &&
+                  (() => {
+                    const ready = Boolean(syncConfig?.configured && syncConfig?.enabled);
+                    const isConflict = syncStatus?.state === "conflict";
+                    const isRemoteAhead = syncStatus?.state === "remote_ahead";
+                    const isLocalAhead = syncStatus?.state === "local_ahead";
+                    const hasPassErr = Boolean(syncStatus?.passphraseError);
+                    const isSynced = syncStatus?.state === "up_to_date";
+
+                    const label = syncing
+                      ? "同步中"
+                      : !ready
+                        ? "云同步"
+                        : hasPassErr
+                          ? "口令异常"
+                          : isConflict
+                            ? "同步冲突"
+                            : isRemoteAhead
+                              ? "拉取更新"
+                              : "云同步";
+
+                    const title = !ready
+                      ? "配置 S3 兼容云端同步"
+                      : syncStatus?.passphraseError ||
+                        syncStatus?.summary ||
+                        "点击立即与 S3 云端同步";
+
+                    return (
+                      <motion.button
+                        type="button"
+                        disabled={syncing}
+                        whileTap={syncing ? undefined : TAP_SCALE}
+                        transition={SPRING_SNAPPY}
+                        onClick={() => {
+                          if (!ready || hasPassErr) {
+                            openSettingsTab("sync");
+                          } else if (isConflict) {
+                            setSyncConflictOpen(true);
+                          } else {
+                            handleSyncNow();
+                          }
+                        }}
+                        title={title}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium shadow-tactile transition-colors disabled:opacity-60",
+                          isConflict || hasPassErr
+                            ? "bg-rose-500/[0.08] border-rose-500/30 text-rose-700 dark:text-rose-300 hover:bg-rose-500/[0.14]"
+                            : isRemoteAhead
+                              ? "bg-sky-500/[0.09] border-sky-500/30 text-sky-700 dark:text-sky-300 hover:bg-sky-500/[0.15]"
+                              : "border-zinc-200/95 dark:border-white/[0.09] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] text-zinc-700 dark:text-zinc-200"
+                        )}
+                      >
+                        <span className="relative flex items-center justify-center">
+                          {syncing ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin text-indigo-500" />
+                          ) : (
+                            <Cloud
+                              className={cn(
+                                "h-3.5 w-3.5",
+                                isConflict || hasPassErr
+                                  ? "text-rose-500"
+                                  : isRemoteAhead
+                                    ? "text-sky-500"
+                                    : ready
+                                      ? "text-indigo-500 dark:text-indigo-400"
+                                      : "text-zinc-400 dark:text-zinc-500"
+                              )}
+                            />
+                          )}
+                          {ready && !syncing && (
+                            <span
+                              className={cn(
+                                "absolute -top-0.5 -right-0.5 h-1.5 w-1.5 rounded-full",
+                                isConflict || hasPassErr
+                                  ? "bg-rose-500"
+                                  : isRemoteAhead
+                                    ? "bg-sky-500 animate-pulse"
+                                    : isLocalAhead
+                                      ? "bg-amber-500"
+                                      : isSynced
+                                        ? "bg-emerald-500"
+                                        : "bg-zinc-400"
+                              )}
+                            />
+                          )}
+                        </span>
+                        <span>{label}</span>
+                      </motion.button>
+                    );
+                  })()}
+
                 {/* Expiry Alert Center Trigger */}
                 {(() => {
                   const hasAlerts = alertSummary.totalAlertCount > 0;
@@ -3496,6 +3776,8 @@ export default function App() {
         onPrint={() => handlePrint()}
         onLock={handleLock}
         onOpenSettings={openSettingsTab}
+        syncConfigured={Boolean(syncConfig?.configured && syncConfig?.enabled)}
+        onSyncNow={handleSyncNow}
         onSelectThemePreference={(pref) => handleSelectThemePreference(pref)}
         onLoginOrLogout={() => {
           if (auth.isAdmin) handleLogout();
@@ -3585,6 +3867,24 @@ export default function App() {
           setAvailableUpdate(res.hasUpdate ? res : null);
         }}
         onTriggerInstallUpdate={handleInstallUpdate}
+        syncConfig={syncConfig}
+        syncStatus={syncStatus}
+        syncing={syncing}
+        syncProgress={syncProgress}
+        onSyncConfigSaved={(next) => {
+          setSyncConfig(next);
+          if (!next.enabled || !next.configured) {
+            setSyncStatus(null);
+            setSyncBannerOpen(false);
+          }
+        }}
+        onSyncStatusUpdated={(next) => {
+          setSyncStatus(next);
+        }}
+        onSyncNow={handleSyncNow}
+        onSyncManualPush={() => handleSyncPush(false)}
+        onSyncManualPull={() => handleSyncPull(false)}
+        onOpenSyncConflict={() => setSyncConflictOpen(true)}
         onClose={() => setSettingsModalOpen(false)}
         onSettingsChanged={(next) => {
           setSettings(next);
@@ -3673,6 +3973,44 @@ export default function App() {
           setUpdatePopupOpen(false);
           openSettingsTab("update");
         }}
+      />
+
+      {/* Right-to-Left Startup S3 Sync Notification Banner */}
+      <SyncBannerToast
+        open={
+          syncBannerOpen &&
+          !settingsModalOpen &&
+          !syncConflictOpen &&
+          !onboardingPreviewOpen &&
+          !(auth.isInitialized && auth.isLocked)
+        }
+        status={syncStatus}
+        syncing={syncing}
+        progress={syncProgress}
+        offsetForUpdateBanner={
+          updatePopupOpen && Boolean(availableUpdate?.hasUpdate)
+        }
+        onPullNow={() => handleSyncPull(false)}
+        onOpenConflict={() => {
+          setSyncBannerOpen(false);
+          setSyncConflictOpen(true);
+        }}
+        onOpenSettings={() => {
+          setSyncBannerOpen(false);
+          openSettingsTab("sync");
+        }}
+        onDismiss={() => setSyncBannerOpen(false)}
+      />
+
+      {/* Explicit Sync Conflict Resolution Modal */}
+      <SyncConflictModal
+        open={syncConflictOpen}
+        status={syncStatus}
+        syncing={syncing}
+        progress={syncProgress}
+        onClose={() => setSyncConflictOpen(false)}
+        onResolvePull={() => handleSyncPull(true)}
+        onResolvePush={() => handleSyncPush(true)}
       />
 
       <ImportModal

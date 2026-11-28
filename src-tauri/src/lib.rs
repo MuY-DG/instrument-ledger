@@ -3,7 +3,10 @@ mod backup;
 mod commands;
 mod db;
 mod models;
+mod s3_client;
 mod storage;
+mod sync_crypto;
+mod sync_engine;
 mod updater;
 mod workbench_store;
 
@@ -128,6 +131,7 @@ pub fn run() {
                 }),
                 pending_update: Mutex::new(None),
                 allow_exit: AtomicBool::new(false),
+                sync_in_flight: AtomicBool::new(false),
                 data_dir,
                 db_path,
             });
@@ -229,6 +233,13 @@ pub fn run() {
             commands::reset_app_with_backup,
             commands::check_for_updates,
             commands::download_and_launch_update,
+            commands::get_sync_config,
+            commands::save_sync_config,
+            commands::test_sync_connection,
+            commands::check_sync_status,
+            commands::sync_push,
+            commands::sync_pull,
+            commands::sync_now,
         ])
         .build(tauri::generate_context!())
         .expect("error while building InstrumentLedger application");

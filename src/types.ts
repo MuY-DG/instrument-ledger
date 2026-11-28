@@ -259,3 +259,120 @@ export interface WorkbenchCachePruneResult {
   draftCount: number;
   limitBytes: number;
 }
+
+export type SyncProviderPreset = "r2" | "oss" | "cos" | "aws" | "minio" | "custom";
+
+export type SyncState =
+  | "unconfigured"
+  | "disabled"
+  | "up_to_date"
+  | "local_ahead"
+  | "remote_ahead"
+  | "conflict";
+
+export interface SyncConfigView {
+  enabled: boolean;
+  configured: boolean;
+  providerPreset: SyncProviderPreset | string;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  accessKeyId: string;
+  hasSecretAccessKey: boolean;
+  secretAccessKeyHint: string;
+  forcePathStyle: boolean;
+  e2eeEnabled: boolean;
+  hasE2eePassphrase: boolean;
+  checkOnStartup: boolean;
+  deviceId: string;
+  deviceName: string;
+  lastSyncedRev: number;
+  lastSyncedAt: string;
+}
+
+export interface SaveSyncConfigInput {
+  enabled: boolean;
+  providerPreset: string;
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  accessKeyId: string;
+  secretAccessKey?: string | null;
+  clearSecretAccessKey?: boolean | null;
+  forcePathStyle: boolean;
+  e2eeEnabled: boolean;
+  e2eePassphrase?: string | null;
+  clearE2eePassphrase?: boolean | null;
+  checkOnStartup: boolean;
+  deviceName?: string | null;
+}
+
+export interface TestSyncConfigInput {
+  endpoint: string;
+  region: string;
+  bucket: string;
+  prefix: string;
+  accessKeyId: string;
+  secretAccessKey?: string | null;
+  forcePathStyle: boolean;
+  e2eeEnabled: boolean;
+  e2eePassphrase?: string | null;
+}
+
+export interface SyncTestResult {
+  ok: boolean;
+  message: string;
+  hasRemoteData: boolean;
+  remoteRevision: number | null;
+  remoteInstrumentCount: number | null;
+  remoteReportCount: number | null;
+  remoteUpdatedAt: string | null;
+  remoteDeviceName: string | null;
+  remoteEncrypted: boolean;
+  passphraseVerified: boolean | null;
+}
+
+export interface SyncStatusResult {
+  configured: boolean;
+  enabled: boolean;
+  state: SyncState;
+  summary: string;
+  localInstrumentCount: number;
+  localReportCount: number;
+  localChanged: boolean;
+  lastSyncedRev: number;
+  lastSyncedAt: string;
+  remoteRevision: number | null;
+  remoteUpdatedAt: string | null;
+  remoteDeviceName: string | null;
+  remoteInstrumentCount: number | null;
+  remoteReportCount: number | null;
+  remoteEncrypted: boolean;
+  localE2eeEnabled: boolean;
+  encryptionMismatch: boolean;
+  passphraseError: string | null;
+}
+
+export interface SyncActionResult {
+  direction: "push" | "pull" | "noop";
+  revision: number;
+  instrumentCount: number;
+  reportCount: number;
+  transferredBlobs: number;
+  skippedBlobs: number;
+  dbBytes: number;
+  encrypted: boolean;
+  syncedAt: string;
+  safetyBackupPath: string | null;
+  message: string;
+}
+
+export interface SyncProgressEvent {
+  phase: string;
+  message: string;
+  current: number;
+  total: number;
+  percent: number;
+}

@@ -13,6 +13,7 @@ import {
   Check,
   CheckCircle2,
   ChevronDown,
+  Cloud,
   CloudDownload,
   Edit3,
   ExternalLink,
@@ -53,6 +54,7 @@ import { isMacPlatform } from "@/components/AuthLockModals";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
 import { MarkdownNotes } from "@/components/MarkdownNotes";
+import { SyncSettingsPanel } from "@/components/SyncSettingsPanel";
 import { ThresholdSettingsEditor } from "@/components/ThresholdSettingsEditor";
 import {
   EASE_PRECISION,
@@ -72,6 +74,9 @@ import type {
   CloseBehavior,
   DataDirInfo,
   ResetAppResult,
+  SyncConfigView,
+  SyncProgressEvent,
+  SyncStatusResult,
   UpdateCheckResult,
   UpdateDownloadProgress,
 } from "@/types";
@@ -82,6 +87,7 @@ export type SettingsTab =
   | "window"
   | "alerts"
   | "applock"
+  | "sync"
   | "backup"
   | "update";
 
@@ -99,6 +105,16 @@ interface SettingsModalProps {
   updateProgress?: UpdateDownloadProgress | null;
   onUpdateDetected?: (res: UpdateCheckResult) => void;
   onTriggerInstallUpdate?: (repoOverride?: string, proxyOverride?: string) => Promise<void>;
+  syncConfig?: SyncConfigView | null;
+  syncStatus?: SyncStatusResult | null;
+  syncing?: boolean;
+  syncProgress?: SyncProgressEvent | null;
+  onSyncConfigSaved?: (next: SyncConfigView) => void;
+  onSyncStatusUpdated?: (next: SyncStatusResult) => void;
+  onSyncNow?: () => Promise<void>;
+  onSyncManualPush?: () => Promise<void>;
+  onSyncManualPull?: () => Promise<void>;
+  onOpenSyncConflict?: () => void;
   onClose: () => void;
   onSettingsChanged: (next: AppSettings) => void;
   onDataRestored: () => void;
@@ -148,6 +164,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   updateProgress = null,
   onUpdateDetected,
   onTriggerInstallUpdate,
+  syncConfig = null,
+  syncStatus = null,
+  syncing = false,
+  syncProgress = null,
+  onSyncConfigSaved,
+  onSyncStatusUpdated,
+  onSyncNow,
+  onSyncManualPush,
+  onSyncManualPull,
+  onOpenSyncConflict,
   onClose,
   onSettingsChanged,
   onDataRestored,
@@ -291,6 +317,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       tab === "account" ||
       tab === "general" ||
       tab === "applock" ||
+      tab === "sync" ||
       tab === "backup"
     ) {
       setTab("window");
@@ -758,6 +785,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     { id: "window", label: "窗口与托盘", icon: <AppWindow className="h-3.5 w-3.5" /> },
     { id: "alerts", label: "到期预警", icon: <BellRing className="h-3.5 w-3.5" /> },
     { id: "applock", label: "应用锁", icon: <Lock className="h-3.5 w-3.5" />, adminOnly: true },
+    { id: "sync", label: "云端同步", icon: <Cloud className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "backup", label: "备份与还原", icon: <HardDrive className="h-3.5 w-3.5" />, adminOnly: true },
     { id: "update", label: "检查更新", icon: <CloudDownload className="h-3.5 w-3.5" /> },
   ];
@@ -821,6 +849,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         <span className="relative z-10 flex-1 text-left">
                           {t.label}
                         </span>
+                        {t.id === "sync" &&
+                          syncStatus &&
+                          (syncStatus.state === "remote_ahead" ||
+                            syncStatus.state === "conflict" ||
+                            syncStatus.state === "local_ahead" ||
+                            Boolean(syncStatus.passphraseError)) && (
+                            <span
+                              className={cn(
+                                "relative z-10 h-1.5 w-1.5 rounded-full shrink-0",
+                                syncStatus.state === "conflict" ||
+                                  syncStatus.passphraseError
+                                  ? "bg-rose-500"
+                                  : syncStatus.state === "remote_ahead"
+                                    ? "bg-sky-500"
+                                    : "bg-amber-500"
+                              )}
+                            />
+                          )}
                         {t.id === "update" &&
                           (availableUpdate?.hasUpdate ||
                             updateResult?.hasUpdate) && (
@@ -1708,6 +1754,28 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       )}
                     </div>
                   </div>
+                )}
+
+                {tab === "sync" && isAdmin && (
+                  <SyncSettingsPanel
+                    syncConfig={syncConfig}
+                    syncStatus={syncStatus}
+                    syncing={syncing}
+                    syncProgress={syncProgress}
+                    onConfigSaved={(next) => onSyncConfigSaved?.(next)}
+                    onStatusUpdated={(next) => onSyncStatusUpdated?.(next)}
+                    onSyncNow={async () => {
+                      await onSyncNow?.();
+                    }}
+                    onManualPush={async () => {
+                      await onSyncManualPush?.();
+                    }}
+                    onManualPull={async () => {
+                      await onSyncManualPull?.();
+                    }}
+                    onOpenConflictModal={() => onOpenSyncConflict?.()}
+                    onNotify={onNotify}
+                  />
                 )}
 
                 {tab === "backup" && isAdmin && (
