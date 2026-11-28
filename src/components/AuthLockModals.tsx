@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import { InfoTip } from "@/components/InfoTip";
 import {
@@ -558,6 +559,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
   onClose,
   onSuccess,
 }) => {
+  const { t } = useI18n();
   const sessionDays = defaultSessionDays > 0 ? defaultSessionDays : 7;
   const [username, setUsername] = useState(defaultUsername || "");
   const [password, setPassword] = useState("");
@@ -605,7 +607,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   <ShieldCheck className="h-4 w-4" />
                 </div>
                 <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                  管理员身份验证
+                  {t("管理员身份验证", "Admin Sign In")}
                 </h2>
               </div>
               <button
@@ -620,21 +622,21 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
             <form onSubmit={handleSubmit} className="p-6 space-y-4">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  管理员账号
+                  {t("管理员账号", "Username")}
                 </label>
                 <input
                   type="text"
                   required
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
-                  placeholder="请输入管理员账号"
+                  placeholder={t("请输入管理员账号", "Enter admin username")}
                   className="precision-field w-full px-3.5 py-2.5 text-sm rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-zinc-50/60 hover:bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.05]"
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-                  登录密码
+                  {t("登录密码", "Password")}
                 </label>
                 <div className="relative">
                   <input
@@ -643,7 +645,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                     required
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="请输入密码"
+                    placeholder={t("请输入密码", "Enter password")}
                     className="precision-field w-full pl-3.5 pr-10 py-2.5 text-sm rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-zinc-50/60 hover:bg-white dark:bg-white/[0.03] text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 focus:bg-white dark:focus:bg-white/[0.05]"
                   />
                   <button
@@ -662,12 +664,15 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   onChange={setRemember}
                   label={
                     <span className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
-                      {sessionDays} 天内保持登录
+                      {t(`${sessionDays} 天内保持登录`, `Keep signed in for ${sessionDays} days`)}
                     </span>
                   }
                 />
                 <InfoTip
-                  content={`勾选后 ${sessionDays} 天内重启软件无需重输密码，到期自动恢复只读；可随时在侧边栏退出。`}
+                  content={t(
+                    `勾选后 ${sessionDays} 天内重启软件无需重输密码，到期自动恢复只读；可随时在侧边栏退出。`,
+                    `Stay signed in across restarts for ${sessionDays} days. You can sign out anytime from the sidebar.`
+                  )}
                 />
               </div>
 
@@ -695,7 +700,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   onClick={onClose}
                   className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.06] transition-colors"
                 >
-                  取消
+                  {t("取消", "Cancel")}
                 </motion.button>
                 <motion.button
                   type="submit"
@@ -705,7 +710,7 @@ export const AdminLoginModal: React.FC<AdminLoginModalProps> = ({
                   className="btn-sheen inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                 >
                   <KeyRound className="h-3.5 w-3.5" />
-                  <span>{loading ? "登录中..." : "登录"}</span>
+                  <span>{loading ? t("登录中...", "Signing in...") : t("登录", "Sign In")}</span>
                 </motion.button>
               </div>
             </form>
@@ -1054,7 +1059,6 @@ export const AppLockSetupModal: React.FC<AppLockSetupModalProps> = ({
 interface AppLockOverlayProps {
   locked: boolean;
   username: string;
-  docTitle: string;
   pinLength: number;
   focusNonce?: number;
   onUnlocked: (status: AuthStatus, resetApplied?: boolean) => void;
@@ -1065,11 +1069,11 @@ type RecoveryAction = "unlock_only" | "reset_pin" | "disable_lock";
 export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
   locked,
   username,
-  docTitle,
   pinLength,
   focusNonce = 0,
   onUnlocked,
 }) => {
+  const { t } = useI18n();
   const effectivePinLen = pinLength >= 4 && pinLength <= 6 ? pinLength : 4;
   const [view, setView] = useState<"pin" | "recovery">("pin");
   const [pin, setPin] = useState("");
@@ -1268,10 +1272,8 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                 )}
               />
               <span className="font-medium text-zinc-900 dark:text-zinc-100">
-                {docTitle || "监视与测量管理台账"}
+                {unlockedSuccess ? t("已解锁", "Unlocked") : t("应用已锁定", "App Locked")}
               </span>
-              <span className="text-zinc-300 dark:text-zinc-600">·</span>
-              <span>{unlockedSuccess ? "已解锁" : "已锁定"}</span>
             </div>
           </motion.div>
 
@@ -1376,8 +1378,8 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                     </motion.div>
                     <h2 className="text-[15px] font-semibold text-zinc-950 dark:text-white tracking-tight">
                       {unlockedSuccess
-                        ? "验证通过"
-                        : `输入 ${effectivePinLen} 位 PIN 码`}
+                        ? t("验证通过", "Verified")
+                        : t(`输入 ${effectivePinLen} 位 PIN 码`, `Enter ${effectivePinLen}-Digit PIN`)}
                     </h2>
                   </div>
 
@@ -1392,7 +1394,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
                       onComplete={handlePinComplete}
                       disabled={verifying}
                       verified={unlockedSuccess}
-                      verifiedLabel="已解锁"
+                      verifiedLabel={t("已解锁", "Unlocked")}
                       hasError={Boolean(error)}
                       autoFocus={locked && view === "pin"}
                       focusNonce={focusNonce}

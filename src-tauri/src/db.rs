@@ -4,7 +4,7 @@ use chrono::{DateTime, Duration, Months, NaiveDate, Utc};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::auth::verify_password;
-use crate::models::{AppSettings, CalibrationReport, Instrument, WarningThreshold};
+use crate::models::{AppSettings, CalibrationReport, CustomAppIcon, Instrument, WarningThreshold};
 
 pub fn now_iso() -> String {
     Utc::now().to_rfc3339()
@@ -124,7 +124,10 @@ pub fn init_db(db_path: &Path) -> Result<Connection, String> {
 pub const DEFAULT_GITHUB_REPO: &str = "MuY-DG/instrument-ledger";
 pub const DEFAULT_UPDATE_PROXY_URL: &str = "https://gh-proxy.com/";
 pub const DEFAULT_ALERT_POPUP_FREQUENCY: &str = "every_open";
-pub const DEFAULT_CLOSE_BEHAVIOR: &str = "ask";
+pub const DEFAULT_CLOSE_BEHAVIOR: &str = "minimize_to_tray";
+pub const DEFAULT_UI_LANGUAGE: &str = "system";
+pub const DEFAULT_UI_SCALE_MODE: &str = "auto";
+pub const DEFAULT_UI_SCALE: f64 = 1.0;
 pub const DEFAULT_ADMIN_SESSION_DAYS: i64 = 7;
 pub const DEFAULT_ADMIN_TITLE: &str = "系统管理员";
 
@@ -218,6 +221,36 @@ pub fn sanitize_close_behavior(raw: &str) -> String {
     }
 }
 
+pub fn sanitize_ui_language(raw: &str) -> String {
+    match raw.trim() {
+        "system" | "zh-CN" | "en" => raw.trim().to_string(),
+        _ => DEFAULT_UI_LANGUAGE.to_string(),
+    }
+}
+
+pub fn sanitize_ui_scale_mode(raw: &str) -> String {
+    match raw.trim() {
+        "auto" | "manual" => raw.trim().to_string(),
+        _ => DEFAULT_UI_SCALE_MODE.to_string(),
+    }
+}
+
+pub fn sanitize_ui_scale(scale: f64) -> f64 {
+    if !scale.is_finite() {
+        return DEFAULT_UI_SCALE;
+    }
+    let clamped = scale.clamp(0.75, 1.50);
+    (clamped * 100.0).round() / 100.0
+}
+
+pub fn load_custom_app_icons(conn: &Connection) -> Vec<CustomAppIcon> {
+    get_setting(conn, "custom_app_icons")
+        .ok()
+        .flatten()
+        .and_then(|raw| serde_json::from_str::<Vec<CustomAppIcon>>(&raw).ok())
+        .unwrap_or_default()
+}
+
 pub fn sanitize_admin_session_days(days: i64) -> i64 {
     days.clamp(1, 365)
 }
@@ -287,6 +320,15 @@ fn seed_default_settings(conn: &Connection) -> Result<(), String> {
         ("alert_popup_interval_hours", "4"),
         ("auto_lock_minutes", "0"),
         ("close_behavior", DEFAULT_CLOSE_BEHAVIOR),
+        ("show_tray_icon", "1"),
+        ("ui_language", DEFAULT_UI_LANGUAGE),
+        ("ui_scale_mode", DEFAULT_UI_SCALE_MODE),
+        ("ui_scale", "1.0"),
+        ("app_icon_id", "default"),
+        ("custom_app_icons", "[]"),
+        ("compact_toolbar", "1"),
+        ("show_import_button", "0"),
+        ("sidebar_nav_config", ""),
         ("keep_admin_session", "1"),
         ("admin_session_days", "7"),
         ("admin_session_active", "0"),
@@ -418,6 +460,26 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         .unwrap_or(4)
         .clamp(1, 168);
     let close_behavior = sanitize_close_behavior(&get_or("close_behavior", DEFAULT_CLOSE_BEHAVIOR));
+    let show_tray_icon = get_or("show_tray_icon", "1") != "0";
+    let ui_language = sanitize_ui_language(&get_or("ui_language", DEFAULT_UI_LANGUAGE));
+    let ui_scale_mode = sanitize_ui_scale_mode(&get_or("ui_scale_mode", DEFAULT_UI_SCALE_MODE));
+    let ui_scale = get_or("ui_scale", "1.0")
+        .parse::<f64>()
+        .map(sanitize_ui_scale)
+        .unwrap_or(DEFAULT_UI_SCALE);
+    let custom_app_icons = load_custom_app_icons(conn);
+    let raw_icon_id = get_or("app_icon_id", "default");
+    let app_icon_id = if raw_icon_id == "default"
+        || raw_icon_id == "obsidian"
+        || custom_app_icons.iter().any(|c| c.id == raw_icon_id)
+    {
+        raw_icon_id
+    } else {
+        "default".to_string()
+    };
+    let compact_toolbar = get_or("compact_toolbar", "1") != "0";
+    let show_import_button = get_or("show_import_button", "0") == "1";
+    let sidebar_nav_config = get_or("sidebar_nav_config", "");
     let keep_admin_session = get_or("keep_admin_session", "1") != "0";
     let admin_session_days = get_or("admin_session_days", &DEFAULT_ADMIN_SESSION_DAYS.to_string())
         .parse::<i64>()
@@ -445,6 +507,15 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         alert_popup_interval_hours,
         auto_lock_minutes: get_or("auto_lock_minutes", "0").parse().unwrap_or(0),
         close_behavior,
+        show_tray_icon,
+        ui_language,
+        ui_scale_mode,
+        ui_scale,
+        app_icon_id,
+        custom_app_icons,
+        compact_toolbar,
+        show_import_button,
+        sidebar_nav_config,
         keep_admin_session,
         admin_session_days,
         app_lock_enabled,
@@ -777,7 +848,16 @@ mod tests {
 
         let conn = init_db(&db_path).expect("init_db failed");
         let s1 = load_app_settings(&conn).unwrap();
-        assert_eq!(s1.close_behavior, "ask");
+        assert_eq!(s1.close_behavior, "minimize_to_tray");
+        assert!(s1.show_tray_icon);
+        assert_eq!(s1.ui_language, "system");
+        assert_eq!(s1.ui_scale_mode, "auto");
+        assert!((s1.ui_scale - 1.0).abs() < 1e-6);
+        assert_eq!(s1.app_icon_id, "default");
+        assert!(s1.custom_app_icons.is_empty());
+        assert!(s1.compact_toolbar);
+        assert!(!s1.show_import_button);
+        assert_eq!(s1.sidebar_nav_config, "");
         assert!(s1.keep_admin_session);
         assert!(!s1.app_lock_enabled);
         assert_eq!(s1.app_lock_pin_length, 0);
@@ -786,7 +866,14 @@ mod tests {
 
         assert_eq!(sanitize_close_behavior("minimize_to_tray"), "minimize_to_tray");
         assert_eq!(sanitize_close_behavior("exit"), "exit");
-        assert_eq!(sanitize_close_behavior("bogus"), "ask");
+        assert_eq!(sanitize_close_behavior("bogus"), "minimize_to_tray");
+        assert_eq!(sanitize_ui_language("en"), "en");
+        assert_eq!(sanitize_ui_language("zh-CN"), "zh-CN");
+        assert_eq!(sanitize_ui_language("other"), "system");
+        assert_eq!(sanitize_ui_scale_mode("manual"), "manual");
+        assert_eq!(sanitize_ui_scale_mode("other"), "auto");
+        assert!((sanitize_ui_scale(2.5) - 1.5).abs() < 1e-6);
+        assert!((sanitize_ui_scale(0.2) - 0.75).abs() < 1e-6);
 
         // Enabling app lock without hash must still report not configured
         set_setting(&conn, "app_lock_enabled", "1").unwrap();

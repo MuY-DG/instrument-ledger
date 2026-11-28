@@ -7,7 +7,7 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_updater::{Update, UpdaterExt};
 use url::Url;
 
-use crate::models::{UpdateCheckResult, UpdateDownloadProgress};
+use crate::models::{ReleaseHistoryItem, UpdateCheckResult, UpdateDownloadProgress};
 
 /// Built-in zero-cost public GitHub mirror acceleration pool (all verified against
 /// static Release `latest.json` redirects & binary downloads; integrity is strictly
@@ -724,6 +724,221 @@ pub async fn download_and_install_update(
 
     std::thread::sleep(Duration::from_millis(250));
     app.restart()
+}
+
+#[derive(serde::Deserialize)]
+struct GithubReleaseDto {
+    #[serde(default)]
+    tag_name: String,
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    body: Option<String>,
+    #[serde(default)]
+    published_at: Option<String>,
+    #[serde(default)]
+    created_at: Option<String>,
+    #[serde(default)]
+    html_url: String,
+    #[serde(default)]
+    draft: bool,
+    #[serde(default)]
+    prerelease: bool,
+}
+
+fn unescape_basic_xml(input: &str) -> String {
+    input
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
+}
+
+fn strip_html_tags(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut in_tag = false;
+    let normalized = input
+        .replace("<br/>", "\n")
+        .replace("<br />", "\n")
+        .replace("<br>", "\n")
+        .replace("</p>", "\n")
+        .replace("</li>", "\n")
+        .replace("<li>", "- ");
+    for ch in normalized.chars() {
+        match ch {
+            '<' => in_tag = true,
+            '>' => in_tag = false,
+            _ if !in_tag => out.push(ch),
+            _ => {}
+        }
+    }
+    out.trim().to_string()
+}
+
+fn extract_xml_tag(block: &str, tag: &str) -> Option<String> {
+    let open_prefix = format!("<{}", tag);
+    let start_pos = block.find(&open_prefix)?;
+    let after_open = &block[start_pos + open_prefix.len()..];
+    let gt_pos = after_open.find('>')?;
+    let content_start = &after_open[gt_pos + 1..];
+    let close_tag = format!("</{}>", tag);
+    let end_pos = content_start.find(&close_tag)?;
+    Some(content_start[..end_pos].trim().to_string())
+}
+
+fn extract_atom_link_href(block: &str) -> Option<String> {
+    let pos = block.find("<link ")?;
+    let tail = &block[pos..];
+    let href_pos = tail.find("href=\"")?;
+    let after = &tail[href_pos + 6..];
+    let end = after.find('"')?;
+    Some(after[..end].to_string())
+}
+
+fn parse_releases_atom(xml: &str, repo: &str) -> Vec<ReleaseHistoryItem> {
+    let mut items = Vec::new();
+    let mut cursor = xml;
+    while let Some(idx) = cursor.find("<entry>") {
+        let rest = &cursor[idx + 7..];
+        let Some(end) = rest.find("</entry>") else {
+            break;
+        };
+        let block = &rest[..end];
+        cursor = &rest[end + 8..];
+
+        let href = extract_atom_link_href(block)
+            .unwrap_or_else(|| format!("https://github.com/{}/releases", repo));
+        let tag_from_href = href
+            .rsplit('/')
+            .next()
+            .unwrap_or_default()
+            .trim()
+            .to_string();
+        let title = extract_xml_tag(block, "title")
+            .map(|s| unescape_basic_xml(&s))
+            .unwrap_or_else(|| tag_from_href.clone());
+        let tag_name = if !tag_from_href.is_empty() {
+            tag_from_href
+        } else {
+            title.clone()
+        };
+        let version = tag_name
+            .trim_start_matches(['v', 'V'])
+            .to_string();
+        let published_at = extract_xml_tag(block, "updated").unwrap_or_default();
+        let body = extract_xml_tag(block, "content")
+            .map(|s| strip_html_tags(&unescape_basic_xml(&s)))
+            .unwrap_or_default();
+
+        if !tag_name.is_empty() {
+            items.push(ReleaseHistoryItem {
+                version,
+                tag_name,
+                name: title,
+                published_at,
+                body,
+                html_url: href,
+                prerelease: false,
+            });
+        }
+        if items.len() >= 20 {
+            break;
+        }
+    }
+    items
+}
+
+pub async fn fetch_github_release_history(
+    repo_input: &str,
+    proxy_url: &str,
+) -> Result<Vec<ReleaseHistoryItem>, String> {
+    let repo = normalize_repo(repo_input)?;
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(12))
+        .user_agent("InstrumentLedger")
+        .build()
+        .map_err(|e| format!("初始化网络客户端失败: {}", e))?;
+
+    // 1. Primary path: GitHub REST API (full Markdown release notes & metadata)
+    let api_url = format!("https://api.github.com/repos/{}/releases?per_page=20", repo);
+    let mut last_err = String::new();
+    match client
+        .get(&api_url)
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+    {
+        Ok(resp) if resp.status().is_success() => {
+            if let Ok(text) = resp.text().await {
+                if let Ok(list) = serde_json::from_str::<Vec<GithubReleaseDto>>(&text) {
+                    let items: Vec<ReleaseHistoryItem> = list
+                        .into_iter()
+                        .filter(|r| !r.draft)
+                        .map(|r| {
+                            let tag = r.tag_name.trim().to_string();
+                            let version = tag.trim_start_matches(['v', 'V']).to_string();
+                            let name = r
+                                .name
+                                .as_deref()
+                                .map(str::trim)
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or(&tag)
+                                .to_string();
+                            let published_at = r
+                                .published_at
+                                .or(r.created_at)
+                                .unwrap_or_default();
+                            ReleaseHistoryItem {
+                                version,
+                                tag_name: tag,
+                                name,
+                                published_at,
+                                body: r.body.unwrap_or_default().trim().to_string(),
+                                html_url: r.html_url,
+                                prerelease: r.prerelease,
+                            }
+                        })
+                        .collect();
+                    return Ok(items);
+                }
+            }
+        }
+        Ok(resp) => {
+            last_err = format!("GitHub API HTTP {}", resp.status().as_u16());
+        }
+        Err(e) => {
+            last_err = e.to_string();
+        }
+    }
+
+    // 2. Resilient fallback: releases.atom via configured / built-in multi-node mirror channels
+    let atom_url = format!("https://github.com/{}/releases.atom", repo);
+    let channels = build_update_channels(proxy_url);
+    for ch in channels {
+        let Ok(url) = ch.apply_to_url(&atom_url) else {
+            continue;
+        };
+        if let Ok(resp) = client.get(url).send().await {
+            if resp.status().is_success() {
+                if let Ok(xml) = resp.text().await {
+                    let parsed = parse_releases_atom(&xml, &repo);
+                    if !parsed.is_empty() {
+                        return Ok(parsed);
+                    }
+                }
+            }
+        }
+    }
+
+    Err(if last_err.is_empty() {
+        format!("未能从 {} 获取发布历史，请检查网络连接", repo)
+    } else {
+        format!("获取发布历史失败: {}", last_err)
+    })
 }
 
 #[cfg(test)]

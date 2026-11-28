@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AddReportInput,
   AppSettings,
+  AppearancePreferencesInput,
   AuthStatus,
   BackupResult,
   Base64FilePayload,
@@ -13,6 +14,7 @@ import type {
   ImportResult,
   Instrument,
   InstrumentInput,
+  ReleaseHistoryItem,
   ResetAppResult,
   RestoreResult,
   SaveSyncConfigInput,
@@ -172,6 +174,12 @@ export const api = {
     invoke<void>("perform_close_action", { action, remember }),
   setCloseBehavior: (closeBehavior: CloseBehavior) =>
     invoke<AppSettings>("set_close_behavior", { closeBehavior }),
+  updateAppearancePreferences: (input: AppearancePreferencesInput) =>
+    invoke<AppSettings>("update_appearance_preferences", { input }),
+  addCustomAppIcon: (name: string, pngBase64: string) =>
+    invoke<AppSettings>("add_custom_app_icon", { name, pngBase64 }),
+  deleteCustomAppIcon: (iconId: string) =>
+    invoke<AppSettings>("delete_custom_app_icon", { iconId }),
   changeAdminPassword: (
     oldPassword: string,
     newPassword: string,
@@ -341,6 +349,11 @@ export const api = {
 
   checkForUpdates: (githubRepoOverride?: string, proxyOverride?: string) =>
     invoke<UpdateCheckResult>("check_for_updates", {
+      githubRepoOverride: githubRepoOverride ?? null,
+      proxyOverride: proxyOverride ?? null,
+    }),
+  fetchReleaseHistory: (githubRepoOverride?: string, proxyOverride?: string) =>
+    invoke<ReleaseHistoryItem[]>("fetch_release_history", {
       githubRepoOverride: githubRepoOverride ?? null,
       proxyOverride: proxyOverride ?? null,
     }),

@@ -1,4 +1,5 @@
-import type { CalibrationStatus, Instrument, WarningThreshold } from "@/types";
+import type { CalibrationStatus, Instrument, ResolvedLocale, WarningThreshold } from "@/types";
+import { getActiveLocale } from "@/lib/i18n";
 import {
   DEFAULT_WARNING_THRESHOLDS,
   sortThresholdsAsc,
@@ -84,18 +85,25 @@ export interface InstrumentStatusInfo {
 export function getInstrumentStatus(
   inst: Pick<Instrument, "exemptCalibration" | "nextCalDate" | "remark">,
   thresholdsOrWarningDays: WarningThreshold[] | number = DEFAULT_WARNING_THRESHOLDS,
-  opts?: { preSortedAsc?: boolean; todayEpochMs?: number }
+  opts?: { preSortedAsc?: boolean; todayEpochMs?: number; locale?: ResolvedLocale }
 ): InstrumentStatusInfo {
+  const isEn = (opts?.locale ?? getActiveLocale()) === "en";
   if (inst.exemptCalibration || !inst.nextCalDate.trim()) {
     return {
       status: "exempt",
       daysRemaining: null,
-      label: "免校",
+      label: isEn ? "Exempt" : "免校",
       detailText: inst.remark?.includes("无法校验")
-        ? "无法校验"
+        ? isEn
+          ? "Cannot Calibrate"
+          : "无法校验"
         : inst.remark?.includes("无需校验")
-          ? "无需校验"
-          : "未设效期",
+          ? isEn
+            ? "No Cal Needed"
+            : "无需校验"
+          : isEn
+            ? "No Expiry"
+            : "未设效期",
       isDueThisWeek: false,
       matchedThreshold: null,
     };
@@ -106,7 +114,7 @@ export function getInstrumentStatus(
     return {
       status: "exempt",
       daysRemaining: null,
-      label: "待核对",
+      label: isEn ? "Check Date" : "待核对",
       detailText: inst.nextCalDate,
       isDueThisWeek: false,
       matchedThreshold: null,
@@ -119,8 +127,8 @@ export function getInstrumentStatus(
     return {
       status: "expired",
       daysRemaining: diff,
-      label: "已超期",
-      detailText: `超期 ${Math.abs(diff)} 天`,
+      label: isEn ? "Expired" : "已超期",
+      detailText: isEn ? `${Math.abs(diff)}d overdue` : `超期 ${Math.abs(diff)} 天`,
       isDueThisWeek: false,
       matchedThreshold: null,
     };
@@ -133,7 +141,7 @@ export function getInstrumentStatus(
             id: `tier-${thresholdsOrWarningDays}`,
             days: thresholdsOrWarningDays,
             color: "#f59e0b",
-            label: "即将到期",
+            label: isEn ? "Due Soon" : "即将到期",
           },
         ]
       : opts?.preSortedAsc
@@ -152,8 +160,17 @@ export function getInstrumentStatus(
     return {
       status: "warning",
       daysRemaining: diff,
-      label: matched.label || `${matched.days}天预警`,
-      detailText: diff === 0 ? "今日到期" : `剩 ${diff} 天`,
+      label: isEn
+        ? `Due ≤${matched.days}d`
+        : matched.label || `${matched.days}天预警`,
+      detailText:
+        diff === 0
+          ? isEn
+            ? "Due today"
+            : "今日到期"
+          : isEn
+            ? `${diff}d left`
+            : `剩 ${diff} 天`,
       isDueThisWeek,
       matchedThreshold: matched,
     };
@@ -162,8 +179,8 @@ export function getInstrumentStatus(
   return {
     status: "valid",
     daysRemaining: diff,
-    label: "正常有效",
-    detailText: `剩 ${diff} 天`,
+    label: isEn ? "Valid" : "正常有效",
+    detailText: isEn ? `${diff}d left` : `剩 ${diff} 天`,
     isDueThisWeek,
     matchedThreshold: null,
   };
@@ -176,11 +193,12 @@ export function getInstrumentStatus(
  */
 export function buildInstrumentStatusMap(
   instruments: Instrument[],
-  thresholds: WarningThreshold[]
+  thresholds: WarningThreshold[],
+  locale?: ResolvedLocale
 ): Map<number, InstrumentStatusInfo> {
   const asc = sortThresholdsAsc(thresholds);
   const todayEpochMs = getTodayEpochMs();
-  const opts = { preSortedAsc: true, todayEpochMs };
+  const opts = { preSortedAsc: true, todayEpochMs, locale };
   const map = new Map<number, InstrumentStatusInfo>();
   for (let i = 0; i < instruments.length; i++) {
     const inst = instruments[i];
@@ -291,14 +309,15 @@ export function formatShortDateTime(iso: string): string {
   return `${y}-${m}-${d} ${hh}:${mm}`;
 }
 
-export function calTypeLabel(calType: string): string {
+export function calTypeLabel(calType: string, locale?: ResolvedLocale): string {
+  const isEn = (locale ?? getActiveLocale()) === "en";
   switch (calType) {
     case "internal":
-      return "内校";
+      return isEn ? "Internal" : "内校";
     case "external":
-      return "外校";
+      return isEn ? "External" : "外校";
     case "exempt":
-      return "免校";
+      return isEn ? "Exempt" : "免校";
     default:
       return calType || "-";
   }

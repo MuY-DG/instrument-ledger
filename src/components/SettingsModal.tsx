@@ -5,7 +5,6 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   AlertCircle,
   AlertTriangle,
-  AppWindow,
   Archive,
   ArrowRight,
   BellRing,
@@ -23,15 +22,13 @@ import {
   FileText,
   FolderOpen,
   HardDrive,
+  History,
   Image as ImageIcon,
   KeyRound,
   Layers,
   Loader2,
   Lock,
-  MonitorDown,
   Palette,
-  Play,
-  Power,
   RefreshCw,
   RotateCcw,
   Save,
@@ -39,7 +36,6 @@ import {
   ShieldCheck,
   Shuffle,
   SlidersHorizontal,
-  Sparkles,
   Trash2,
   User,
   X,
@@ -51,8 +47,11 @@ import {
   isGrainMeshId,
   type AccountBgId,
 } from "@/lib/accountBackgrounds";
+import { useI18n } from "@/lib/i18n";
 import { formatFileSize, getTodayStr } from "@/lib/status";
+import type { ThemePreference } from "@/lib/themeTransition";
 import { cn } from "@/lib/utils";
+import { AppearanceSettingsTab } from "@/components/AppearanceSettingsTab";
 import { isMacPlatform } from "@/components/AuthLockModals";
 import { confirmDialog } from "@/components/ConfirmDialog";
 import { InfoTip } from "@/components/InfoTip";
@@ -74,8 +73,9 @@ import {
 } from "@/components/ui/InteractiveControls";
 import type {
   AppSettings,
-  CloseBehavior,
+  AppearancePreferencesInput,
   DataDirInfo,
+  ReleaseHistoryItem,
   ResetAppResult,
   SyncConfigView,
   SyncProgressEvent,
@@ -86,8 +86,7 @@ import type {
 
 export type SettingsTab =
   | "account"
-  | "general"
-  | "window"
+  | "appearance"
   | "alerts"
   | "applock"
   | "sync"
@@ -101,6 +100,9 @@ interface SettingsModalProps {
   adminSessionExpiresAt?: string | null;
   accountBg: AccountBgId;
   onAccountBgChange: (next: AccountBgId) => void;
+  themePreference: ThemePreference;
+  onSelectThemePreference: (pref: ThemePreference, triggerEl?: HTMLElement | null) => void;
+  onAppearanceChange: (patch: AppearancePreferencesInput) => Promise<AppSettings | null>;
   settings: AppSettings;
   instrumentCount?: number;
   availableUpdate?: UpdateCheckResult | null;
@@ -155,10 +157,13 @@ function formatPublishDate(raw: string): string {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({
   openModal,
-  initialTab = "account",
+  initialTab = "appearance",
   isAdmin,
   accountBg,
   onAccountBgChange,
+  themePreference,
+  onSelectThemePreference,
+  onAppearanceChange,
   settings,
   instrumentCount = 0,
   availableUpdate = null,
@@ -188,32 +193,26 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onLockNow,
   onDisableAppLock,
 }) => {
+  const { t } = useI18n();
   const mac = isMacPlatform();
   const [tab, setTab] = useState<SettingsTab>(initialTab);
-  const [savingWindowPref, setSavingWindowPref] = useState(false);
   const [savingSecurityPref, setSavingSecurityPref] = useState(false);
   const [disablingLock, setDisablingLock] = useState(false);
 
-  // General form
+  // Update source & auto-lock form
   const [autoLockMinutes, setAutoLockMinutes] = useState(settings.autoLockMinutes);
-  const [docCode, setDocCode] = useState(settings.docCode);
-  const [docVersion, setDocVersion] = useState(settings.docVersion);
-  const [docTitle, setDocTitle] = useState(settings.docTitle);
-  const [docSubtitle, setDocSubtitle] = useState(settings.docSubtitle);
-  const [weeklyNotice, setWeeklyNotice] = useState(settings.weeklyNotice);
   const [githubRepo, setGithubRepo] = useState(() =>
     normalizeOptionalRepoInput(settings.githubRepo)
   );
   const [updateProxyUrl, setUpdateProxyUrl] = useState(() =>
     normalizeOptionalProxyInput(settings.updateProxyUrl)
   );
-  const [logoPreview, setLogoPreview] = useState("");
-  const [savingGeneral, setSavingGeneral] = useState(false);
   const {
-    status: generalSaveStatus,
-    setStatus: setGeneralSaveStatus,
-    setTransientSuccess: setGeneralSaveSuccess,
+    status: updateSourceSaveStatus,
+    setStatus: setUpdateSourceSaveStatus,
+    setTransientSuccess: setUpdateSourceSaveSuccess,
   } = useActionStatus(1400);
+  const [savingUpdateSource, setSavingUpdateSource] = useState(false);
   const {
     status: backupStatus,
     setStatus: setBackupStatus,
@@ -258,18 +257,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       (settings.backupIncludeWorkbench && dirInfo.workbenchDraftCount > 0)
     : instrumentCount > 0;
 
-  const generalIsDirty =
-    docCode !== settings.docCode ||
-    docVersion !== settings.docVersion ||
-    docTitle !== settings.docTitle ||
-    docSubtitle !== settings.docSubtitle ||
-    weeklyNotice !== settings.weeklyNotice;
-
-  // Updater state
+  // Updater & Release History state
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [updateResult, setUpdateResult] = useState<UpdateCheckResult | null>(availableUpdate);
   const [updateError, setUpdateError] = useState("");
-  const [showSourceConfig, setShowSourceConfig] = useState(!availableUpdate?.hasUpdate);
+  const [showSourceConfig, setShowSourceConfig] = useState(false);
+  const [showReleaseHistory, setShowReleaseHistory] = useState(false);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+  const [releaseHistory, setReleaseHistory] = useState<ReleaseHistoryItem[] | null>(null);
+  const [historyError, setHistoryError] = useState("");
+  const [expandedReleaseTag, setExpandedReleaseTag] = useState<string | null>(null);
+
+  // Unsaved-changes guard across tabs & modal close
+  const [appearanceDirty, setAppearanceDirty] = useState(false);
+  const [alertsDirty, setAlertsDirty] = useState(false);
+  const confirmingDiscardRef = useRef(false);
+
+  const updateSourceDirty =
+    isAdmin &&
+    (githubRepo !== normalizeOptionalRepoInput(settings.githubRepo) ||
+      updateProxyUrl !== normalizeOptionalProxyInput(settings.updateProxyUrl));
+
+  const accountFormDirty =
+    isAdmin &&
+    ((editingProfile &&
+      (profileUsername !== settings.adminUsername ||
+        profileTitle !== (settings.adminTitle || "系统管理员"))) ||
+      (editingPassword &&
+        Boolean(oldPassword || newPassword || confirmPassword)));
+
+  const currentTabDirty =
+    (tab === "appearance" && appearanceDirty) ||
+    (tab === "alerts" && alertsDirty) ||
+    (tab === "update" && updateSourceDirty) ||
+    (tab === "account" && accountFormDirty);
 
   const wasOpenRef = useRef(false);
 
@@ -277,17 +298,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (!openModal) {
       wasOpenRef.current = false;
+      setAppearanceDirty(false);
+      setAlertsDirty(false);
       return;
     }
     if (!wasOpenRef.current) {
       wasOpenRef.current = true;
       setTab(
         isAdmin ||
-          initialTab === "window" ||
+          initialTab === "appearance" ||
           initialTab === "alerts" ||
           initialTab === "update"
           ? initialTab
-          : "window"
+          : "appearance"
       );
       setEditingProfile(false);
       setShowBgPicker(false);
@@ -300,11 +323,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       setResetPassword("");
       setResetError("");
       setDirInfo(null);
+      setShowSourceConfig(false);
+      setShowReleaseHistory(false);
+      setHistoryError("");
+      setExpandedReleaseTag(null);
       if (availableUpdate) {
         setUpdateResult(availableUpdate);
-        setShowSourceConfig(!availableUpdate.hasUpdate);
-      } else {
-        setShowSourceConfig(true);
       }
       api.getDataDirInfo().then(setDirInfo).catch(() => {});
       api
@@ -322,12 +346,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!openModal || isAdmin) return;
     if (
       tab === "account" ||
-      tab === "general" ||
       tab === "applock" ||
       tab === "sync" ||
       tab === "backup"
     ) {
-      setTab("window");
+      setTab("appearance");
     }
   }, [openModal, isAdmin, tab]);
 
@@ -335,23 +358,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   useEffect(() => {
     if (!openModal) return;
     setAutoLockMinutes(settings.autoLockMinutes);
-    setDocCode(settings.docCode);
-    setDocVersion(settings.docVersion);
-    setDocTitle(settings.docTitle);
-    setDocSubtitle(settings.docSubtitle);
-    setWeeklyNotice(settings.weeklyNotice);
     setGithubRepo(normalizeOptionalRepoInput(settings.githubRepo));
     setUpdateProxyUrl(normalizeOptionalProxyInput(settings.updateProxyUrl));
     setProfileUsername(settings.adminUsername);
     setProfileTitle(settings.adminTitle || "系统管理员");
-    if (settings.companyLogoPath) {
-      api
-        .getStoredImageDataUrl(settings.companyLogoPath)
-        .then(setLogoPreview)
-        .catch(() => setLogoPreview(""));
-    } else {
-      setLogoPreview("");
-    }
     if (settings.adminAvatarPath) {
       api
         .getStoredImageDataUrl(settings.adminAvatarPath)
@@ -367,63 +377,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     if (!openModal || !availableUpdate) return;
     setUpdateResult(availableUpdate);
   }, [openModal, availableUpdate]);
-
-  const handleSaveGeneral = async (e?: React.FormEvent) => {
-    e?.preventDefault();
-    setSavingGeneral(true);
-    setGeneralSaveStatus("loading");
-    try {
-      const updated = await api.updateSettings({
-        docCode,
-        docVersion,
-        docTitle,
-        docSubtitle,
-        weeklyNotice,
-        githubRepo,
-        updateProxyUrl,
-      });
-      onSettingsChanged(updated);
-      setGeneralSaveSuccess();
-      onNotify("系统配置已保存", "success");
-    } catch (err) {
-      setGeneralSaveStatus("idle");
-      onNotify(String(err), "error");
-    } finally {
-      setSavingGeneral(false);
-    }
-  };
-
-  const handleUploadLogo = async () => {
-    const picked = await open({
-      multiple: false,
-      title: "选择公司表头 Logo 图片",
-      filters: [{ name: "图片", extensions: ["png", "jpg", "jpeg"] }],
-    });
-    if (typeof picked === "string" && picked) {
-      try {
-        const rel = await api.uploadCompanyLogo(picked);
-        const updated = await api.getSettings();
-        onSettingsChanged(updated);
-        const url = await api.getStoredImageDataUrl(rel);
-        setLogoPreview(url);
-        onNotify("公司表头 Logo 已更新", "success");
-      } catch (err) {
-        onNotify(String(err), "error");
-      }
-    }
-  };
-
-  const handleRemoveLogo = async () => {
-    try {
-      await api.removeCompanyLogo();
-      const updated = await api.getSettings();
-      onSettingsChanged(updated);
-      setLogoPreview("");
-      onNotify("已移除公司 Logo", "success");
-    } catch (err) {
-      onNotify(String(err), "error");
-    }
-  };
 
   const handleUploadAvatar = async () => {
     const picked = await open({
@@ -571,12 +524,24 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleDiscardGeneral = () => {
-    setDocCode(settings.docCode);
-    setDocVersion(settings.docVersion);
-    setDocTitle(settings.docTitle);
-    setDocSubtitle(settings.docSubtitle);
-    setWeeklyNotice(settings.weeklyNotice);
+  const handleSaveUpdateSource = async () => {
+    if (savingUpdateSource) return;
+    setSavingUpdateSource(true);
+    setUpdateSourceSaveStatus("loading");
+    try {
+      const updated = await api.updateSettings({
+        githubRepo,
+        updateProxyUrl,
+      });
+      onSettingsChanged(updated);
+      setUpdateSourceSaveSuccess();
+      onNotify(t("更新源配置已保存", "Update source saved"), "success");
+    } catch (err) {
+      setUpdateSourceSaveStatus("idle");
+      onNotify(String(err), "error");
+    } finally {
+      setSavingUpdateSource(false);
+    }
   };
 
   const handleChooseResetBackupDir = async () => {
@@ -696,28 +661,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleUpdateCloseBehavior = async (next: CloseBehavior) => {
-    if (savingWindowPref || settings.closeBehavior === next) return;
-    setSavingWindowPref(true);
-    try {
-      const updated = await api.setCloseBehavior(next);
-      onSettingsChanged(updated);
-      const label =
-        next === "minimize_to_tray"
-          ? mac
-            ? "最小化到顶部菜单栏"
-            : "最小化到系统托盘"
-          : next === "exit"
-            ? "直接退出程序"
-            : "每次关闭时询问";
-      onNotify(`关闭按钮行为已设为「${label}」`, "success");
-    } catch (err) {
-      onNotify(String(err), "error");
-    } finally {
-      setSavingWindowPref(false);
-    }
-  };
-
   const handlePatchSecuritySetting = async (
     patch: {
       autoLockMinutes?: number;
@@ -742,9 +685,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const handleConfirmDisableAppLock = async () => {
     if (!onDisableAppLock || disablingLock) return;
     const ok = await confirmDialog({
-      title: "关闭应用锁",
-      description: "关闭后将清除当前 PIN 码，之后可随时重新开启。",
-      confirmText: "按住关闭",
+      title: t("关闭应用锁", "Disable App Lock"),
+      description: t(
+        "关闭后将清除当前 PIN 码，之后可随时重新开启。",
+        "Disabling will clear the current PIN. You can re-enable it anytime."
+      ),
+      confirmText: t("按住关闭", "Hold to Disable"),
       destructive: true,
       holdToConfirm: true,
     });
@@ -757,27 +703,120 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
+  const handleLoadReleaseHistory = async (forceRefresh = false) => {
+    if (loadingHistory) return;
+    if (!forceRefresh && releaseHistory !== null) return;
+    setLoadingHistory(true);
+    setHistoryError("");
+    try {
+      const list = await api.fetchReleaseHistory(
+        githubRepo.trim() || undefined,
+        updateProxyUrl.trim() || undefined
+      );
+      setReleaseHistory(list);
+      if (list.length > 0 && !expandedReleaseTag) {
+        setExpandedReleaseTag(list[0].tagName);
+      }
+    } catch (err) {
+      setHistoryError(String(err));
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  const handleToggleReleaseHistory = () => {
+    setShowReleaseHistory((prev) => {
+      const next = !prev;
+      if (next && releaseHistory === null) {
+        void handleLoadReleaseHistory(false);
+      }
+      return next;
+    });
+  };
+
+  const handleDiscardUpdateSource = () => {
+    setGithubRepo(normalizeOptionalRepoInput(settings.githubRepo));
+    setUpdateProxyUrl(normalizeOptionalProxyInput(settings.updateProxyUrl));
+  };
+
+  const confirmLeaveIfUnsaved = async (isClosing: boolean): Promise<boolean> => {
+    if (!currentTabDirty) return true;
+    if (confirmingDiscardRef.current) return false;
+    confirmingDiscardRef.current = true;
+    try {
+      return await confirmDialog({
+        title: t("有未保存的更改", "Unsaved Changes"),
+        description: isClosing
+          ? t(
+              "当前设置中有尚未保存的修改，关闭后这些更改将不会生效，确定放弃吗？",
+              "You have unsaved changes. Closing now will discard them. Continue?"
+            )
+          : t(
+              "当前标签页有尚未保存的修改，切换后这些更改将会丢失，确定放弃吗？",
+              "You have unsaved changes on this tab. Switching tabs will discard them. Continue?"
+            ),
+        cancelText: t("继续编辑", "Keep Editing"),
+        confirmText: isClosing
+          ? t("放弃并关闭", "Discard & Close")
+          : t("放弃并切换", "Discard & Switch"),
+        destructive: true,
+      });
+    } finally {
+      confirmingDiscardRef.current = false;
+    }
+  };
+
+  const handleRequestClose = () => {
+    void (async () => {
+      const ok = await confirmLeaveIfUnsaved(true);
+      if (!ok) return;
+      setAppearanceDirty(false);
+      setAlertsDirty(false);
+      onClose();
+    })();
+  };
+
+  const handleSelectTab = (nextTab: SettingsTab) => {
+    if (nextTab === tab) return;
+    void (async () => {
+      const ok = await confirmLeaveIfUnsaved(false);
+      if (!ok) return;
+      if (tab === "update" && updateSourceDirty) {
+        handleDiscardUpdateSource();
+      }
+      if (tab === "account") {
+        setEditingProfile(false);
+        setEditingPassword(false);
+        setOldPassword("");
+        setNewPassword("");
+        setConfirmPassword("");
+      }
+      setAppearanceDirty(false);
+      setAlertsDirty(false);
+      setTab(nextTab);
+    })();
+  };
+
   const tabs: Array<{
     id: SettingsTab;
     label: string;
     icon: React.ReactNode;
     adminOnly?: boolean;
   }> = [
-    { id: "account", label: "账号", icon: <User className="h-3.5 w-3.5" />, adminOnly: true },
-    { id: "general", label: "台账与表头", icon: <Settings className="h-3.5 w-3.5" />, adminOnly: true },
-    { id: "window", label: "窗口与托盘", icon: <AppWindow className="h-3.5 w-3.5" /> },
-    { id: "alerts", label: "到期预警", icon: <BellRing className="h-3.5 w-3.5" /> },
-    { id: "applock", label: "应用锁", icon: <Lock className="h-3.5 w-3.5" />, adminOnly: true },
-    { id: "sync", label: "云端同步", icon: <Cloud className="h-3.5 w-3.5" />, adminOnly: true },
-    { id: "backup", label: "备份与还原", icon: <HardDrive className="h-3.5 w-3.5" />, adminOnly: true },
-    { id: "update", label: "检查更新", icon: <CloudDownload className="h-3.5 w-3.5" /> },
+    { id: "account", label: t("账号", "Account"), icon: <User className="h-3.5 w-3.5" />, adminOnly: true },
+    { id: "appearance", label: t("外观", "Appearance"), icon: <Palette className="h-3.5 w-3.5" /> },
+    { id: "alerts", label: t("到期预警", "Expiry Alerts"), icon: <BellRing className="h-3.5 w-3.5" /> },
+    { id: "applock", label: t("应用锁", "App Lock"), icon: <Lock className="h-3.5 w-3.5" />, adminOnly: true },
+    { id: "sync", label: t("云端同步", "Cloud Sync"), icon: <Cloud className="h-3.5 w-3.5" />, adminOnly: true },
+    { id: "backup", label: t("备份与还原", "Backup"), icon: <HardDrive className="h-3.5 w-3.5" />, adminOnly: true },
+    { id: "update", label: t("检查更新", "Updates"), icon: <CloudDownload className="h-3.5 w-3.5" /> },
   ];
 
   return (
     <>
     <ModalShell
       open={openModal}
-      onClose={onClose}
+      onClose={handleRequestClose}
       closeOnEsc={!resetDialogOpen && !previewingOnboarding}
       panelClassName="w-full max-w-3xl h-[78vh] flex flex-col"
     >
@@ -786,12 +825,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               <div className="flex items-center gap-2.5">
                 <Settings className="h-4 w-4 text-zinc-700 dark:text-zinc-200" />
                 <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                  设置
+                  {t("设置", "Settings")}
                 </h2>
               </div>
               <button
                 type="button"
-                onClick={onClose}
+                onClick={handleRequestClose}
                 className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08]"
               >
                 <X className="h-4 w-4" />
@@ -802,16 +841,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               {/* Sidebar Tabs */}
               <div className="w-44 border-r border-zinc-200/80 dark:border-white/[0.07] bg-[#f6f6f8] dark:bg-[#0d0d10] p-3 space-y-1 shrink-0">
                 {tabs
-                  .filter((t) => !t.adminOnly || isAdmin)
-                  .map((t) => {
-                    const active = tab === t.id;
+                  .filter((item) => !item.adminOnly || isAdmin)
+                  .map((item) => {
+                    const active = tab === item.id;
                     return (
                       <motion.button
-                        key={t.id}
+                        key={item.id}
                         type="button"
                         whileTap={TAP_SCALE_SUBTLE}
                         transition={SPRING_SNAPPY}
-                        onClick={() => setTab(t.id)}
+                        onClick={() => handleSelectTab(item.id)}
                         className={cn(
                           "relative w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-colors",
                           active
@@ -827,12 +866,12 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           />
                         )}
                         <span className="relative z-10 flex items-center">
-                          {t.icon}
+                          {item.icon}
                         </span>
                         <span className="relative z-10 flex-1 text-left">
-                          {t.label}
+                          {item.label}
                         </span>
-                        {t.id === "sync" &&
+                        {item.id === "sync" &&
                           syncStatus &&
                           (syncStatus.state === "remote_ahead" ||
                             syncStatus.state === "conflict" ||
@@ -850,7 +889,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               )}
                             />
                           )}
-                        {t.id === "update" &&
+                        {item.id === "update" &&
                           (availableUpdate?.hasUpdate ||
                             updateResult?.hasUpdate) && (
                             <span className="relative z-10 h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
@@ -1355,236 +1394,27 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   </div>
                 )}
 
-                {tab === "general" && isAdmin && (
-                  <form
-                    onSubmit={handleSaveGeneral}
-                    className="flex-1 flex flex-col min-h-0"
-                  >
-                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                    <div>
-                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-                        <span>表单编号 / 版本</span>
-                        <InfoTip content="质量体系受控文件编号与修订版次，用于侧边栏、打印抬头及 Excel 导出表头与文件名。" />
-                      </label>
-                      <div className="grid grid-cols-[1fr_104px] gap-2">
-                        <input
-                          type="text"
-                          value={docCode}
-                          onChange={(e) => setDocCode(e.target.value)}
-                          placeholder="例如：JSSK-MPR-170"
-                          className={`${INPUT_CLS} font-mono`}
-                        />
-                        <input
-                          type="text"
-                          value={docVersion}
-                          onChange={(e) => setDocVersion(e.target.value)}
-                          placeholder="如：A"
-                          className={`${INPUT_CLS} font-mono text-center`}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-                        <span>台账标题</span>
-                        <InfoTip content="用于界面显示、打印抬头及 Excel 导出表头。" />
-                      </label>
-                      <input
-                        type="text"
-                        value={docTitle}
-                        onChange={(e) => setDocTitle(e.target.value)}
-                        className={INPUT_CLS}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-                        英文副标题
-                      </label>
-                      <input
-                        type="text"
-                        value={docSubtitle}
-                        onChange={(e) => setDocSubtitle(e.target.value)}
-                        className={INPUT_CLS}
-                      />
-                    </div>
-
-                    <div>
-                      <label className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
-                        <span>表头说明</span>
-                        <InfoTip content="显示在打印抬头及 Excel 导出表头中的说明文案。" />
-                      </label>
-                      <input
-                        type="text"
-                        value={weeklyNotice}
-                        onChange={(e) => setWeeklyNotice(e.target.value)}
-                        className={INPUT_CLS}
-                      />
-                    </div>
-
-                    {/* Company Logo */}
-                    <div className="p-4 rounded-xl border border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/60 dark:bg-white/[0.02] space-y-2.5">
-                      <div className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                        <span>公司 Logo</span>
-                        <InfoTip content="选填，用于侧边栏、Excel 导出及打印抬头。" />
-                      </div>
-                      <div className="flex items-center gap-3">
-                        {logoPreview ? (
-                          <img
-                            src={logoPreview}
-                            alt="公司 Logo"
-                            className="h-11 max-w-[140px] object-contain bg-white border border-zinc-200 dark:border-white/10 rounded-lg p-1.5"
-                          />
-                        ) : (
-                          <div className="h-11 w-28 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-white/[0.02] flex items-center justify-center text-zinc-400 text-xs gap-1">
-                            <ImageIcon className="h-3.5 w-3.5" />
-                            未设置
-                          </div>
-                        )}
-                        <button
-                          type="button"
-                          onClick={handleUploadLogo}
-                          className="px-3 py-1.5 rounded-lg bg-white dark:bg-white/[0.05] border border-zinc-200 dark:border-white/[0.1] hover:bg-zinc-50 dark:hover:bg-white/[0.09] text-xs font-medium text-zinc-700 dark:text-zinc-200 transition"
-                        >
-                          {logoPreview ? "更换" : "上传"}
-                        </button>
-                        {logoPreview && (
-                          <button
-                            type="button"
-                            onClick={handleRemoveLogo}
-                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs text-rose-600 dark:text-rose-400 hover:bg-rose-500/10 transition"
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            移除
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    </div>
-
-                    {/* Fixed Footer Bar */}
-                    <div className="shrink-0 px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/85 dark:bg-[#16161b]/95 backdrop-blur-md flex items-center justify-between gap-3">
-                      <div className="text-[11px]">
-                        {generalIsDirty && (
-                          <span className="text-amber-600 dark:text-amber-400 font-medium">
-                            有未保存的更改
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 shrink-0">
-                        {generalIsDirty && (
-                          <button
-                            type="button"
-                            onClick={handleDiscardGeneral}
-                            className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition"
-                          >
-                            撤销
-                          </button>
-                        )}
-                        <ActionStatusButton
-                          type="submit"
-                          size="sm"
-                          status={generalSaveStatus}
-                          disabled={savingGeneral}
-                          idleLabel="保存"
-                          loadingLabel="保存中..."
-                          successLabel="已保存"
-                          idleIcon={<Save className="h-3.5 w-3.5" />}
-                        />
-                      </div>
-                    </div>
-                  </form>
-                )}
-
-                {tab === "window" && (
-                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                        关闭窗口时
-                      </span>
-                      <InfoTip
-                        content={
-                          mac
-                            ? "后台运行时关闭主窗口不会结束进程，点击顶部菜单栏或 Dock 图标可随时重新打开。"
-                            : "后台运行时关闭主窗口不会结束进程，单击右下角托盘图标可快速唤出，右键可锁定或退出。"
-                        }
-                      />
-                    </div>
-
-                    <div className="space-y-2.5">
-                      {(
-                        [
-                          {
-                            id: "minimize_to_tray" as CloseBehavior,
-                            title: mac ? "最小化到菜单栏" : "最小化到系统托盘",
-                            tip: mac
-                              ? "隐藏主窗口并在后台保活，保留登录状态与定时提醒，点击顶部图标或 Dock 随时打开。"
-                              : "隐藏主窗口并在右下角托盘保活，保留登录状态与定时提醒，单击托盘图标随时打开。",
-                            icon: <MonitorDown className="h-4 w-4" />,
-                          },
-                          {
-                            id: "exit" as CloseBehavior,
-                            title: "直接退出",
-                            tip: "",
-                            icon: <Power className="h-4 w-4" />,
-                          },
-                          {
-                            id: "ask" as CloseBehavior,
-                            title: "每次询问",
-                            tip: "",
-                            icon: <AppWindow className="h-4 w-4" />,
-                          },
-                        ] as const
-                      ).map((opt) => {
-                        const active = settings.closeBehavior === opt.id;
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            disabled={savingWindowPref}
-                            onClick={() => handleUpdateCloseBehavior(opt.id)}
-                            className={cn(
-                              "w-full text-left px-4 py-3.5 rounded-xl border transition flex items-center gap-3.5",
-                              active
-                                ? "border-zinc-900 dark:border-white/75 bg-zinc-50/90 dark:bg-white/[0.05] ring-1 ring-zinc-900/10 dark:ring-white/15"
-                                : "border-zinc-200/90 dark:border-white/[0.08] bg-white dark:bg-white/[0.015] hover:bg-zinc-50/60 dark:hover:bg-white/[0.035]"
-                            )}
-                          >
-                            <div
-                              className={cn(
-                                "h-8 w-8 rounded-xl flex items-center justify-center shrink-0",
-                                active
-                                  ? "bg-zinc-900 dark:bg-white text-white dark:text-zinc-950"
-                                  : "bg-zinc-100 dark:bg-white/[0.06] text-zinc-500 dark:text-zinc-400"
-                              )}
-                            >
-                              {opt.icon}
-                            </div>
-                            <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                              <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                                {opt.title}
-                              </span>
-                              {opt.tip && <InfoTip content={opt.tip} />}
-                            </div>
-                            <div className="shrink-0">
-                              <span
-                                className={cn(
-                                  "h-4 w-4 rounded-full border flex items-center justify-center",
-                                  active
-                                    ? "border-zinc-900 dark:border-white"
-                                    : "border-zinc-300 dark:border-zinc-600"
-                                )}
-                              >
-                                {active && (
-                                  <span className="h-2 w-2 rounded-full bg-zinc-900 dark:bg-white" />
-                                )}
-                              </span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
+                {tab === "appearance" && (
+                  <AppearanceSettingsTab
+                    settings={settings}
+                    isAdmin={isAdmin}
+                    themePreference={themePreference}
+                    onSelectThemePreference={onSelectThemePreference}
+                    onAppearanceChange={onAppearanceChange}
+                    onSettingsChanged={onSettingsChanged}
+                    onDirtyChange={setAppearanceDirty}
+                    onNotify={onNotify}
+                    onPreviewOnboarding={onPreviewOnboarding}
+                    onOpenResetApp={isAdmin ? openResetConfirmDialog : undefined}
+                    onRequestLogin={
+                      onRequestLogin
+                        ? () => {
+                            onClose();
+                            onRequestLogin();
+                          }
+                        : undefined
+                    }
+                  />
                 )}
 
                 {tab === "alerts" && (
@@ -1592,6 +1422,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     settings={settings}
                     isAdmin={isAdmin}
                     onSettingsChanged={onSettingsChanged}
+                    onDirtyChange={setAlertsDirty}
                     onNotify={onNotify}
                     onRequestLogin={
                       onRequestLogin
@@ -2027,60 +1858,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         S3 云端同步凭据仅存本机，不包含在本地备份包中；工具台缓存容量管理已移至「QI / QC 工具台」总览页。
                       </div>
                     </div>
-
-                    {onPreviewOnboarding && (
-                      <div className="px-4 py-3.5 rounded-xl border border-zinc-200/85 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] flex items-center justify-between gap-4">
-                        <div className="flex items-center gap-3 min-w-0">
-                          <div className="h-8 w-8 rounded-lg bg-violet-500/10 border border-violet-500/20 text-violet-600 dark:text-violet-400 flex items-center justify-center shrink-0">
-                            <Sparkles className="h-4 w-4" />
-                          </div>
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                              启动引导动画
-                            </span>
-                            <InfoTip content="预览首次安装时的启动动画与引导界面，仅作效果演示，不会修改任何本地数据或账号配置。" />
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={onPreviewOnboarding}
-                          className="btn-tactile inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] shadow-tactile text-zinc-800 dark:text-zinc-100 text-xs font-medium shrink-0"
-                        >
-                          <Play className="h-3.5 w-3.5" />
-                          <span>预览动画</span>
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="px-4 py-3.5 rounded-xl border border-rose-200/85 dark:border-rose-500/20 bg-rose-50/35 dark:bg-rose-500/[0.03] flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-8 w-8 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
-                          <AlertTriangle className="h-4 w-4" />
-                        </div>
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                            初始化程序
-                          </span>
-                          <InfoTip content="清空本地数据并恢复至首次安装状态；若存在台账数据将先自动导出备份。" />
-                        </div>
-                      </div>
-                      <motion.button
-                        type="button"
-                        whileTap={TAP_SCALE}
-                        transition={SPRING_SNAPPY}
-                        onClick={openResetConfirmDialog}
-                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold shadow-tactile-primary transition-colors shrink-0"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>初始化</span>
-                      </motion.button>
-                    </div>
                   </div>
                   );
                 })()}
 
                 {tab === "update" && (
-                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
+                  <div className="flex-1 flex flex-col min-h-0">
+                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
                     {/* Installed Version Hero Bar */}
                     <div className="p-4 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3.5 min-w-0">
@@ -2089,7 +1873,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         </div>
                         <div className="min-w-0">
                           <div className="text-[11.5px] text-zinc-500 dark:text-zinc-400">
-                            当前版本
+                            {t("当前版本", "Current Version")}
                           </div>
                           <div className="flex items-center gap-2 mt-0.5 flex-wrap">
                             <span className="text-lg font-semibold font-mono tabular-nums text-zinc-950 dark:text-white leading-none">
@@ -2098,28 +1882,46 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             {updateResult?.hasUpdate ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-sky-500/10 border border-sky-500/20 text-[11px] font-medium text-sky-700 dark:text-sky-300">
                                 <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
-                                可更新至 v{updateResult.latestVersion}
+                                {t(
+                                  `可更新至 v${updateResult.latestVersion}`,
+                                  `v${updateResult.latestVersion} available`
+                                )}
                               </span>
                             ) : updateResult && !updateResult.hasUpdate ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
                                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                                已是最新
+                                {t("已是最新", "Up to date")}
                               </span>
                             ) : null}
                           </div>
                         </div>
                       </div>
-                      <ActionStatusButton
-                        size="sm"
-                        status={checkUpdateStatus}
-                        disabled={checkingUpdate || updatingApp}
-                        idleLabel="检查更新"
-                        loadingLabel="检查中..."
-                        successLabel="检查完成"
-                        idleIcon={<RefreshCw className="h-3.5 w-3.5" />}
-                        onClick={handleCheckUpdate}
-                        className="shrink-0"
-                      />
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleToggleReleaseHistory}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition cursor-pointer",
+                            showReleaseHistory
+                              ? "border-zinc-900 dark:border-white/75 bg-zinc-100 dark:bg-white/[0.1] text-zinc-950 dark:text-white"
+                              : "border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] text-zinc-700 dark:text-zinc-200 shadow-tactile"
+                          )}
+                        >
+                          <History className="h-3.5 w-3.5" />
+                          <span>{t("查看历史", "History")}</span>
+                        </button>
+                        <ActionStatusButton
+                          size="sm"
+                          status={checkUpdateStatus}
+                          disabled={checkingUpdate || updatingApp}
+                          idleLabel={t("检查更新", "Check Updates")}
+                          loadingLabel={t("检查中...", "Checking...")}
+                          successLabel={t("检查完成", "Checked")}
+                          idleIcon={<RefreshCw className="h-3.5 w-3.5" />}
+                          onClick={handleCheckUpdate}
+                          className="shrink-0"
+                        />
+                      </div>
                     </div>
 
                     {/* Error Notice */}
@@ -2303,26 +2105,182 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     )}
 
-                    {/* Collapsible Admin Update Source Config */}
+                    {/* Collapsible Release History Viewer */}
+                    <div className="rounded-xl border border-zinc-200/80 dark:border-white/[0.08] bg-white dark:bg-white/[0.015] overflow-hidden">
+                      <div className="px-4 py-3 flex items-center justify-between gap-3 hover:bg-zinc-50/80 dark:hover:bg-white/[0.03] transition">
+                        <button
+                          type="button"
+                          onClick={handleToggleReleaseHistory}
+                          className="flex-1 flex items-center gap-2 text-left min-w-0 cursor-pointer"
+                        >
+                          <History className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-400 shrink-0" />
+                          <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 shrink-0">
+                            {t("更新历史", "Release History")}
+                          </span>
+                          {releaseHistory && (
+                            <span className="px-1.5 py-0.2 rounded-md bg-zinc-100 dark:bg-white/[0.07] font-mono text-[10.5px] text-zinc-500 dark:text-zinc-400">
+                              {releaseHistory.length}
+                            </span>
+                          )}
+                        </button>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {showReleaseHistory && (
+                            <button
+                              type="button"
+                              disabled={loadingHistory}
+                              onClick={() => handleLoadReleaseHistory(true)}
+                              title={t("刷新历史记录", "Refresh history")}
+                              className="p-1 rounded-md text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-white/[0.08] disabled:opacity-40 transition cursor-pointer"
+                            >
+                              <RefreshCw
+                                className={cn("h-3.5 w-3.5", loadingHistory && "animate-spin")}
+                              />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={handleToggleReleaseHistory}
+                            className="p-0.5 text-zinc-400 cursor-pointer"
+                          >
+                            <ChevronDown
+                              className={cn(
+                                "h-4 w-4 transition-transform duration-200",
+                                showReleaseHistory && "rotate-180"
+                              )}
+                            />
+                          </button>
+                        </div>
+                      </div>
+
+                      <Collapsible open={showReleaseHistory}>
+                        <div className="px-4 pb-4 pt-3 border-t border-zinc-200/70 dark:border-white/[0.07] space-y-2.5">
+                          {loadingHistory ? (
+                            <div className="py-6 flex items-center justify-center gap-2 text-xs text-zinc-400">
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                              <span>{t("正在加载历史版本...", "Loading releases...")}</span>
+                            </div>
+                          ) : historyError ? (
+                            <div className="px-3.5 py-2.5 rounded-lg bg-rose-500/[0.06] border border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 flex items-center justify-between gap-2">
+                              <span className="truncate">{historyError}</span>
+                              <button
+                                type="button"
+                                onClick={() => handleLoadReleaseHistory(true)}
+                                className="px-2 py-1 rounded-md bg-white dark:bg-white/[0.06] border border-rose-500/20 text-[11px] font-medium shrink-0 cursor-pointer"
+                              >
+                                {t("重试", "Retry")}
+                              </button>
+                            </div>
+                          ) : releaseHistory && releaseHistory.length === 0 ? (
+                            <div className="py-5 text-center text-xs text-zinc-400">
+                              {t("暂无发布历史记录", "No releases published yet")}
+                            </div>
+                          ) : releaseHistory ? (
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto pr-0.5">
+                              {releaseHistory.map((rel) => {
+                                const isCurrent =
+                                  rel.version === (dirInfo?.appVersion || "1.4.0");
+                                const isOpen = expandedReleaseTag === rel.tagName;
+                                return (
+                                  <div
+                                    key={rel.tagName}
+                                    className="rounded-lg border border-zinc-200/80 dark:border-white/[0.07] bg-zinc-50/55 dark:bg-white/[0.02] overflow-hidden"
+                                  >
+                                    <div className="px-3 py-2 flex items-center justify-between gap-2">
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setExpandedReleaseTag(isOpen ? null : rel.tagName)
+                                        }
+                                        className="flex-1 flex items-center gap-2 min-w-0 text-left cursor-pointer"
+                                      >
+                                        <span className="font-mono text-xs font-semibold text-zinc-900 dark:text-zinc-100 shrink-0">
+                                          {rel.tagName.startsWith("v")
+                                            ? rel.tagName
+                                            : `v${rel.version}`}
+                                        </span>
+                                        {isCurrent && (
+                                          <span className="px-1.5 py-0.2 rounded bg-emerald-500/12 border border-emerald-500/25 text-[10px] font-medium text-emerald-700 dark:text-emerald-300 shrink-0">
+                                            {t("当前", "Current")}
+                                          </span>
+                                        )}
+                                        {rel.prerelease && (
+                                          <span className="px-1.5 py-0.2 rounded bg-amber-500/12 border border-amber-500/25 text-[10px] font-medium text-amber-700 dark:text-amber-300 shrink-0">
+                                            Pre
+                                          </span>
+                                        )}
+                                        {formatPublishDate(rel.publishedAt) && (
+                                          <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500 shrink-0">
+                                            {formatPublishDate(rel.publishedAt)}
+                                          </span>
+                                        )}
+                                      </button>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        {rel.htmlUrl && (
+                                          <button
+                                            type="button"
+                                            onClick={() => openUrl(rel.htmlUrl)}
+                                            title={t("在 GitHub 查看", "Open on GitHub")}
+                                            className="p-1 rounded text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-100 transition cursor-pointer"
+                                          >
+                                            <ExternalLink className="h-3 w-3" />
+                                          </button>
+                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            setExpandedReleaseTag(isOpen ? null : rel.tagName)
+                                          }
+                                          className="p-1 text-zinc-400 cursor-pointer"
+                                        >
+                                          <ChevronDown
+                                            className={cn(
+                                              "h-3.5 w-3.5 transition-transform duration-150",
+                                              isOpen && "rotate-180"
+                                            )}
+                                          />
+                                        </button>
+                                      </div>
+                                    </div>
+                                    <Collapsible open={isOpen}>
+                                      <div className="px-3 pb-3 pt-2 border-t border-zinc-200/65 dark:border-white/[0.06] bg-white/75 dark:bg-black/20">
+                                        {rel.body.trim() ? (
+                                          <MarkdownNotes content={rel.body} />
+                                        ) : (
+                                          <p className="text-xs text-zinc-400">
+                                            {t("暂无更新日志", "No release notes")}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </Collapsible>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          ) : null}
+                        </div>
+                      </Collapsible>
+                    </div>
+
+                    {/* Collapsible Admin Update Source Config (Collapsed by Default) */}
                     {isAdmin && (
                       <div className="rounded-xl border border-zinc-200/80 dark:border-white/[0.08] bg-white dark:bg-white/[0.015] overflow-hidden">
                         <button
                           type="button"
                           onClick={() => setShowSourceConfig((prev) => !prev)}
-                          className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-zinc-50/80 dark:hover:bg-white/[0.03] transition"
+                          className="w-full px-4 py-3 flex items-center justify-between gap-3 text-left hover:bg-zinc-50/80 dark:hover:bg-white/[0.03] transition cursor-pointer"
                         >
                           <div className="flex items-center gap-2.5 min-w-0">
                             <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 shrink-0">
-                              更新源设置
+                              {t("更新源设置", "Update Source")}
                             </span>
                             <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500 truncate">
                               {githubRepo.trim() || DEFAULT_GITHUB_REPO}
                               {!updateProxyUrl.trim()
-                                ? " · 默认多节点加速"
+                                ? t(" · 默认多节点加速", " · Multi-mirror auto")
                                 : updateProxyUrl.trim().toLowerCase() === "direct" ||
                                     updateProxyUrl.trim() === "直连"
-                                  ? " · 直连优先/自动兜底"
-                                  : " · 自定义加速"}
+                                  ? t(" · 直连优先/自动兜底", " · Direct first")
+                                  : t(" · 自定义加速", " · Custom proxy")}
                             </span>
                           </div>
                           <ChevronDown
@@ -2338,16 +2296,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <div>
                                 <div className="flex items-center justify-between gap-2 mb-1">
                                   <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-                                    <span>GitHub 仓库</span>
+                                    <span>{t("GitHub 仓库", "GitHub Repository")}</span>
                                     <InfoTip content="选填，留空默认使用 MuY-DG/instrument-ledger；自定义格式为 用户名/仓库名。" />
                                   </label>
                                   {githubRepo.trim() !== "" && (
                                     <button
                                       type="button"
                                       onClick={() => setGithubRepo("")}
-                                      className="text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+                                      className="text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition cursor-pointer"
                                     >
-                                      恢复默认
+                                      {t("恢复默认", "Reset")}
                                     </button>
                                   )}
                                 </div>
@@ -2362,16 +2320,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                               <div>
                                 <div className="flex items-center justify-between gap-2 mb-1">
                                   <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-                                    <span>加速代理（检测与下载通用）</span>
+                                    <span>{t("加速代理（检测与下载通用）", "Mirror Proxy")}</span>
                                     <InfoTip content="选填，留空默认启用内置多节点加速（优先 gh-proxy.com 等节点，异常时自动并发切换与回退 GitHub 直连）；支持逗号分隔多个自定义前缀，填写 direct 可切换为直连优先。" />
                                   </label>
                                   {updateProxyUrl.trim() !== "" && (
                                     <button
                                       type="button"
                                       onClick={() => setUpdateProxyUrl("")}
-                                      className="text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition"
+                                      className="text-[11px] text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition cursor-pointer"
                                     >
-                                      恢复默认
+                                      {t("恢复默认", "Reset")}
                                     </button>
                                   )}
                                 </div>
@@ -2379,33 +2337,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                                   type="text"
                                   value={updateProxyUrl}
                                   onChange={(e) => setUpdateProxyUrl(e.target.value)}
-                                  placeholder="默认：内置 5 节点自动加速 + GitHub 直连（选填自定义前缀，多个用逗号分隔）"
+                                  placeholder={t(
+                                    "默认：内置 5 节点自动加速 + GitHub 直连（选填自定义前缀，多个用逗号分隔）",
+                                    "Default: built-in 5-node mirror + GitHub direct (optional comma-separated prefixes)"
+                                  )}
                                   className={`${INPUT_CLS} ${updateProxyUrl ? "font-mono" : ""} text-xs`}
                                 />
                                 <p className="mt-1.5 text-[10.5px] text-zinc-400 dark:text-zinc-500 leading-relaxed">
-                                  内置线路：
+                                  {t("内置线路：", "Built-in mirrors: ")}
                                   <span className="font-mono">
-                                    gh-proxy.com · ghfast.top · gh-proxy.org · cdn.gh-proxy.org · edgeone.gh-proxy.org · GitHub 直连
+                                    gh-proxy.com · ghfast.top · gh-proxy.org · cdn.gh-proxy.org · edgeone.gh-proxy.org · GitHub
                                   </span>
-                                  （全程 Ed25519 验签）
+                                  {t("（全程 Ed25519 验签）", " (Ed25519 signed)")}
                                 </p>
                               </div>
                             </div>
-                            <div className="flex justify-end">
-                              <ActionStatusButton
-                                size="sm"
-                                variant="secondary"
-                                status={generalSaveStatus}
-                                disabled={savingGeneral}
-                                idleLabel="保存"
-                                loadingLabel="保存中..."
-                                successLabel="已保存"
-                                idleIcon={<Save className="h-3.5 w-3.5" />}
-                                onClick={() => handleSaveGeneral()}
-                              />
-                            </div>
                           </div>
                         </Collapsible>
+                      </div>
+                    )}
+                    </div>
+
+                    {/* Fixed Bottom Save Footer Bar for Update Source Settings */}
+                    {isAdmin && (
+                      <div className="shrink-0 px-6 py-3 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/90 dark:bg-[#16161b]/95 backdrop-blur-md flex items-center justify-between gap-3">
+                        <div className="text-[11px]">
+                          {updateSourceDirty && (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium">
+                              {t("有未保存的更改", "Unsaved changes")}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          {updateSourceDirty && (
+                            <button
+                              type="button"
+                              onClick={handleDiscardUpdateSource}
+                              className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition cursor-pointer"
+                            >
+                              {t("撤销", "Revert")}
+                            </button>
+                          )}
+                          <ActionStatusButton
+                            size="sm"
+                            status={updateSourceSaveStatus}
+                            disabled={savingUpdateSource || !updateSourceDirty}
+                            idleLabel={t("保存", "Save")}
+                            loadingLabel={t("保存中...", "Saving...")}
+                            successLabel={t("已保存", "Saved")}
+                            idleIcon={<Save className="h-3.5 w-3.5" />}
+                            onClick={() => handleSaveUpdateSource()}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>

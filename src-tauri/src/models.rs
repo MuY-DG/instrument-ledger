@@ -129,6 +129,28 @@ pub struct WarningThreshold {
     pub label: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CustomAppIcon {
+    pub id: String,
+    pub name: String,
+    pub stored_path: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AppearancePreferencesInput {
+    pub close_behavior: Option<String>,
+    pub show_tray_icon: Option<bool>,
+    pub ui_language: Option<String>,
+    pub ui_scale_mode: Option<String>,
+    pub ui_scale: Option<f64>,
+    pub app_icon_id: Option<String>,
+    pub compact_toolbar: Option<bool>,
+    pub show_import_button: Option<bool>,
+    pub sidebar_nav_config: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
@@ -142,6 +164,15 @@ pub struct AppSettings {
     pub alert_popup_interval_hours: i64,
     pub auto_lock_minutes: i64,
     pub close_behavior: String,
+    pub show_tray_icon: bool,
+    pub ui_language: String,
+    pub ui_scale_mode: String,
+    pub ui_scale: f64,
+    pub app_icon_id: String,
+    pub custom_app_icons: Vec<CustomAppIcon>,
+    pub compact_toolbar: bool,
+    pub show_import_button: bool,
+    pub sidebar_nav_config: String,
     pub keep_admin_session: bool,
     pub admin_session_days: i64,
     pub app_lock_enabled: bool,
@@ -175,6 +206,14 @@ pub struct SettingsUpdateInput {
     pub alert_popup_interval_hours: Option<i64>,
     pub auto_lock_minutes: Option<i64>,
     pub close_behavior: Option<String>,
+    pub show_tray_icon: Option<bool>,
+    pub ui_language: Option<String>,
+    pub ui_scale_mode: Option<String>,
+    pub ui_scale: Option<f64>,
+    pub app_icon_id: Option<String>,
+    pub compact_toolbar: Option<bool>,
+    pub show_import_button: Option<bool>,
+    pub sidebar_nav_config: Option<String>,
     pub keep_admin_session: Option<bool>,
     pub admin_session_days: Option<i64>,
     pub lock_on_hide: Option<bool>,
@@ -275,6 +314,18 @@ pub struct UpdateDownloadProgress {
     pub percent: f64,
     pub phase: String,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReleaseHistoryItem {
+    pub version: String,
+    pub tag_name: String,
+    pub name: String,
+    pub published_at: String,
+    pub body: String,
+    pub html_url: String,
+    pub prerelease: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

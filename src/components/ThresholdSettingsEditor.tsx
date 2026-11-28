@@ -38,6 +38,7 @@ interface ThresholdSettingsEditorProps {
   settings: AppSettings;
   isAdmin: boolean;
   onSettingsChanged: (next: AppSettings) => void;
+  onDirtyChange?: (dirty: boolean) => void;
   onNotify: (msg: string, type?: "success" | "error") => void;
   onRequestLogin?: () => void;
 }
@@ -55,6 +56,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
   settings,
   isAdmin,
   onSettingsChanged,
+  onDirtyChange,
   onNotify,
   onRequestLogin,
 }) => {
@@ -123,6 +125,11 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
     settings.alertPopupFrequency,
     settings.alertPopupIntervalHours,
   ]);
+
+  useEffect(() => {
+    onDirtyChange?.(isAdmin && isDirty);
+    return () => onDirtyChange?.(false);
+  }, [isAdmin, isDirty, onDirtyChange]);
 
   const handleUpdateRow = (
     id: string,

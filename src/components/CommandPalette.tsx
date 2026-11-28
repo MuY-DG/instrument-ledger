@@ -26,6 +26,7 @@ import {
   Upload,
   Wrench,
 } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import { getInstrumentStatus } from "@/lib/status";
 import type { ThemePreference } from "@/lib/themeTransition";
 import { getMaxWarningDays, sortThresholdsDesc } from "@/lib/thresholdColors";
@@ -58,8 +59,7 @@ interface CommandPaletteProps {
   onOpenSettings: (
     tab:
       | "account"
-      | "general"
-      | "window"
+      | "appearance"
       | "alerts"
       | "applock"
       | "sync"
@@ -99,6 +99,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenWorkbenchHub,
   onLaunchWorkbenchTool,
 }) => {
+  const { t } = useI18n();
   const descThresholds = sortThresholdsDesc(warningThresholds);
   const maxWarningDays = getMaxWarningDays(warningThresholds);
   useEffect(() => {
@@ -123,12 +124,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
       align="top"
       panelClassName="w-full max-w-xl"
     >
-      <Command label="快速检索与命令面板" className="flex flex-col" loop>
+      <Command label={t("快速检索与命令面板", "Quick Search & Command Palette")} className="flex flex-col" loop>
         <div className="flex items-center gap-2.5 px-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/40 dark:bg-white/[0.015]">
           <Search className="h-4 w-4 text-zinc-400 shrink-0" />
           <Command.Input
             autoFocus
-            placeholder="搜索设备或命令..."
+            placeholder={t("搜索设备或命令...", "Search equipment or commands...")}
             className="w-full py-3.5 bg-transparent text-sm text-zinc-900 dark:text-zinc-100 placeholder-zinc-400 dark:placeholder-zinc-500 focus:outline-none"
           />
           <KeycapBadge onClick={onClose}>ESC</KeycapBadge>
@@ -136,12 +137,12 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
               <Command.List className="max-h-[380px] overflow-y-auto p-2 space-y-2">
                 <Command.Empty className="py-10 text-center text-xs text-zinc-400">
-                  没有找到匹配的设备或命令
+                  {t("没有找到匹配的设备或命令", "No matching equipment or commands")}
                 </Command.Empty>
 
                 {/* Quick Actions */}
                 <Command.Group
-                  heading="快捷操作"
+                  heading={t("快捷操作", "Quick Actions")}
                   className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-zinc-400 [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                 >
                   {isAdmin && (
@@ -151,9 +152,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     >
                       <span className="flex items-center gap-2.5">
                         <Plus className="h-3.5 w-3.5 text-indigo-500" />
-                        <span>新增设备</span>
+                        <span>{t("新增设备", "Add Equipment")}</span>
                       </span>
-                      <span className="text-[10px] text-zinc-400">管理员</span>
+                      <span className="text-[10px] text-zinc-400">{t("管理员", "Admin")}</span>
                     </Command.Item>
                   )}
 
@@ -164,7 +165,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     >
                       <span className="flex items-center gap-2.5">
                         <Upload className="h-3.5 w-3.5 text-emerald-500" />
-                        <span>导入 Excel</span>
+                        <span>{t("导入 Excel", "Import Excel")}</span>
                       </span>
                     </Command.Item>
                   )}
@@ -175,7 +176,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <BellRing className="h-3.5 w-3.5 text-amber-500" />
-                      <span>到期预警</span>
+                      <span>{t("到期预警", "Expiry Alerts")}</span>
                     </span>
                   </Command.Item>
 
@@ -185,7 +186,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <SlidersHorizontal className="h-3.5 w-3.5 text-indigo-500" />
-                      <span>预警设置</span>
+                      <span>{t("预警设置", "Alert Rules")}</span>
                     </span>
                   </Command.Item>
 
@@ -195,7 +196,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <FileSpreadsheet className="h-3.5 w-3.5 text-emerald-500" />
-                      <span>导出 Excel</span>
+                      <span>{t("导出 Excel", "Export Excel")}</span>
                     </span>
                   </Command.Item>
 
@@ -205,7 +206,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <Printer className="h-3.5 w-3.5 text-zinc-400" />
-                      <span>打印台账</span>
+                      <span>{t("打印台账", "Print Ledger")}</span>
                     </span>
                   </Command.Item>
 
@@ -217,7 +218,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <Sun className="h-3.5 w-3.5 text-amber-500" />
-                      <span>主题：亮色模式</span>
+                      <span>{t("主题：浅色模式", "Theme: Light")}</span>
                     </span>
                     {themePreference === "light" && (
                       <Check className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-300" />
@@ -232,7 +233,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <Moon className="h-3.5 w-3.5 text-indigo-500 dark:text-indigo-400" />
-                      <span>主题：暗色模式</span>
+                      <span>{t("主题：深色模式", "Theme: Dark")}</span>
                     </span>
                     {themePreference === "dark" && (
                       <Check className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-300" />
@@ -247,7 +248,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <Monitor className="h-3.5 w-3.5 text-sky-500 dark:text-sky-400" />
-                      <span>主题：跟随系统</span>
+                      <span>{t("主题：跟随系统", "Theme: System")}</span>
                     </span>
                     {themePreference === "system" && (
                       <Check className="h-3.5 w-3.5 text-zinc-500 dark:text-zinc-300" />
@@ -260,7 +261,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <Lock className="h-3.5 w-3.5 text-amber-500" />
-                      <span>立即锁屏</span>
+                      <span>{t("立即锁屏", "Lock App Now")}</span>
                     </span>
                     <KeycapBadge>⌘L</KeycapBadge>
                   </Command.Item>
@@ -271,21 +272,19 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <CloudDownload className="h-3.5 w-3.5 text-sky-500" />
-                      <span>检查更新</span>
+                      <span>{t("检查更新", "Check for Updates")}</span>
                     </span>
                   </Command.Item>
 
-                  {isAdmin && (
-                    <Command.Item
-                      onSelect={() => runAndClose(() => onOpenSettings("general"))}
-                      className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
-                    >
-                      <span className="flex items-center gap-2.5">
-                        <Settings className="h-3.5 w-3.5 text-zinc-400" />
-                        <span>系统设置</span>
-                      </span>
-                    </Command.Item>
-                  )}
+                  <Command.Item
+                    onSelect={() => runAndClose(() => onOpenSettings("appearance"))}
+                    className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07] transition-colors"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <Settings className="h-3.5 w-3.5 text-zinc-400" />
+                      <span>{t("外观与系统设置", "Appearance & Settings")}</span>
+                    </span>
+                  </Command.Item>
 
                   {isAdmin && syncConfigured && onSyncNow && (
                     <Command.Item
@@ -338,14 +337,14 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       ) : (
                         <LogIn className="h-3.5 w-3.5 text-indigo-500" />
                       )}
-                      <span>{isAdmin ? "退出登录" : "管理员登录"}</span>
+                      <span>{isAdmin ? t("退出登录", "Sign Out") : t("管理员登录", "Admin Sign In")}</span>
                     </span>
                   </Command.Item>
                 </Command.Group>
 
                 {/* QI/QC Workbench Tools */}
                 <Command.Group
-                  heading="QI / QC 质量工具台"
+                  heading={t("QI / QC 质量工具台", "QI / QC Workbench")}
                   className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-zinc-400 [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                 >
                   <Command.Item
@@ -355,11 +354,11 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                   >
                     <span className="flex items-center gap-2.5">
                       <LayoutGrid className="h-3.5 w-3.5 text-indigo-500" />
-                      <span>打开 QI / QC 工具台总览</span>
+                      <span>{t("打开 QI / QC 工具台总览", "Open QI / QC Workbench Hub")}</span>
                     </span>
-                    <span className="text-[10px] text-zinc-400">工具服务</span>
+                    <span className="text-[10px] text-zinc-400">{t("工具服务", "Hub")}</span>
                   </Command.Item>
-                  {WORKBENCH_TOOLS.filter((t) => t.status === "ready").map((tool) => {
+                  {WORKBENCH_TOOLS.filter((tool) => tool.status === "ready").map((tool) => {
                     const Icon = tool.icon;
                     return (
                       <Command.Item
@@ -370,9 +369,9 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       >
                         <span className="flex items-center gap-2.5">
                           <Icon className="h-3.5 w-3.5" style={{ color: tool.accent }} />
-                          <span>启动：{tool.name}</span>
+                          <span>{t(`启动：${tool.name}`, `Open: ${tool.name}`)}</span>
                         </span>
-                        <span className="text-[10px] text-zinc-400">工具</span>
+                        <span className="text-[10px] text-zinc-400">{t("工具", "Tool")}</span>
                       </Command.Item>
                     );
                   })}
@@ -380,7 +379,7 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
 
                 {/* Views & Filters */}
                 <Command.Group
-                  heading="视图切换"
+                  heading={t("视图切换", "Views & Filters")}
                   className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-zinc-400 [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                 >
                   <Command.Item
@@ -388,48 +387,56 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                     className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
                   >
                     <Gauge className="h-3.5 w-3.5 text-zinc-400" />
-                    <span>切换至：仪器 / 量具台账</span>
+                    <span>{t("切换至：仪器 / 量具台账", "View: Gauges & Instruments")}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => runAndClose(() => onNavigateTab("fixture"))}
                     className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
                   >
                     <Wrench className="h-3.5 w-3.5 text-zinc-400" />
-                    <span>切换至：尺寸检具台账</span>
+                    <span>{t("切换至：尺寸检具台账", "View: Fixtures & Jigs")}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => runAndClose(() => onNavigateTab("all"))}
                     className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
                   >
                     <Layers className="h-3.5 w-3.5 text-zinc-400" />
-                    <span>切换至：全部设备台账</span>
+                    <span>{t("切换至：全部设备台账", "View: All Equipment")}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => runAndClose(() => onFilterStatus("expired"))}
                     className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
                   >
                     <span className="h-2 w-2 rounded-full bg-rose-500 ml-0.5 mr-1" />
-                    <span>仅查看已超期设备</span>
+                    <span>{t("仅查看已超期设备", "Filter: Expired Only")}</span>
                   </Command.Item>
                   <Command.Item
                     onSelect={() => runAndClose(() => onFilterStatus("warning"))}
                     className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
                   >
                     <span className="h-2 w-2 rounded-full bg-amber-500 ml-0.5 mr-1" />
-                    <span>仅查看全部预警设备（≤{maxWarningDays}天）</span>
+                    <span>
+                      {t(
+                        `仅查看全部预警设备（≤${maxWarningDays}天）`,
+                        `Filter: All Due Soon (≤${maxWarningDays}d)`
+                      )}
+                    </span>
                   </Command.Item>
-                  {descThresholds.map((t) => (
+                  {descThresholds.map((tier) => (
                     <Command.Item
-                      key={t.id}
-                      onSelect={() => runAndClose(() => onFilterExpiry(t.days))}
+                      key={tier.id}
+                      onSelect={() => runAndClose(() => onFilterExpiry(tier.days))}
                       className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
                     >
                       <span
                         className="h-2 w-2 rounded-full ml-0.5 mr-1"
-                        style={{ backgroundColor: t.color }}
+                        style={{ backgroundColor: tier.color }}
                       />
                       <span>
-                        到期筛选：{t.days}天内到期（{t.label}）
+                        {t(
+                          `到期筛选：${tier.days}天内到期（${tier.label}）`,
+                          `Due within ${tier.days} days`
+                        )}
                       </span>
                     </Command.Item>
                   ))}
@@ -438,7 +445,10 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                 {/* Instruments direct jump */}
                 {instruments.length > 0 && (
                   <Command.Group
-                    heading={`设备档案（共 ${instruments.length} 台）`}
+                    heading={t(
+                      `设备档案（共 ${instruments.length} 台）`,
+                      `Equipment (${instruments.length})`
+                    )}
                     className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-zinc-400 [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
                   >
                     {instruments.slice(0, 60).map((inst) => {

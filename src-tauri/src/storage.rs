@@ -9,6 +9,8 @@ pub fn ensure_storage_dirs(data_dir: &Path) -> Result<(), String> {
         .map_err(|e| format!("创建图片目录失败: {}", e))?;
     fs::create_dir_all(data_dir.join("reports"))
         .map_err(|e| format!("创建报告目录失败: {}", e))?;
+    fs::create_dir_all(data_dir.join("app_icons"))
+        .map_err(|e| format!("创建应用图标目录失败: {}", e))?;
     fs::create_dir_all(
         data_dir
             .join("workbench")
@@ -19,7 +21,7 @@ pub fn ensure_storage_dirs(data_dir: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Safely resolve a relative stored path (e.g. "images/abc.jpg" or "reports/1/xyz.pdf") inside data_dir
+/// Safely resolve a relative stored path (e.g. "images/abc.jpg", "reports/1/xyz.pdf", or "app_icons/abc.png") inside data_dir
 pub fn resolve_stored_path(data_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
     let trimmed = rel_path.trim();
     if trimmed.is_empty() {
@@ -37,7 +39,7 @@ pub fn resolve_stored_path(data_dir: &Path, rel_path: &str) -> Result<PathBuf, S
         .next()
         .and_then(|c| c.as_os_str().to_str())
         .unwrap_or("");
-    if first != "images" && first != "reports" {
+    if first != "images" && first != "reports" && first != "app_icons" {
         return Err("仅允许访问受管附件目录".to_string());
     }
     Ok(data_dir.join(rel))
@@ -111,6 +113,24 @@ pub fn save_image_from_base64(
     let rel = format!("images/{}.{}", Uuid::new_v4(), ext);
     let dest = data_dir.join(&rel);
     fs::write(&dest, bytes).map_err(|e| format!("写入图片文件失败: {}", e))?;
+    Ok(rel)
+}
+
+pub fn save_app_icon_from_base64(data_dir: &Path, base64_str: &str) -> Result<String, String> {
+    ensure_storage_dirs(data_dir)?;
+    let raw_b64 = match base64_str.find(',') {
+        Some(idx) => &base64_str[idx + 1..],
+        None => base64_str,
+    };
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(raw_b64.trim())
+        .map_err(|e| format!("解码图标数据失败: {}", e))?;
+    if bytes.len() < 8 || &bytes[..8] != b"\x89PNG\r\n\x1a\n" {
+        return Err("自定义图标数据格式无效，需要 PNG 图像".to_string());
+    }
+    let rel = format!("app_icons/{}.png", Uuid::new_v4());
+    let dest = data_dir.join(&rel);
+    fs::write(&dest, bytes).map_err(|e| format!("保存应用图标失败: {}", e))?;
     Ok(rel)
 }
 

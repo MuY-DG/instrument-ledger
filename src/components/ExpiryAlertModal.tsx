@@ -19,6 +19,7 @@ import {
 } from "@/lib/thresholdColors";
 import { StatusBadge } from "@/components/StatusBadge";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import { EASE_PRECISION, SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
 import { ModalShell, SlidingNumber } from "@/components/ui/MotionPrimitives";
 import { PrecisionCheckbox, SearchField } from "@/components/ui/FormControls";
@@ -136,14 +137,15 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
     onClose();
   };
 
+  const { t } = useI18n();
   const jumpButtonLabel =
     selectedTier === "expired"
-      ? "筛选超期"
+      ? t("筛选超期", "Filter Expired")
       : activeThresholdObj
-        ? `筛选 ≤${activeThresholdObj.days}天`
+        ? t(`筛选 ≤${activeThresholdObj.days}天`, `Filter ≤${activeThresholdObj.days}d`)
         : descThresholds.length > 0
-          ? `筛选 ≤${descThresholds[0].days}天`
-          : "列表查看";
+          ? t(`筛选 ≤${descThresholds[0].days}天`, `Filter ≤${descThresholds[0].days}d`)
+          : t("列表查看", "View in List");
 
   const accentColor = summary.highestSeverityColor || "#10b981";
   const accentVisuals = getThresholdVisuals(accentColor);
@@ -181,7 +183,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                      到期预警
+                      {t("到期预警", "Expiry Alerts")}
                     </h2>
                     <span className="text-[11px] font-mono text-zinc-400 dark:text-zinc-500">
                       {getTodayStr()}
@@ -189,8 +191,11 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                   </div>
                   <p className="text-[11.5px] text-zinc-500 dark:text-zinc-400 truncate mt-0.5">
                     {summary.totalAlertCount > 0
-                      ? `共 ${summary.totalAlertCount} 台 · 超期 ${summary.expired.length} / 预警 ${summary.totalAlertCount - summary.expired.length}`
-                      : "全部设备效期正常"}
+                      ? t(
+                          `共 ${summary.totalAlertCount} 台 · 超期 ${summary.expired.length} / 预警 ${summary.totalAlertCount - summary.expired.length}`,
+                          `${summary.totalAlertCount} alerts · ${summary.expired.length} expired / ${summary.totalAlertCount - summary.expired.length} due soon`
+                        )
+                      : t("全部设备效期正常", "All equipment calibration dates are valid")}
                   </p>
                 </div>
               </div>
@@ -237,7 +242,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                           : "text-zinc-500 dark:text-zinc-400"
                       )}
                     >
-                      全部预警
+                      {t("全部预警", "All Alerts")}
                     </div>
                     <div className="relative z-10 mt-1 text-lg font-semibold font-mono leading-none">
                       <SlidingNumber value={summary.totalAlertCount} />
@@ -473,7 +478,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                   onChange={onToggleMuteToday}
                   label={
                     <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                      今日不再提醒
+                      {t("今日不再提醒", "Don't remind again today")}
                     </span>
                   }
                 />
@@ -498,7 +503,7 @@ export const ExpiryAlertModal: React.FC<ExpiryAlertModalProps> = ({
                     onClick={onClose}
                     className="px-4 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                   >
-                    确定
+                    {t("确定", "OK")}
                   </motion.button>
                 </div>
               </div>

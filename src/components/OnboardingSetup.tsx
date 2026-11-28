@@ -812,22 +812,9 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                 <div className="h-[172px] flex flex-col items-center justify-start pt-6">
                   {titleReady && (
                     <>
-                      <motion.div
-                        initial={{ opacity: 0, y: 6 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ duration: 0.45, ease: EASE_PRECISION }}
-                        className="mb-2.5 inline-flex items-center gap-2 px-3 py-0.5 rounded-full bg-white/85 backdrop-blur-md border border-white/75 shadow-hairline text-[10.5px] font-mono tracking-[0.2em] text-zinc-700 uppercase"
-                      >
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{ backgroundColor: activeAccent.from }}
-                        />
-                        <span>{docCode || "JSSK-MPR-170"}</span>
-                      </motion.div>
-
                       <BlurText
                         as="h1"
-                        text={docTitle || "监视与测量管理台账"}
+                        text="InstrumentLedger"
                         delay={0.03}
                         stagger={0.028}
                         className={cn(
@@ -1167,7 +1154,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
                         >
                           <ChevronDown className="h-3.5 w-3.5" />
                         </motion.span>
-                        <span>台账信息（可选）</span>
+                        <span>Excel 导出与打印表头（可选）</span>
                       </button>
 
                       <Collapsible open={showAdvanced}>

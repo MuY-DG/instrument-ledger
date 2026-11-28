@@ -1,3 +1,4 @@
+mod app_icon;
 mod auth;
 mod backup;
 mod commands;
@@ -17,28 +18,55 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 #[cfg(not(target_os = "macos"))]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
-use tauri::{Emitter, Manager};
+use tauri::{AppHandle, Manager};
 
+use crate::app_icon::{apply_app_icon_by_id, DEFAULT_APP_ICON_ID};
 use crate::auth::SessionState;
 use crate::commands::{
     hide_main_window_and_maybe_lock, lock_app_from_tray, show_main_window, AppState,
 };
 use crate::db::{
-    get_setting, init_db, is_account_initialized, is_app_lock_configured,
+    get_setting, init_db, is_account_initialized, is_app_lock_configured, load_custom_app_icons,
     resolve_startup_admin_session, sanitize_close_behavior, set_setting, DEFAULT_CLOSE_BEHAVIOR,
 };
 use crate::storage::ensure_storage_dirs;
 
-fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
-    let show_item = MenuItem::with_id(app, "tray_show", "显示主窗口", true, None::<&str>)?;
-    let lock_item = MenuItem::with_id(app, "tray_lock", "锁定应用", true, None::<&str>)?;
+fn build_tray_menu(app: &AppHandle, is_en: bool) -> Result<Menu<tauri::Wry>, tauri::Error> {
+    let show_label = if is_en { "Show Window" } else { "显示主窗口" };
+    let lock_label = if is_en { "Lock App" } else { "锁定应用" };
+    let quit_label = if is_en { "Quit" } else { "退出程序" };
+    let show_item = MenuItem::with_id(app, "tray_show", show_label, true, None::<&str>)?;
+    let lock_item = MenuItem::with_id(app, "tray_lock", lock_label, true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;
-    let quit_item = MenuItem::with_id(app, "tray_quit", "退出程序", true, None::<&str>)?;
-    let menu = Menu::with_items(app, &[&show_item, &lock_item, &sep, &quit_item])?;
+    let quit_item = MenuItem::with_id(app, "tray_quit", quit_label, true, None::<&str>)?;
+    Menu::with_items(app, &[&show_item, &lock_item, &sep, &quit_item])
+}
+
+pub fn apply_tray_visibility(app: &AppHandle, visible: bool) {
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        let _ = tray.set_visible(visible);
+    }
+}
+
+pub fn refresh_tray_language(app: &AppHandle, lang: &str) {
+    let is_en = lang.trim().eq_ignore_ascii_case("en");
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        if let Ok(menu) = build_tray_menu(app, is_en) {
+            let _ = tray.set_menu(Some(menu));
+        }
+    }
+}
+
+fn setup_tray(
+    app: &tauri::App,
+    visible: bool,
+    is_en: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let menu = build_tray_menu(app.handle(), is_en)?;
 
     let mut builder = TrayIconBuilder::with_id("main-tray")
         .menu(&menu)
-        .tooltip("监视与测量设备管理台账");
+        .tooltip("InstrumentLedger");
 
     #[cfg(target_os = "macos")]
     {
@@ -88,6 +116,10 @@ fn setup_tray(app: &tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         })
         .build(app)?;
 
+    if !visible {
+        apply_tray_visibility(app.handle(), false);
+    }
+
     Ok(())
 }
 
@@ -122,6 +154,14 @@ pub fn run() {
                 let _ = set_setting(&conn, "app_lock_active", "0");
             }
 
+            let show_tray_icon = get_setting(&conn, "show_tray_icon")?.as_deref() != Some("0");
+            let ui_language = get_setting(&conn, "ui_language")?.unwrap_or_default();
+            let is_en_tray = ui_language.trim().eq_ignore_ascii_case("en");
+            let startup_icon_id = get_setting(&conn, "app_icon_id")?
+                .unwrap_or_else(|| DEFAULT_APP_ICON_ID.to_string());
+            let startup_custom_icons = load_custom_app_icons(&conn);
+            let data_dir_for_icon = data_dir.clone();
+
             app.manage(AppState {
                 db: Mutex::new(conn),
                 session: Mutex::new(SessionState {
@@ -136,7 +176,15 @@ pub fn run() {
                 db_path,
             });
 
-            setup_tray(app)?;
+            setup_tray(app, show_tray_icon, is_en_tray)?;
+            if startup_icon_id != DEFAULT_APP_ICON_ID {
+                let _ = apply_app_icon_by_id(
+                    app.handle(),
+                    &data_dir_for_icon,
+                    &startup_icon_id,
+                    &startup_custom_icons,
+                );
+            }
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -166,15 +214,7 @@ pub fn run() {
                 }
 
                 api.prevent_close();
-                if close_behavior == "minimize_to_tray" {
-                    hide_main_window_and_maybe_lock(window.app_handle());
-                } else {
-                    // "ask": bring window to front and show close preference prompt
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    let _ = window.emit("close-requested-prompt", ());
-                }
+                hide_main_window_and_maybe_lock(window.app_handle());
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -189,6 +229,9 @@ pub fn run() {
             commands::unlock_app_with_admin,
             commands::perform_close_action,
             commands::set_close_behavior,
+            commands::update_appearance_preferences,
+            commands::add_custom_app_icon,
+            commands::delete_custom_app_icon,
             commands::change_admin_password,
             commands::list_instruments,
             commands::create_instrument,
@@ -233,6 +276,7 @@ pub fn run() {
             commands::reset_app_with_backup,
             commands::check_for_updates,
             commands::download_and_launch_update,
+            commands::fetch_release_history,
             commands::get_sync_config,
             commands::save_sync_config,
             commands::test_sync_connection,

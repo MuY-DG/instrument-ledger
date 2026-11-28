@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { api, invalidateMediaPath } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { calcNextCalDate, getInstrumentStatus } from "@/lib/status";
 import { InfoTip } from "@/components/InfoTip";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -311,6 +312,7 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
     }
   };
 
+  const { t } = useI18n();
   const currentDisplayPhoto = removePhoto
     ? ""
     : newPhotoBase64 || existingPhotoPreview;
@@ -335,10 +337,10 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
             <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between bg-zinc-50/70 dark:bg-white/[0.02]">
               <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
                 {mode === "create"
-                  ? "新增设备"
+                  ? t("新增设备", "Add Equipment")
                   : mode === "edit"
-                    ? "编辑设备"
-                    : "设备档案"}
+                    ? t("编辑设备", "Edit Equipment")
+                    : t("设备档案", "Equipment Details")}
               </h2>
               <button
                 type="button"
@@ -901,15 +903,15 @@ export const InstrumentDrawer: React.FC<InstrumentDrawerProps> = ({
                 onClick={onClose}
                 className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
               >
-                {readOnly ? "关闭" : "取消"}
+                {readOnly ? t("关闭", "Close") : t("取消", "Cancel")}
               </motion.button>
               {!readOnly && (
                 <ActionStatusButton
                   status={saveStatus}
                   disabled={saving}
-                  idleLabel="保存"
-                  loadingLabel="保存中..."
-                  successLabel="已保存"
+                  idleLabel={t("保存", "Save")}
+                  loadingLabel={t("保存中...", "Saving...")}
+                  successLabel={t("已保存", "Saved")}
                   idleIcon={<Save className="h-3.5 w-3.5" />}
                   onClick={(e) => {
                     void handleSubmit(e);

@@ -2,6 +2,7 @@ import React, { useCallback } from "react";
 import { AnimatePresence, motion } from "motion/react";
 import { Monitor, Moon, Sun } from "lucide-react";
 import { MorphTooltip } from "@/components/ui/MorphTooltip";
+import { useI18n } from "@/lib/i18n";
 import { EASE_PRECISION, SPRING_SNAPPY, TAP_SCALE_ICON } from "@/lib/motion";
 import {
   getNextThemePreference,
@@ -12,23 +13,27 @@ import { cn } from "@/lib/utils";
 const PREFERENCE_META: Record<
   ThemePreference,
   {
-    label: string;
+    labelZh: string;
+    labelEn: string;
     Icon: React.FC<{ className?: string }>;
     iconTint: string;
   }
 > = {
   system: {
-    label: "跟随系统",
+    labelZh: "跟随系统",
+    labelEn: "System",
     Icon: Monitor,
     iconTint: "text-sky-500 dark:text-sky-400",
   },
   light: {
-    label: "亮色",
+    labelZh: "浅色",
+    labelEn: "Light",
     Icon: Sun,
     iconTint: "text-amber-500",
   },
   dark: {
-    label: "暗色",
+    labelZh: "深色",
+    labelEn: "Dark",
     Icon: Moon,
     iconTint: "text-indigo-500 dark:text-indigo-400",
   },
@@ -43,7 +48,7 @@ interface ThemeSwitcherButtonProps {
 
 /**
  * Direct single-click theme cycle trigger in the bottom-left sidebar rail.
- * Cycles: 跟随系统 -> 亮色 -> 暗色 -> 跟随系统.
+ * Cycles: System -> Light -> Dark -> System.
  */
 export const ThemeSwitcherButton: React.FC<ThemeSwitcherButtonProps> = ({
   preference,
@@ -51,8 +56,11 @@ export const ThemeSwitcherButton: React.FC<ThemeSwitcherButtonProps> = ({
   buttonRef,
   onCycleTheme,
 }) => {
+  const { isEn } = useI18n();
   const currentMeta = PREFERENCE_META[preference];
   const nextMeta = PREFERENCE_META[getNextThemePreference(preference)];
+  const currentLabel = isEn ? currentMeta.labelEn : currentMeta.labelZh;
+  const nextLabel = isEn ? nextMeta.labelEn : nextMeta.labelZh;
   const ActiveIcon = currentMeta.Icon;
 
   const setBtnRef = useCallback(
@@ -70,7 +78,11 @@ export const ThemeSwitcherButton: React.FC<ThemeSwitcherButtonProps> = ({
     <MorphTooltip
       placement={collapsed ? "right" : "top"}
       className={collapsed ? undefined : "w-full"}
-      content={`主题：${currentMeta.label}（点击切换${nextMeta.label}）`}
+      content={
+        isEn
+          ? `Theme: ${currentLabel} (click for ${nextLabel})`
+          : `主题：${currentLabel}（点击切换${nextLabel}）`
+      }
     >
       <motion.button
         ref={setBtnRef}
@@ -78,7 +90,11 @@ export const ThemeSwitcherButton: React.FC<ThemeSwitcherButtonProps> = ({
         whileTap={TAP_SCALE_ICON}
         transition={SPRING_SNAPPY}
         onClick={(e) => onCycleTheme(e.currentTarget)}
-        aria-label={`当前主题：${currentMeta.label}，点击切换至${nextMeta.label}`}
+        aria-label={
+          isEn
+            ? `Current theme: ${currentLabel}, switch to ${nextLabel}`
+            : `当前主题：${currentLabel}，点击切换至${nextLabel}`
+        }
         className={cn(
           "relative rounded-lg flex items-center justify-center transition-colors overflow-hidden",
           collapsed ? "h-8 w-9" : "w-full py-1.5",
@@ -108,14 +124,15 @@ interface ThemeStatusCapsuleProps {
 }
 
 /**
- * Floating bottom-center capsule toast announcing active theme switches:
- * 「主题：跟随系统」 / 「主题：亮色」 / 「主题：暗色」
+ * Floating bottom-center capsule toast announcing active theme switches.
  */
 export const ThemeStatusCapsule: React.FC<ThemeStatusCapsuleProps> = ({
   visible,
   preference,
 }) => {
+  const { isEn } = useI18n();
   const meta = PREFERENCE_META[preference];
+  const label = isEn ? meta.labelEn : meta.labelZh;
   const Icon = meta.Icon;
 
   return (
@@ -153,14 +170,14 @@ export const ThemeStatusCapsule: React.FC<ThemeStatusCapsuleProps> = ({
 
             <AnimatePresence mode="popLayout" initial={false}>
               <motion.span
-                key={preference}
+                key={`${preference}-${isEn ? "en" : "zh"}`}
                 initial={{ opacity: 0, y: 5, filter: "blur(2px)" }}
                 animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
                 exit={{ opacity: 0, y: -5, filter: "blur(2px)" }}
                 transition={{ duration: 0.16, ease: EASE_PRECISION }}
                 className="whitespace-nowrap tracking-tight"
               >
-                主题：{meta.label}
+                {isEn ? `Theme: ${label}` : `主题：${label}`}
               </motion.span>
             </AnimatePresence>
           </motion.div>

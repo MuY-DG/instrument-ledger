@@ -12,6 +12,7 @@ import {
   SpotlightSurface,
 } from "@/components/ui/MotionPrimitives";
 import { MorphTooltip } from "@/components/ui/MorphTooltip";
+import { useI18n } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
 import type { ExpiryFilter, StatusFilter } from "@/types";
 
@@ -53,6 +54,7 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
   onFilterStatus,
   onFilterExpiry,
 }) => {
+  const { t, isEn } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [hoveredKey, setHoveredKey] = useState<string | null>(null);
 
@@ -62,7 +64,7 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
     if (valid > 0) {
       list.push({
         key: "valid",
-        label: "正常有效",
+        label: t("正常有效", "Valid"),
         color: "#10b981",
         count: valid,
         pct: Math.round((valid / controlled) * 100),
@@ -73,7 +75,7 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
       if (seg.count > 0) {
         list.push({
           key: `tier-${seg.id}`,
-          label: seg.label || `${seg.days}天内`,
+          label: isEn ? `≤${seg.days}d` : seg.label || `${seg.days}天内`,
           color: seg.color,
           count: seg.count,
           pct: Math.round((seg.count / controlled) * 100),
@@ -84,7 +86,7 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
     if (expired > 0) {
       list.push({
         key: "expired",
-        label: "已超期",
+        label: t("已超期", "Expired"),
         color: "#f43f5e",
         count: expired,
         pct: Math.round((expired / controlled) * 100),
@@ -92,7 +94,7 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
       });
     }
     return list;
-  }, [controlled, valid, tierSegments, expired, onFilterStatus, onFilterExpiry]);
+  }, [controlled, valid, tierSegments, expired, onFilterStatus, onFilterExpiry, t, isEn]);
 
   const activeHoverSeg = segments.find((s) => s.key === hoveredKey) || null;
 
@@ -167,7 +169,7 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
           content={
             <div className="space-y-1.5 min-w-[148px]">
               <div className="flex items-center justify-between gap-3 font-medium">
-                <span>在控合规率</span>
+                <span>{t("在控合规率", "Compliance")}</span>
                 <span className="font-mono">{compliancePct}%</span>
               </div>
               {segments.length > 0 ? (
@@ -192,7 +194,10 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
                 </div>
               ) : (
                 <div className="text-[10.5px] text-zinc-400 font-mono">
-                  受控 {controlled} · {expired > 0 ? `${expired} 台待复校` : "效期良好"}
+                  {t("受控", "Controlled")} {controlled} ·{" "}
+                  {expired > 0
+                    ? t(`${expired} 台待复校`, `${expired} overdue`)
+                    : t("效期良好", "All valid")}
                 </div>
               )}
             </div>
@@ -278,7 +283,7 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
           title={segments.length > 0 ? "点击展开各状态占比明细" : undefined}
         >
           <span className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-800 dark:group-hover:text-zinc-200 transition-colors">
-            <span>在控设备合规率</span>
+            <span>{t("在控设备合规率", "Compliance Rate")}</span>
             {segments.length > 0 && (
               <motion.span
                 animate={{ rotate: expanded ? 180 : 0 }}
@@ -353,7 +358,9 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
                   <span className="truncate">{activeHoverSeg.label}</span>
                 </span>
                 <span className="text-zinc-600 dark:text-zinc-300 shrink-0">
-                  {activeHoverSeg.count} 台 · {activeHoverSeg.pct}%
+                  {isEn
+                    ? `${activeHoverSeg.count} · ${activeHoverSeg.pct}%`
+                    : `${activeHoverSeg.count} 台 · ${activeHoverSeg.pct}%`}
                 </span>
               </motion.div>
             ) : (
@@ -365,9 +372,11 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
                 transition={{ duration: 0.14, ease: EASE_PRECISION }}
                 className="w-full flex items-center justify-between text-zinc-400 dark:text-zinc-500"
               >
-                <span>受控 {controlled}</span>
+                <span>{t(`受控 ${controlled}`, `Tracked ${controlled}`)}</span>
                 <span>
-                  {expired > 0 ? `${expired} 台待复校` : "效期状态良好"}
+                  {expired > 0
+                    ? t(`${expired} 台待复校`, `${expired} overdue`)
+                    : t("效期状态良好", "All up to date")}
                 </span>
               </motion.div>
             )}

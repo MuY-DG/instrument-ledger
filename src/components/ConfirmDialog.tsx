@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { AlertTriangle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
 import { ModalShell } from "@/components/ui/MotionPrimitives";
 import { HoldConfirmButton } from "@/components/ui/InteractiveControls";
@@ -43,6 +44,7 @@ export function confirmDialog(options: ConfirmOptions): Promise<boolean> {
 }
 
 export const ConfirmDialogHost: React.FC = () => {
+  const { t } = useI18n();
   const [req, setReq] = useState<PendingConfirm | null>(null);
   const lastReqRef = useRef<PendingConfirm | null>(null);
   if (req) lastReqRef.current = req;
@@ -142,7 +144,9 @@ export const ConfirmDialogHost: React.FC = () => {
 
           <div className="px-5 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between gap-2">
             <span className="text-[10.5px] text-zinc-400 dark:text-zinc-500 select-none">
-              {displayReq.holdToConfirm ? "为防误操作，请长按确认" : ""}
+              {displayReq.holdToConfirm
+                ? t("为防误操作，请长按确认", "Hold to confirm this action")
+                : ""}
             </span>
             <div className="flex items-center gap-2 shrink-0">
               <motion.button
@@ -153,14 +157,14 @@ export const ConfirmDialogHost: React.FC = () => {
                 onClick={() => settle(false)}
                 className="px-4 py-1.5 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] hover:bg-zinc-50 dark:hover:bg-white/[0.08] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
               >
-                {displayReq.cancelText || "取消"}
+                {displayReq.cancelText || t("取消", "Cancel")}
               </motion.button>
               {displayReq.holdToConfirm ? (
                 <HoldConfirmButton
                   onConfirm={() => settle(true)}
-                  idleLabel={displayReq.confirmText || "按住确认"}
-                  holdingLabel="继续按住..."
-                  completedLabel="已确认"
+                  idleLabel={displayReq.confirmText || t("按住确认", "Hold to Confirm")}
+                  holdingLabel={t("继续按住...", "Keep holding...")}
+                  completedLabel={t("已确认", "Confirmed")}
                   holdDurationMs={displayReq.holdDurationMs ?? 880}
                   variant={displayReq.destructive ? "danger" : "primary"}
                 />
@@ -177,7 +181,7 @@ export const ConfirmDialogHost: React.FC = () => {
                       : "bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950"
                   )}
                 >
-                  {displayReq.confirmText || "确定"}
+                  {displayReq.confirmText || t("确定", "Confirm")}
                 </motion.button>
               )}
             </div>

@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { Edit3, Eye, FileText, Plus, Trash2 } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 import { calTypeLabel, type InstrumentStatusInfo } from "@/lib/status";
 import { getThresholdVisuals } from "@/lib/thresholdColors";
 import { cn } from "@/lib/utils";
@@ -87,6 +88,7 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
     onOpenReport,
     onOpenPhoto,
   }) => {
+    const { t, locale } = useI18n();
     const tierVisuals =
       statusInfo.status === "warning" && statusInfo.matchedThreshold
         ? getThresholdVisuals(statusInfo.matchedThreshold.color)
@@ -181,7 +183,7 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
             </span>
             {showCategoryBadge && (
               <span className="px-1.5 py-0.2 rounded border border-zinc-200/80 dark:border-white/[0.09] text-[10px] font-medium text-zinc-500 dark:text-zinc-400 shrink-0">
-                {inst.category === "fixture" ? "检具" : "量具"}
+                {inst.category === "fixture" ? t("检具", "Fixture") : t("量具", "Gauge")}
               </span>
             )}
           </div>
@@ -242,7 +244,7 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
               >
                 {inst.location || (
                   <span className="text-zinc-300 dark:text-zinc-600">
-                    未登记
+                    {t("未登记", "Unassigned")}
                   </span>
                 )}
               </div>
@@ -265,11 +267,11 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
           </div>
           <div className="flex items-center gap-1.5 mt-1 text-[10.5px] text-zinc-500 dark:text-zinc-400">
             <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-white/[0.06] text-zinc-600 dark:text-zinc-300 font-medium">
-              {calTypeLabel(inst.calibrationType)}
+              {calTypeLabel(inst.calibrationType, locale)}
             </span>
             {inst.calCycleMonths > 0 && !inst.exemptCalibration && (
               <span className="font-mono tabular-nums text-zinc-400 dark:text-zinc-500">
-                {inst.calCycleMonths}月
+                {t(`${inst.calCycleMonths}月`, `${inst.calCycleMonths}m`)}
               </span>
             )}
           </div>
@@ -318,7 +320,7 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
             >
               <FileText className="h-3.5 w-3.5 shrink-0 text-indigo-500 dark:text-indigo-400" />
               <span className="truncate font-mono tabular-nums">
-                报告 · {inst.reportCount}
+                {t(`报告 · ${inst.reportCount}`, `Docs · ${inst.reportCount}`)}
               </span>
             </button>
           ) : isAdmin ? (
@@ -328,7 +330,7 @@ const InstrumentRow: React.FC<InstrumentRowProps> = React.memo(
               className="btn-tactile inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-dashed border-zinc-300 dark:border-zinc-700 hover:border-zinc-400 dark:hover:border-zinc-500 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-[11.5px]"
             >
               <Plus className="h-3 w-3" />
-              <span>上传</span>
+              <span>{t("上传", "Upload")}</span>
             </button>
           ) : (
             <span className="text-[11.5px] text-zinc-300 dark:text-zinc-700">
@@ -585,6 +587,7 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
     [items, startIdx, endIdx]
   );
 
+  const { t } = useI18n();
   const showCategoryBadge = activeTab === "all";
   const hasSelection = selectedIds.size > 0;
   const totalHeight = total * ROW_HEIGHT;
@@ -641,28 +644,28 @@ export const VirtualInstrumentTable: React.FC<VirtualInstrumentTableProps> = ({
               #
             </div>
             <div role="columnheader" className="py-2.5 px-3">
-              设备与使用部门
+              {t("设备与使用部门", "Equipment & Dept")}
             </div>
             <div role="columnheader" className="py-2.5 px-3">
-              编号 / 型号规格
+              {t("编号 / 型号规格", "Serial / Spec")}
             </div>
             <div role="columnheader" className="py-2.5 px-3">
-              存放位置
+              {t("存放位置", "Location")}
             </div>
             <div role="columnheader" className="py-2.5 px-3">
-              上次校验 / 周期
+              {t("上次校验 / 周期", "Last Cal / Cycle")}
             </div>
             <div role="columnheader" className="py-2.5 px-3">
-              下次校验
+              {t("下次校验", "Next Cal")}
             </div>
             <div role="columnheader" className="py-2.5 px-3">
-              效期状态
+              {t("效期状态", "Status")}
             </div>
             <div role="columnheader" className="py-2.5 px-3">
-              校验报告
+              {t("校验报告", "Reports")}
             </div>
             <div role="columnheader" className="py-2.5 pl-3 pr-6 text-right">
-              操作
+              {t("操作", "Actions")}
             </div>
           </div>
         </div>

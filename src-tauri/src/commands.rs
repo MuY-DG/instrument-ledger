@@ -10,35 +10,41 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
+use crate::app_icon::{apply_app_icon_by_id, DEFAULT_APP_ICON_ID, OBSIDIAN_APP_ICON_ID};
 use crate::auth::{hash_password, validate_pin, verify_password, SessionState};
 use crate::backup::{
     create_backup_with_scope, get_backup_scope_options, reset_app_data_with_backup, restore_backup,
 };
 use crate::db::{
     calc_next_cal_date, get_setting, is_account_initialized, is_app_lock_configured,
-    load_app_settings, now_iso, query_instrument_by_id, query_instruments,
+    load_app_settings, load_custom_app_icons, now_iso, query_instrument_by_id, query_instruments,
     query_reports_for_instrument, sanitize_admin_session_days, sanitize_close_behavior,
-    sanitize_popup_frequency, sanitize_warning_thresholds, set_setting,
-    DEFAULT_ADMIN_SESSION_DAYS, DEFAULT_ADMIN_TITLE, DEFAULT_GITHUB_REPO,
+    sanitize_popup_frequency, sanitize_ui_language, sanitize_ui_scale, sanitize_ui_scale_mode,
+    sanitize_warning_thresholds, set_setting, DEFAULT_ADMIN_SESSION_DAYS, DEFAULT_ADMIN_TITLE,
+    DEFAULT_GITHUB_REPO,
 };
 use crate::models::{
-    AddReportInput, AppSettings, AuthStatus, BackupResult, BatchOperationResult,
-    BatchUpdateInstrumentsInput, CalibrationReport, DataDirInfo, ImportResult, Instrument,
-    InstrumentInput, ResetAppResult, RestoreResult, SaveSyncConfigInput, SettingsUpdateInput,
-    SyncActionResult, SyncConfigView, SyncProgressEvent, SyncStatusResult, SyncTestResult,
-    TestSyncConfigInput, UpdateCheckResult,
+    AddReportInput, AppSettings, AppearancePreferencesInput, AuthStatus, BackupResult,
+    BatchOperationResult, BatchUpdateInstrumentsInput, CalibrationReport, CustomAppIcon,
+    DataDirInfo, ImportResult, Instrument, InstrumentInput, ReleaseHistoryItem, ResetAppResult,
+    RestoreResult, SaveSyncConfigInput, SettingsUpdateInput, SyncActionResult, SyncConfigView,
+    SyncProgressEvent, SyncStatusResult, SyncTestResult, TestSyncConfigInput, UpdateCheckResult,
 };
 use crate::storage::{
-    dir_total_size, mime_from_ext, remove_stored_file, resolve_stored_path, save_image_from_base64,
-    save_image_from_path, save_report_from_base64, save_report_from_path,
+    dir_total_size, mime_from_ext, remove_stored_file, resolve_stored_path,
+    save_app_icon_from_base64, save_image_from_base64, save_image_from_path,
+    save_report_from_base64, save_report_from_path,
 };
+use crate::{apply_tray_visibility, refresh_tray_language};
 use crate::sync_engine::{
     apply_pulled_snapshot_locally_with_scope, apply_sync_config_update,
     build_clean_sync_db_snapshot_with_scope, check_remote_sync_status,
     compute_local_ledger_summary_with_scope, download_pull_payload, execute_push, load_sync_config,
     resolve_test_config, save_sync_config_file, test_s3_sync_connection,
 };
-use crate::updater::{check_github_release, download_and_install_update, PendingUpdate};
+use crate::updater::{
+    check_github_release, download_and_install_update, fetch_github_release_history, PendingUpdate,
+};
 use crate::workbench_store::{
     clear_all_pdf_drafts, delete_pdf_draft, enforce_pdf_cache_limit,
     get_workbench_cache_limit_mb, get_workbench_cache_stats, list_pdf_drafts, read_pdf_draft_meta,
@@ -513,6 +519,149 @@ pub fn set_close_behavior(
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
     set_setting(&conn, "close_behavior", &sanitize_close_behavior(&close_behavior))?;
     load_app_settings(&conn)
+}
+
+#[tauri::command]
+pub fn update_appearance_preferences(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    input: AppearancePreferencesInput,
+) -> Result<AppSettings, String> {
+    check_unlocked(&state)?;
+    let (settings, tray_vis, tray_lang, apply_icon) = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        if let Some(behavior) = input.close_behavior {
+            set_setting(&conn, "close_behavior", &sanitize_close_behavior(&behavior))?;
+        }
+        let mut tray_vis = None;
+        if let Some(show) = input.show_tray_icon {
+            set_setting(&conn, "show_tray_icon", if show { "1" } else { "0" })?;
+            tray_vis = Some(show);
+        }
+        let mut tray_lang = None;
+        if let Some(lang) = input.ui_language {
+            let cleaned = sanitize_ui_language(&lang);
+            set_setting(&conn, "ui_language", &cleaned)?;
+            tray_lang = Some(cleaned);
+        }
+        if let Some(mode) = input.ui_scale_mode {
+            set_setting(&conn, "ui_scale_mode", &sanitize_ui_scale_mode(&mode))?;
+        }
+        if let Some(scale) = input.ui_scale {
+            set_setting(&conn, "ui_scale", &format!("{:.2}", sanitize_ui_scale(scale)))?;
+        }
+        let mut apply_icon = None;
+        if let Some(icon_id) = input.app_icon_id {
+            let trimmed = icon_id.trim().to_string();
+            let custom_icons = load_custom_app_icons(&conn);
+            let valid = trimmed == DEFAULT_APP_ICON_ID
+                || trimmed == OBSIDIAN_APP_ICON_ID
+                || custom_icons.iter().any(|c| c.id == trimmed);
+            if !valid {
+                return Err("所选应用图标不存在".to_string());
+            }
+            set_setting(&conn, "app_icon_id", &trimmed)?;
+            apply_icon = Some((trimmed, custom_icons));
+        }
+        if let Some(compact) = input.compact_toolbar {
+            set_setting(&conn, "compact_toolbar", if compact { "1" } else { "0" })?;
+        }
+        if let Some(show_imp) = input.show_import_button {
+            set_setting(&conn, "show_import_button", if show_imp { "1" } else { "0" })?;
+        }
+        if let Some(nav_cfg) = input.sidebar_nav_config {
+            set_setting(&conn, "sidebar_nav_config", nav_cfg.trim())?;
+        }
+        (load_app_settings(&conn)?, tray_vis, tray_lang, apply_icon)
+    };
+
+    if let Some(show) = tray_vis {
+        apply_tray_visibility(&app, show);
+    }
+    if let Some(lang) = tray_lang {
+        refresh_tray_language(&app, &lang);
+    }
+    if let Some((icon_id, custom_icons)) = apply_icon {
+        apply_app_icon_by_id(&app, &state.data_dir, &icon_id, &custom_icons)?;
+    }
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn add_custom_app_icon(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    png_base64: String,
+) -> Result<AppSettings, String> {
+    check_unlocked(&state)?;
+    let stored_path = save_app_icon_from_base64(&state.data_dir, &png_base64)?;
+    let icon_id = format!("custom:{}", uuid::Uuid::new_v4());
+    let clean_name: String = {
+        let t = name.trim();
+        if t.is_empty() {
+            "自定义图标".to_string()
+        } else {
+            t.chars().take(24).collect()
+        }
+    };
+
+    let (settings, custom_icons) = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        let mut icons = load_custom_app_icons(&conn);
+        icons.push(CustomAppIcon {
+            id: icon_id.clone(),
+            name: clean_name,
+            stored_path,
+        });
+        let serialized = serde_json::to_string(&icons)
+            .map_err(|e| format!("序列化自定义图标列表失败: {}", e))?;
+        set_setting(&conn, "custom_app_icons", &serialized)?;
+        set_setting(&conn, "app_icon_id", &icon_id)?;
+        (load_app_settings(&conn)?, icons)
+    };
+
+    apply_app_icon_by_id(&app, &state.data_dir, &icon_id, &custom_icons)?;
+    Ok(settings)
+}
+
+#[tauri::command]
+pub fn delete_custom_app_icon(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    icon_id: String,
+) -> Result<AppSettings, String> {
+    check_unlocked(&state)?;
+    let target = icon_id.trim().to_string();
+    let (settings, should_reapply, next_icon_id, next_icons) = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        let mut icons = load_custom_app_icons(&conn);
+        let Some(pos) = icons.iter().position(|c| c.id == target) else {
+            return Err("未找到对应的自定义图标".to_string());
+        };
+        let removed = icons.remove(pos);
+        remove_stored_file(&state.data_dir, &removed.stored_path);
+
+        let serialized = serde_json::to_string(&icons)
+            .map_err(|e| format!("序列化自定义图标列表失败: {}", e))?;
+        set_setting(&conn, "custom_app_icons", &serialized)?;
+
+        let current_active = get_setting(&conn, "app_icon_id")?
+            .unwrap_or_else(|| DEFAULT_APP_ICON_ID.to_string());
+        let reapply = current_active == target;
+        let active_after = if reapply {
+            set_setting(&conn, "app_icon_id", DEFAULT_APP_ICON_ID)?;
+            DEFAULT_APP_ICON_ID.to_string()
+        } else {
+            current_active
+        };
+        (load_app_settings(&conn)?, reapply, active_after, icons)
+    };
+
+    if should_reapply {
+        apply_app_icon_by_id(&app, &state.data_dir, &next_icon_id, &next_icons)?;
+    }
+    Ok(settings)
 }
 
 #[tauri::command]
@@ -1637,6 +1786,30 @@ pub fn update_settings(
     if let Some(behavior) = input.close_behavior {
         set_setting(&conn, "close_behavior", &sanitize_close_behavior(&behavior))?;
     }
+    if let Some(show) = input.show_tray_icon {
+        set_setting(&conn, "show_tray_icon", if show { "1" } else { "0" })?;
+    }
+    if let Some(lang) = input.ui_language {
+        set_setting(&conn, "ui_language", &sanitize_ui_language(&lang))?;
+    }
+    if let Some(mode) = input.ui_scale_mode {
+        set_setting(&conn, "ui_scale_mode", &sanitize_ui_scale_mode(&mode))?;
+    }
+    if let Some(scale) = input.ui_scale {
+        set_setting(&conn, "ui_scale", &format!("{:.2}", sanitize_ui_scale(scale)))?;
+    }
+    if let Some(icon_id) = input.app_icon_id {
+        set_setting(&conn, "app_icon_id", icon_id.trim())?;
+    }
+    if let Some(compact) = input.compact_toolbar {
+        set_setting(&conn, "compact_toolbar", if compact { "1" } else { "0" })?;
+    }
+    if let Some(show_imp) = input.show_import_button {
+        set_setting(&conn, "show_import_button", if show_imp { "1" } else { "0" })?;
+    }
+    if let Some(nav_cfg) = input.sidebar_nav_config {
+        set_setting(&conn, "sidebar_nav_config", nav_cfg.trim())?;
+    }
     if let Some(days) = input.admin_session_days {
         set_setting(
             &conn,
@@ -2001,6 +2174,23 @@ pub async fn download_and_launch_update(
         state.allow_exit.store(false, Ordering::SeqCst);
     }
     res
+}
+
+#[tauri::command]
+pub async fn fetch_release_history(
+    state: State<'_, AppState>,
+    github_repo_override: Option<String>,
+    proxy_override: Option<String>,
+) -> Result<Vec<ReleaseHistoryItem>, String> {
+    let (repo, proxy) = {
+        let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+        let settings = load_app_settings(&conn)?;
+        (
+            resolve_effective_repo(github_repo_override, &settings.github_repo),
+            proxy_override.unwrap_or(settings.update_proxy_url),
+        )
+    };
+    fetch_github_release_history(&repo, &proxy).await
 }
 
 // ---------------- S3-Compatible Cloud Sync (Optional E2EE) ----------------

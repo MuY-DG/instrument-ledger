@@ -7,6 +7,27 @@ export type ExpiryFilter = "all" | "expired" | number;
 export type SortMode = "seq" | "expiry" | "name";
 export type AlertPopupFrequency = "every_open" | "daily" | "interval";
 export type CloseBehavior = "ask" | "minimize_to_tray" | "exit";
+export type UiLanguage = "system" | "zh-CN" | "en";
+export type ResolvedLocale = "zh-CN" | "en";
+export type UiScaleMode = "auto" | "manual";
+
+export interface CustomAppIcon {
+  id: string;
+  name: string;
+  storedPath: string;
+}
+
+export interface AppearancePreferencesInput {
+  closeBehavior?: CloseBehavior;
+  showTrayIcon?: boolean;
+  uiLanguage?: UiLanguage;
+  uiScaleMode?: UiScaleMode;
+  uiScale?: number;
+  appIconId?: string;
+  compactToolbar?: boolean;
+  showImportButton?: boolean;
+  sidebarNavConfig?: string;
+}
 
 export interface WarningThreshold {
   id: string;
@@ -133,6 +154,15 @@ export interface AppSettings {
   alertPopupIntervalHours: number;
   autoLockMinutes: number;
   closeBehavior: CloseBehavior;
+  showTrayIcon: boolean;
+  uiLanguage: UiLanguage;
+  uiScaleMode: UiScaleMode;
+  uiScale: number;
+  appIconId: string;
+  customAppIcons: CustomAppIcon[];
+  compactToolbar: boolean;
+  showImportButton: boolean;
+  sidebarNavConfig: string;
   keepAdminSession: boolean;
   adminSessionDays: number;
   appLockEnabled: boolean;
@@ -164,6 +194,14 @@ export interface SettingsUpdateInput {
   alertPopupIntervalHours?: number;
   autoLockMinutes?: number;
   closeBehavior?: CloseBehavior;
+  showTrayIcon?: boolean;
+  uiLanguage?: UiLanguage;
+  uiScaleMode?: UiScaleMode;
+  uiScale?: number;
+  appIconId?: string;
+  compactToolbar?: boolean;
+  showImportButton?: boolean;
+  sidebarNavConfig?: string;
   keepAdminSession?: boolean;
   adminSessionDays?: number;
   lockOnHide?: boolean;
@@ -237,6 +275,16 @@ export interface UpdateDownloadProgress {
   percent: number;
   phase: string;
   message: string;
+}
+
+export interface ReleaseHistoryItem {
+  version: string;
+  tagName: string;
+  name: string;
+  publishedAt: string;
+  body: string;
+  htmlUrl: string;
+  prerelease: boolean;
 }
 
 export interface DataDirInfo {

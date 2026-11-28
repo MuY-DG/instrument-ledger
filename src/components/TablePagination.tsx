@@ -3,6 +3,7 @@ import { motion } from "motion/react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { PrecisionSelect, type SelectOption } from "@/components/ui/FormControls";
 import { SlidingNumber } from "@/components/ui/MotionPrimitives";
+import { useI18n } from "@/lib/i18n";
 import { SPRING_SNAPPY, TAP_SCALE_ICON } from "@/lib/motion";
 import { cn } from "@/lib/utils";
 
@@ -80,12 +81,26 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
   onPageChange,
   onPageSizeChange,
 }) => {
+  const { t, isEn } = useI18n();
   const isShowAll = pageSize === "all";
   const isFiltered =
     typeof categoryTotal === "number" && categoryTotal !== totalItems;
   const pageTokens = useMemo(
     () => (isShowAll ? [] : buildPageTokens(currentPage, totalPages)),
     [isShowAll, currentPage, totalPages]
+  );
+  const pageSizeOptions = useMemo<ReadonlyArray<SelectOption<PageSizeOption>>>(
+    () =>
+      isEn
+        ? [
+            { value: 30, label: "30 / page" },
+            { value: 50, label: "50 / page" },
+            { value: 100, label: "100 / page" },
+            { value: 200, label: "200 / page" },
+            { value: "all", label: "All" },
+          ]
+        : PAGE_SIZE_OPTIONS,
+    [isEn]
   );
 
   return (
@@ -95,11 +110,14 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
         className="h-7 px-2.5 rounded-lg bg-zinc-200/55 dark:bg-white/[0.05] border border-zinc-200/75 dark:border-white/[0.07] inline-flex items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400 select-none"
         title={
           isFiltered
-            ? `当前筛选共 ${totalItems} 条，本分类总计 ${categoryTotal} 条`
-            : `共 ${totalItems} 条设备记录`
+            ? t(
+                `当前筛选共 ${totalItems} 条，本分类总计 ${categoryTotal} 条`,
+                `Showing ${totalItems} of ${categoryTotal} items`
+              )
+            : t(`共 ${totalItems} 条设备记录`, `${totalItems} total items`)
         }
       >
-        <span>共</span>
+        {!isEn && <span>共</span>}
         <SlidingNumber
           value={totalItems}
           className="font-mono font-semibold text-zinc-800 dark:text-zinc-100"
@@ -109,20 +127,20 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
             / {categoryTotal}
           </span>
         )}
-        <span>条</span>
+        <span>{t("条", "items")}</span>
       </div>
 
       {totalItems > 0 && !isShowAll && totalPages > 1 && (
         <nav
-          aria-label="台账分页导航"
+          aria-label={t("台账分页导航", "Pagination")}
           className="inline-flex items-center gap-0.5"
         >
           <button
             type="button"
             disabled={currentPage <= 1}
             onClick={() => onPageChange(Math.max(1, currentPage - 1))}
-            aria-label="上一页"
-            title="上一页"
+            aria-label={t("上一页", "Previous page")}
+            title={t("上一页", "Previous page")}
             className="btn-tactile h-7 w-7 rounded-lg inline-flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-200/70 dark:hover:bg-white/[0.08] disabled:opacity-35 disabled:pointer-events-none transition-colors"
           >
             <ChevronLeft className="h-3.5 w-3.5" />
@@ -171,8 +189,8 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
             type="button"
             disabled={currentPage >= totalPages}
             onClick={() => onPageChange(Math.min(totalPages, currentPage + 1))}
-            aria-label="下一页"
-            title="下一页"
+            aria-label={t("下一页", "Next page")}
+            title={t("下一页", "Next page")}
             className="btn-tactile h-7 w-7 rounded-lg inline-flex items-center justify-center text-zinc-500 dark:text-zinc-400 hover:text-zinc-950 dark:hover:text-white hover:bg-zinc-200/70 dark:hover:bg-white/[0.08] disabled:opacity-35 disabled:pointer-events-none transition-colors"
           >
             <ChevronRight className="h-3.5 w-3.5" />
@@ -183,7 +201,7 @@ export const TablePagination: React.FC<TablePaginationProps> = ({
       {totalItems > 0 && (
         <PrecisionSelect<PageSizeOption>
           value={pageSize}
-          options={PAGE_SIZE_OPTIONS}
+          options={pageSizeOptions}
           onChange={onPageSizeChange}
           size="xs"
           align="right"

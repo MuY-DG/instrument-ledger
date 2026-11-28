@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { motion } from "motion/react";
 import {
@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 import { InfoTip } from "@/components/InfoTip";
 import { SPRING_SNAPPY, TAP_SCALE } from "@/lib/motion";
 import { ModalShell } from "@/components/ui/MotionPrimitives";
@@ -27,6 +28,8 @@ import {
 interface ImportModalProps {
   openModal: boolean;
   existingCount: number;
+  initialDropPath?: string | null;
+  initialDropFile?: File | null;
   onClose: () => void;
   onImported: () => void;
   onNotify: (msg: string, type?: "success" | "error") => void;
@@ -35,6 +38,8 @@ interface ImportModalProps {
 export const ImportModal: React.FC<ImportModalProps> = ({
   openModal,
   existingCount,
+  initialDropPath = null,
+  initialDropFile = null,
   onClose,
   onImported,
   onNotify,
@@ -45,6 +50,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
   const [parsing, setParsing] = useState(false);
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
+  const handledDropKeyRef = useRef<string | null>(null);
   const {
     status: importStatus,
     setStatus: setImportStatus,
@@ -56,6 +62,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     setFileName("");
     setParsed(null);
     setError("");
+    handledDropKeyRef.current = null;
     resetImportStatus();
     onClose();
   };
@@ -94,6 +101,32 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
   };
 
+  // Auto-parse file dropped directly onto the Ledger canvas
+  useEffect(() => {
+    if (!openModal) {
+      handledDropKeyRef.current = null;
+      return;
+    }
+    setReplaceExisting(existingCount === 0);
+    if (initialDropPath) {
+      const key = `path:${initialDropPath}`;
+      if (handledDropKeyRef.current === key) return;
+      handledDropKeyRef.current = key;
+      void parseExcelFromPath(initialDropPath);
+    } else if (initialDropFile) {
+      const key = `file:${initialDropFile.name}:${initialDropFile.size}:${initialDropFile.lastModified}`;
+      if (handledDropKeyRef.current === key) return;
+      handledDropKeyRef.current = key;
+      initialDropFile
+        .arrayBuffer()
+        .then((buf) => parseExcelBuffer(buf, initialDropFile.name))
+        .catch((err) => {
+          setError(`读取文件失败：${String(err)}`);
+        });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openModal, initialDropPath, initialDropFile, existingCount]);
+
   const handleSelectExcel = async () => {
     setError("");
     const picked = await open({
@@ -129,6 +162,7 @@ export const ImportModal: React.FC<ImportModalProps> = ({
     }
   };
 
+  const { t } = useI18n();
   return (
     <ModalShell
       open={openModal}
@@ -140,9 +174,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
               <div className="flex items-center gap-2">
                 <FileSpreadsheet className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
                 <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                  导入 Excel
+                  {t("导入 Excel", "Import Excel")}
                 </h2>
-                <InfoTip content="兼容标准 JSSK-MPR-170 双工作表及常见表格，自动识别「量具」与「检具」并还原编号与免校状态。" />
+                <InfoTip
+                  content={t(
+                    "兼容标准双工作表及常见表格，自动识别「量具」与「检具」并还原编号与免校状态。",
+                    "Supports standard dual-sheet templates and regular Excel tables, detecting Gauges & Fixtures automatically."
+                  )}
+                />
               </div>
               <button
                 type="button"
@@ -159,15 +198,18 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                 iconKind="excel"
                 acceptedExtensions={["xlsx"]}
                 loading={parsing}
-                loadingLabel="正在解析 Excel 台账..."
+                loadingLabel={t("正在解析 Excel 台账...", "Parsing Excel workbook...")}
                 selectedFileName={fileName}
                 selectedMeta={
                   parsed
-                    ? `已识别 ${parsed.rows.length} 条记录（量具 ${parsed.gaugeCount} · 检具 ${parsed.fixtureCount}）`
+                    ? t(
+                        `已识别 ${parsed.rows.length} 条记录（量具 ${parsed.gaugeCount} · 检具 ${parsed.fixtureCount}）`,
+                        `Parsed ${parsed.rows.length} rows (${parsed.gaugeCount} gauges · ${parsed.fixtureCount} fixtures)`
+                      )
                     : undefined
                 }
-                idleTitle="拖入或点击选择 .xlsx 台账文件"
-                idleSubtitle="支持 JSSK-MPR-170 双工作表与常规 Excel 表格"
+                idleTitle={t("拖入或点击选择 .xlsx 台账文件", "Drop or click to choose a .xlsx file")}
+                idleSubtitle={t("支持标准双工作表与常规 Excel 表格", "Supports standard dual-sheet and regular Excel files")}
                 onPickClick={handleSelectExcel}
                 onDropPaths={(paths) => {
                   if (paths[0]) void parseExcelFromPath(paths[0]);
@@ -271,9 +313,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                         onChange={() => setReplaceExisting(false)}
                       />
                       <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                        追加导入
+                        {t("追加导入", "Append Rows")}
                       </span>
-                      <InfoTip content="保留现有记录及已上传的照片和报告，追加新条目。" />
+                      <InfoTip
+                        content={t(
+                          "保留现有记录及已上传的照片和报告，追加新条目。",
+                          "Keep existing records, photos, and reports and append imported rows."
+                        )}
+                      />
                     </label>
 
                     <label
@@ -289,9 +336,14 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                         onChange={() => setReplaceExisting(true)}
                       />
                       <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-100">
-                        覆盖替换
+                        {t("覆盖替换", "Replace All")}
                       </span>
-                      <InfoTip content="清空现有台账及关联附件后，完整导入当前 Excel 数据。" />
+                      <InfoTip
+                        content={t(
+                          "清空现有台账及关联附件后，完整导入当前 Excel 数据。",
+                          "Clear all existing records and attachments, then import this workbook."
+                        )}
+                      />
                     </label>
                   </div>
                 </div>
@@ -301,7 +353,10 @@ export const ImportModal: React.FC<ImportModalProps> = ({
             <div className="shrink-0 px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.02] flex items-center justify-between gap-2.5">
               <span className="text-[11px] text-rose-600 dark:text-rose-400 font-medium">
                 {parsed && replaceExisting && existingCount > 0
-                  ? `将清空现有 ${existingCount} 条记录，长按右侧按钮确认覆盖`
+                  ? t(
+                      `将清空现有 ${existingCount} 条记录，长按右侧按钮确认覆盖`,
+                      `Will clear ${existingCount} existing records. Hold to confirm replace.`
+                    )
                   : ""}
               </span>
               <div className="flex items-center gap-2.5 shrink-0">
@@ -312,16 +367,19 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   onClick={resetAndClose}
                   className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] hover:bg-zinc-50 dark:hover:bg-white/[0.07] shadow-tactile text-xs font-medium text-zinc-700 dark:text-zinc-200 transition-colors"
                 >
-                  取消
+                  {t("取消", "Cancel")}
                 </motion.button>
                 {parsed && replaceExisting && existingCount > 0 ? (
                   <HoldConfirmButton
                     disabled={importing}
                     loading={importing}
-                    loadingLabel="覆盖导入中..."
-                    idleLabel={`按住覆盖导入 (${parsed.rows.length})`}
-                    holdingLabel="继续按住确认覆盖..."
-                    completedLabel="开始覆盖"
+                    loadingLabel={t("覆盖导入中...", "Replacing...")}
+                    idleLabel={t(
+                      `按住覆盖导入 (${parsed.rows.length})`,
+                      `Hold to Replace (${parsed.rows.length})`
+                    )}
+                    holdingLabel={t("继续按住确认覆盖...", "Keep holding...")}
+                    completedLabel={t("开始覆盖", "Replacing")}
                     icon={<Upload className="h-3.5 w-3.5" />}
                     onConfirm={() => {
                       void handleConfirmImport();
@@ -332,9 +390,13 @@ export const ImportModal: React.FC<ImportModalProps> = ({
                   <ActionStatusButton
                     status={importStatus}
                     disabled={!parsed || importing}
-                    idleLabel={parsed ? `导入 (${parsed.rows.length})` : "导入"}
-                    loadingLabel="导入中..."
-                    successLabel="已导入"
+                    idleLabel={
+                      parsed
+                        ? t(`导入 (${parsed.rows.length})`, `Import (${parsed.rows.length})`)
+                        : t("导入", "Import")
+                    }
+                    loadingLabel={t("导入中...", "Importing...")}
+                    successLabel={t("已导入", "Imported")}
                     idleIcon={<Upload className="h-3.5 w-3.5" />}
                     onClick={handleConfirmImport}
                   />
