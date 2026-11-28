@@ -89,6 +89,29 @@ pub fn init_db(db_path: &Path) -> Result<Connection, String> {
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS workbench_pdf_drafts (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            source_rel_path TEXT NOT NULL,
+            byte_length INTEGER NOT NULL DEFAULT 0,
+            page_count INTEGER NOT NULL DEFAULT 0,
+            marker_count INTEGER NOT NULL DEFAULT 0,
+            markers_json TEXT NOT NULL DEFAULT '[]',
+            view_json TEXT NOT NULL DEFAULT '',
+            next_number INTEGER NOT NULL DEFAULT 1,
+            compatibility INTEGER NOT NULL DEFAULT 0,
+            revision INTEGER NOT NULL DEFAULT 1,
+            updated_at INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_wb_pdf_drafts_updated
+            ON workbench_pdf_drafts(updated_at DESC, id DESC);
+
+        CREATE TABLE IF NOT EXISTS workbench_pdf_state (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
         ",
     )
     .map_err(|e| format!("初始化数据表失败: {}", e))?;
@@ -290,6 +313,8 @@ fn seed_default_settings(conn: &Connection) -> Result<(), String> {
         ("company_logo_path", ""),
         ("admin_title", DEFAULT_ADMIN_TITLE),
         ("admin_avatar_path", ""),
+        ("workbench_cache_limit_mb", "1024"),
+        ("backup_include_workbench", "0"),
     ];
 
     for (key, value) in defaults {
@@ -453,6 +478,11 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
             }
         },
         company_logo_path: get_or("company_logo_path", ""),
+        workbench_cache_limit_mb: get_or("workbench_cache_limit_mb", "1024")
+            .parse::<i64>()
+            .unwrap_or(1024)
+            .clamp(128, 10240),
+        backup_include_workbench: get_or("backup_include_workbench", "0") == "1",
     })
 }
 

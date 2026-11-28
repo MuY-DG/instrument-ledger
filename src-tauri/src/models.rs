@@ -156,6 +156,8 @@ pub struct AppSettings {
     pub github_repo: String,
     pub update_proxy_url: String,
     pub company_logo_path: String,
+    pub workbench_cache_limit_mb: i64,
+    pub backup_include_workbench: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -181,6 +183,8 @@ pub struct SettingsUpdateInput {
     pub weekly_notice: Option<String>,
     pub github_repo: Option<String>,
     pub update_proxy_url: Option<String>,
+    pub workbench_cache_limit_mb: Option<i64>,
+    pub backup_include_workbench: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -261,6 +265,9 @@ pub struct DataDirInfo {
     pub data_dir: String,
     pub db_size_bytes: u64,
     pub attachments_size_bytes: u64,
+    pub workbench_cache_bytes: u64,
+    pub workbench_draft_count: usize,
+    pub workbench_cache_limit_mb: i64,
     pub instrument_count: usize,
     pub report_count: usize,
     pub app_version: String,

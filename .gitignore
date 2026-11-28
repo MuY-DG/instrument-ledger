@@ -5,6 +5,7 @@ node_modules/
 # Build outputs
 dist/
 dist-ssr/
+public/pdfjs/
 src-tauri/target/
 src-tauri/gen/
 

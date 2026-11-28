@@ -147,6 +147,8 @@ export interface AppSettings {
   githubRepo: string;
   updateProxyUrl: string;
   companyLogoPath: string;
+  workbenchCacheLimitMb: number;
+  backupIncludeWorkbench: boolean;
 }
 
 export interface SettingsUpdateInput {
@@ -170,6 +172,8 @@ export interface SettingsUpdateInput {
   weeklyNotice?: string;
   githubRepo?: string;
   updateProxyUrl?: string;
+  workbenchCacheLimitMb?: number;
+  backupIncludeWorkbench?: boolean;
 }
 
 export interface AuthStatus {
@@ -233,7 +237,25 @@ export interface DataDirInfo {
   dataDir: string;
   dbSizeBytes: number;
   attachmentsSizeBytes: number;
+  workbenchCacheBytes: number;
+  workbenchDraftCount: number;
+  workbenchCacheLimitMb: number;
   instrumentCount: number;
   reportCount: number;
   appVersion: string;
+}
+
+export interface WorkbenchCacheStats {
+  totalBytes: number;
+  draftCount: number;
+  limitBytes: number;
+  limitMb: number;
+}
+
+export interface WorkbenchCachePruneResult {
+  evictedCount: number;
+  freedBytes: number;
+  totalBytes: number;
+  draftCount: number;
+  limitBytes: number;
 }

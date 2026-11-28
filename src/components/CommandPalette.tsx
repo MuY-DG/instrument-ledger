@@ -9,6 +9,7 @@ import {
   FileSpreadsheet,
   Gauge,
   Layers,
+  LayoutGrid,
   Lock,
   LogIn,
   LogOut,
@@ -27,6 +28,7 @@ import {
 import { getInstrumentStatus } from "@/lib/status";
 import type { ThemePreference } from "@/lib/themeTransition";
 import { getMaxWarningDays, sortThresholdsDesc } from "@/lib/thresholdColors";
+import { WORKBENCH_TOOLS } from "@/workbench/registry";
 import type {
   CategoryTab,
   ExpiryFilter,
@@ -57,6 +59,8 @@ interface CommandPaletteProps {
   ) => void;
   onSelectThemePreference: (pref: ThemePreference) => void;
   onLoginOrLogout: () => void;
+  onOpenWorkbenchHub: () => void;
+  onLaunchWorkbenchTool: (toolId: string) => void;
 }
 
 export const CommandPalette: React.FC<CommandPaletteProps> = ({
@@ -79,6 +83,8 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
   onOpenSettings,
   onSelectThemePreference,
   onLoginOrLogout,
+  onOpenWorkbenchHub,
+  onLaunchWorkbenchTool,
 }) => {
   const descThresholds = sortThresholdsDesc(warningThresholds);
   const maxWarningDays = getMaxWarningDays(warningThresholds);
@@ -294,6 +300,41 @@ export const CommandPalette: React.FC<CommandPaletteProps> = ({
                       <span>{isAdmin ? "退出登录" : "管理员登录"}</span>
                     </span>
                   </Command.Item>
+                </Command.Group>
+
+                {/* QI/QC Workbench Tools */}
+                <Command.Group
+                  heading="QI / QC 质量工具台"
+                  className="[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-[10.5px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-zinc-400 [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wider"
+                >
+                  <Command.Item
+                    value="打开 QI QC 质量工具台 总览 workbench"
+                    onSelect={() => runAndClose(onOpenWorkbenchHub)}
+                    className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
+                  >
+                    <span className="flex items-center gap-2.5">
+                      <LayoutGrid className="h-3.5 w-3.5 text-indigo-500" />
+                      <span>打开 QI / QC 工具台总览</span>
+                    </span>
+                    <span className="text-[10px] text-zinc-400">工具服务</span>
+                  </Command.Item>
+                  {WORKBENCH_TOOLS.filter((t) => t.status === "ready").map((tool) => {
+                    const Icon = tool.icon;
+                    return (
+                      <Command.Item
+                        key={tool.id}
+                        value={`启动 ${tool.name} ${tool.shortName} ${tool.tags.join(" ")}`}
+                        onSelect={() => runAndClose(() => onLaunchWorkbenchTool(tool.id))}
+                        className="flex items-center justify-between px-2.5 py-2 rounded-lg text-xs text-zinc-700 dark:text-zinc-200 cursor-pointer aria-selected:bg-zinc-100 dark:aria-selected:bg-white/[0.07]"
+                      >
+                        <span className="flex items-center gap-2.5">
+                          <Icon className="h-3.5 w-3.5" style={{ color: tool.accent }} />
+                          <span>启动：{tool.name}</span>
+                        </span>
+                        <span className="text-[10px] text-zinc-400">工具</span>
+                      </Command.Item>
+                    );
+                  })}
                 </Command.Group>
 
                 {/* Views & Filters */}

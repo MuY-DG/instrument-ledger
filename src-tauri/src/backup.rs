@@ -12,11 +12,22 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter};
 use crate::db::{init_db, now_iso};
 use crate::models::{BackupManifest, BackupResult, RestoreResult};
 use crate::storage::ensure_storage_dirs;
+use crate::workbench_store::get_backup_include_workbench;
 
+#[cfg(test)]
 pub fn create_backup(
     conn: &Connection,
     data_dir: &Path,
     dest_zip_path: &Path,
+) -> Result<BackupResult, String> {
+    create_backup_with_options(conn, data_dir, dest_zip_path, false)
+}
+
+pub fn create_backup_with_options(
+    conn: &Connection,
+    data_dir: &Path,
+    dest_zip_path: &Path,
+    include_workbench: bool,
 ) -> Result<BackupResult, String> {
     ensure_storage_dirs(data_dir)?;
 
@@ -26,9 +37,15 @@ pub fn create_backup(
     let report_count: usize = conn
         .query_row("SELECT COUNT(*) FROM calibration_reports", [], |r| r.get(0))
         .unwrap_or(0);
+    let wb_draft_count: usize = if include_workbench {
+        conn.query_row("SELECT COUNT(*) FROM workbench_pdf_drafts", [], |r| r.get(0))
+            .unwrap_or(0)
+    } else {
+        0
+    };
 
-    if instrument_count == 0 && report_count == 0 {
-        return Err("当前暂无台账数据，无需导出备份".to_string());
+    if instrument_count == 0 && report_count == 0 && wb_draft_count == 0 {
+        return Err("当前暂无可备份的数据，无需导出备份".to_string());
     }
 
     let temp_snap = std::env::temp_dir().join(format!("ledger_backup_{}.db", Uuid::new_v4()));
@@ -41,6 +58,16 @@ pub fn create_backup(
         .ok_or_else(|| "临时备份路径无效".to_string())?;
     conn.execute("VACUUM INTO ?1", params![snap_str])
         .map_err(|e| format!("生成数据库快照失败: {}", e))?;
+
+    // When excluding workbench cache files, strip workbench draft rows from the snapshot DB
+    // so restoring the backup never produces dangling PDF file references.
+    if !include_workbench {
+        if let Ok(snap_conn) = Connection::open(&temp_snap) {
+            let _ = snap_conn.execute_batch(
+                "DELETE FROM workbench_pdf_drafts; DELETE FROM workbench_pdf_state;",
+            );
+        }
+    }
 
     if let Some(parent) = dest_zip_path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {}", e))?;
@@ -81,8 +108,13 @@ pub fn create_backup(
     }
     let _ = fs::remove_file(&temp_snap);
 
-    // Write images/ and reports/
-    for folder in ["images", "reports"] {
+    // Write images/, reports/, and optionally workbench/
+    let folders: &[&str] = if include_workbench {
+        &["images", "reports", "workbench"]
+    } else {
+        &["images", "reports"]
+    };
+    for folder in folders {
         let root = data_dir.join(folder);
         if !root.exists() {
             continue;
@@ -201,8 +233,8 @@ pub fn restore_backup(
         return Err(format!("替换数据库文件失败: {}", e));
     }
 
-    // Replace images/ and reports/
-    for folder in ["images", "reports"] {
+    // Replace images/, reports/, and workbench/
+    for folder in ["images", "reports", "workbench"] {
         let target_dir = data_dir.join(folder);
         if target_dir.exists() {
             let _ = fs::remove_dir_all(&target_dir);
@@ -214,6 +246,7 @@ pub fn restore_backup(
             copy_dir_recursive(&src_dir, &target_dir)?;
         }
     }
+    ensure_storage_dirs(data_dir)?;
 
     let _ = fs::remove_dir_all(&staging);
 
@@ -265,13 +298,14 @@ pub fn reset_app_data_with_backup(
         .unwrap_or(0);
     let has_data = instrument_count > 0 || report_count > 0;
 
+    let include_workbench = get_backup_include_workbench(conn_guard);
     let backup_res = if has_data {
         let dir = backup_dir.ok_or_else(|| "未指定备份保存目录".to_string())?;
         fs::create_dir_all(dir)
             .map_err(|e| format!("无法访问或创建备份目录 ({}): {}", dir.display(), e))?;
 
         let dest_zip = build_unique_reset_backup_path(dir);
-        let res = create_backup(conn_guard, data_dir, &dest_zip)?;
+        let res = create_backup_with_options(conn_guard, data_dir, &dest_zip, include_workbench)?;
 
         if !dest_zip.exists() || res.size_bytes == 0 {
             return Err("强制备份校验失败（备份文件为空），已中止初始化操作".to_string());
@@ -304,14 +338,15 @@ pub fn reset_app_data_with_backup(
         })?;
     }
 
-    // Wipe and recreate attachment folders
-    for folder in ["images", "reports"] {
+    // Wipe and recreate attachment & workbench cache folders
+    for folder in ["images", "reports", "workbench"] {
         let dir = data_dir.join(folder);
         if dir.exists() {
             let _ = fs::remove_dir_all(&dir);
         }
         fs::create_dir_all(&dir).map_err(|e| format!("重建附件目录失败: {}", e))?;
     }
+    ensure_storage_dirs(data_dir)?;
 
     // Re-initialize brand new empty database (account_initialized unset)
     let fresh_conn = init_db(db_path)?;
@@ -471,6 +506,61 @@ mod tests {
         assert!(bak.is_none());
         assert!(!downloads_dir.exists());
         assert!(!is_account_initialized(&conn).unwrap());
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_backup_workbench_toggle_include_and_exclude() {
+        use crate::workbench_store::{
+            read_pdf_draft_meta, save_pdf_source, SavePdfSourceMeta,
+        };
+
+        let root = std::env::temp_dir().join(format!("inst_wb_bak_test_{}", Uuid::new_v4()));
+        let data_dir = root.join("data");
+        let db_path = data_dir.join("ledger.db");
+        let zip_excl = root.join("excl.zip");
+        let zip_incl = root.join("incl.zip");
+
+        ensure_storage_dirs(&data_dir).unwrap();
+        let mut conn = init_db(&db_path).unwrap();
+        conn.execute(
+            "INSERT INTO instruments (category, seq_no, department, name, serial_no, created_at, updated_at)
+             VALUES ('gauge', 1, '品质部', '卡尺', 'C-01', '2026-11-28', '2026-11-28')",
+            [],
+        )
+        .unwrap();
+
+        save_pdf_source(
+            &conn,
+            &data_dir,
+            &SavePdfSourceMeta {
+                id: "deadbeef01".to_string(),
+                name: "drawing-1".to_string(),
+                page_count: 1,
+                marker_count: 2,
+                markers_json: "[1,2]".to_string(),
+                view_json: None,
+                next_number: 3,
+                compatibility: false,
+                updated_at: 1000,
+            },
+            Some(b"%PDF-1.7-SAMPLE"),
+        )
+        .unwrap();
+
+        // 1. Exclude workbench -> backup restores cleanly with 0 workbench drafts and no dangling refs
+        create_backup_with_options(&conn, &data_dir, &zip_excl, false).unwrap();
+        // 2. Include workbench -> backup restores both ledger & workbench draft
+        create_backup_with_options(&conn, &data_dir, &zip_incl, true).unwrap();
+
+        restore_backup(&mut conn, &db_path, &data_dir, &zip_excl).unwrap();
+        assert!(read_pdf_draft_meta(&conn, &data_dir, "deadbeef01").unwrap().is_none());
+
+        restore_backup(&mut conn, &db_path, &data_dir, &zip_incl).unwrap();
+        let restored = read_pdf_draft_meta(&conn, &data_dir, "deadbeef01").unwrap();
+        assert!(restored.is_some());
+        assert_eq!(restored.unwrap().name, "drawing-1");
 
         let _ = fs::remove_dir_all(&root);
     }

@@ -110,6 +110,7 @@ interface SettingsModalProps {
   onOpenAppLockSetup?: (mode: "enable" | "change") => void;
   onLockNow?: () => void;
   onDisableAppLock?: () => Promise<void>;
+  onWorkbenchCacheCleared?: () => void;
 }
 
 const INPUT_CLS =
@@ -158,6 +159,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenAppLockSetup,
   onLockNow,
   onDisableAppLock,
+  onWorkbenchCacheCleared,
 }) => {
   const mac = isMacPlatform();
   const [tab, setTab] = useState<SettingsTab>(initialTab);
@@ -214,6 +216,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [dirInfo, setDirInfo] = useState<DataDirInfo | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
+  const [clearingWbCache, setClearingWbCache] = useState(false);
+  const [savingWbLimit, setSavingWbLimit] = useState(false);
   const [defaultDownloadsDir, setDefaultDownloadsDir] = useState("");
   const [resetBackupDir, setResetBackupDir] = useState("");
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -223,7 +227,9 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [resettingApp, setResettingApp] = useState(false);
   const resetPwdRef = useRef<HTMLInputElement | null>(null);
   const hasData = dirInfo
-    ? dirInfo.instrumentCount > 0 || dirInfo.reportCount > 0
+    ? dirInfo.instrumentCount > 0 ||
+      dirInfo.reportCount > 0 ||
+      (settings.backupIncludeWorkbench && dirInfo.workbenchDraftCount > 0)
     : instrumentCount > 0;
 
   // Updater state
@@ -486,10 +492,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     setBackingUp(true);
     setBackupStatus("loading");
     try {
-      const res = await api.createLocalBackup(dest);
+      const res = await api.createLocalBackup(dest, settings.backupIncludeWorkbench);
       setBackupSuccess();
       onNotify(
-        `备份成功！共打包 ${res.instrumentCount} 台设备、${res.reportCount} 份报告（${formatFileSize(res.sizeBytes)}）`,
+        `备份成功！共打包 ${res.instrumentCount} 台设备、${res.reportCount} 份报告${settings.backupIncludeWorkbench ? "及工具台草稿" : ""}（${formatFileSize(res.sizeBytes)}）`,
         "success"
       );
     } catch (err) {
@@ -497,6 +503,69 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
       onNotify(String(err), "error");
     } finally {
       setBackingUp(false);
+    }
+  };
+
+  const handleChangeWorkbenchCacheLimit = async (nextLimitMb: number) => {
+    if (savingWbLimit) return;
+    setSavingWbLimit(true);
+    try {
+      const updated = await api.updateSettings({ workbenchCacheLimitMb: nextLimitMb });
+      onSettingsChanged(updated);
+      const refreshed = await api.getDataDirInfo();
+      setDirInfo(refreshed);
+      const label =
+        nextLimitMb >= 1024 ? `${(nextLimitMb / 1024).toFixed(nextLimitMb % 1024 === 0 ? 0 : 1)} GB` : `${nextLimitMb} MB`;
+      onNotify(`工具台缓存上限已更新为 ${label}（超出部分已自动按 LRU 清理）`, "success");
+    } catch (err) {
+      onNotify(`更新缓存上限失败：${String(err)}`, "error");
+    } finally {
+      setSavingWbLimit(false);
+    }
+  };
+
+  const handleToggleBackupWorkbench = async (includeWorkbench: boolean) => {
+    try {
+      const updated = await api.updateSettings({ backupIncludeWorkbench: includeWorkbench });
+      onSettingsChanged(updated);
+      onNotify(
+        includeWorkbench
+          ? "导出备份时将一并打包工具台图纸草稿"
+          : "导出备份时仅打包仪器台账与附件（不含工具台缓存）",
+        "success"
+      );
+    } catch (err) {
+      onNotify(`更新备份选项失败：${String(err)}`, "error");
+    }
+  };
+
+  const handleClearWorkbenchCache = async () => {
+    if (clearingWbCache) return;
+    const ok = await confirmDialog({
+      title: "清空 QI / QC 工具台缓存",
+      description:
+        "确定清空本地保存的全部 PDF 图纸草稿与临时标注缓存？磁盘上的原始图纸不受影响，如需保留未导出的标注请先在工具台中保存 PDF。",
+      confirmText: "确认清空",
+      cancelText: "取消",
+      destructive: true,
+    });
+    if (!ok) return;
+    setClearingWbCache(true);
+    try {
+      const res = await api.workbenchPdfClearAll();
+      const refreshed = await api.getDataDirInfo();
+      setDirInfo(refreshed);
+      onWorkbenchCacheCleared?.();
+      onNotify(
+        res.evictedCount > 0
+          ? `已清空 ${res.evictedCount} 份图纸草稿，释放 ${formatFileSize(res.freedBytes)}`
+          : "工具台缓存已为空",
+        "success"
+      );
+    } catch (err) {
+      onNotify(`清空工具台缓存失败：${String(err)}`, "error");
+    } finally {
+      setClearingWbCache(false);
     }
   };
 
@@ -1697,7 +1766,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                             </span>
                             {dirInfo && (
                               <InfoTip
-                                content={`数据库 ${formatFileSize(dirInfo.dbSizeBytes)} · 附件 ${formatFileSize(dirInfo.attachmentsSizeBytes)}`}
+                                content={`数据库 ${formatFileSize(dirInfo.dbSizeBytes)} · 台账附件 ${formatFileSize(dirInfo.attachmentsSizeBytes)} · 工具台缓存 ${formatFileSize(dirInfo.workbenchCacheBytes)}`}
                               />
                             )}
                           </div>
@@ -1712,6 +1781,100 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                           <FolderOpen className="h-3.5 w-3.5" />
                           <span>打开目录</span>
                         </button>
+                      </div>
+                    </div>
+
+                    {/* QI/QC Workbench Native Cache Governance Card */}
+                    <div className="rounded-xl border border-zinc-200/85 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] divide-y divide-zinc-200/75 dark:divide-white/[0.07]">
+                      <div className="px-4 py-3.5 space-y-2.5">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="h-8 w-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                              <HardDrive className="h-4 w-4" />
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5">
+                                <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                                  QI / QC 工具台缓存
+                                </span>
+                                <InfoTip content="PDF 图纸按 SHA-256 内容去重落盘保存于数据目录；超过上限自动按 LRU 淘汰最久未用草稿，永不淘汰当前打开的文档。" />
+                              </div>
+                              <div className="text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                {dirInfo
+                                  ? `已用 ${formatFileSize(dirInfo.workbenchCacheBytes)} / ${formatFileSize((settings.workbenchCacheLimitMb || 1024) * 1024 * 1024)} · ${dirInfo.workbenchDraftCount} 份图纸草稿`
+                                  : "读取中..."}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            disabled={clearingWbCache || (dirInfo ? dirInfo.workbenchDraftCount === 0 && dirInfo.workbenchCacheBytes === 0 : false)}
+                            onClick={handleClearWorkbenchCache}
+                            className="btn-tactile inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-200 dark:hover:border-rose-500/30 disabled:opacity-45 shadow-tactile text-zinc-700 dark:text-zinc-200 text-xs font-medium shrink-0 transition-colors"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            <span>{clearingWbCache ? "清空中..." : "清空缓存"}</span>
+                          </button>
+                        </div>
+
+                        {dirInfo && (
+                          <div className="h-1.5 w-full rounded-full bg-zinc-200/80 dark:bg-white/[0.07] overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                              style={{
+                                width: `${Math.min(
+                                  100,
+                                  Math.round(
+                                    (dirInfo.workbenchCacheBytes /
+                                      Math.max(1, (settings.workbenchCacheLimitMb || 1024) * 1024 * 1024)) *
+                                      100
+                                  )
+                                )}%`,
+                              }}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="px-4 py-3 flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                            缓存容量上限
+                          </div>
+                          <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                            默认 1 GB，调低后立即按 LRU 清理超出部分
+                          </div>
+                        </div>
+                        <PrecisionSelect
+                          value={String(settings.workbenchCacheLimitMb || 1024)}
+                          disabled={savingWbLimit}
+                          onChange={(val) => handleChangeWorkbenchCacheLimit(Number(val))}
+                          options={[
+                            { value: "256", label: "256 MB" },
+                            { value: "512", label: "512 MB" },
+                            { value: "1024", label: "1 GB（默认）" },
+                            { value: "2048", label: "2 GB" },
+                            { value: "4096", label: "4 GB" },
+                          ]}
+                          className="min-w-[130px]"
+                        />
+                      </div>
+
+                      <div className="px-4 py-3 flex items-center justify-between gap-4">
+                        <div className="min-w-0">
+                          <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                            导出备份时包含工具台草稿
+                          </div>
+                          <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                            默认关闭以保持台账备份轻量；开启后将打包全部 PDF 图纸草稿
+                          </div>
+                        </div>
+                        <PrecisionSwitch
+                          checked={Boolean(settings.backupIncludeWorkbench)}
+                          size="sm"
+                          ariaLabel="导出备份时包含工具台草稿"
+                          onChange={handleToggleBackupWorkbench}
+                        />
                       </div>
                     </div>
 

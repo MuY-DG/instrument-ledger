@@ -1,13 +1,13 @@
 import React, { useEffect, useRef, useState } from "react";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { motion } from "motion/react";
-import * as pdfjsLib from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import {
   Building2,
   Calendar,
   ChevronLeft,
   ChevronRight,
+  Crosshair,
   Download,
   ExternalLink,
   FileSpreadsheet,
@@ -35,14 +35,13 @@ import {
 } from "@/components/ui/InteractiveControls";
 import type { CalibrationReport, Instrument } from "@/types";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
-
 interface ReportModalProps {
   instrument: Instrument | null;
   isAdmin: boolean;
   onClose: () => void;
   onChanged: () => void;
   onNotify: (msg: string, type?: "success" | "error") => void;
+  onOpenInPdfWorkbench?: (file: File) => void;
 }
 
 const IMAGE_EXTS = new Set(["png", "jpg", "jpeg", "webp", "gif", "bmp"]);
@@ -53,6 +52,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   onClose,
   onChanged,
   onNotify,
+  onOpenInPdfWorkbench,
 }) => {
   const [reports, setReports] = useState<CalibrationReport[]>([]);
   const [loadingList, setLoadingList] = useState(false);
@@ -78,12 +78,13 @@ export const ReportModal: React.FC<ReportModalProps> = ({
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState("");
   const [imageDataUrl, setImageDataUrl] = useState("");
-  const [pdfDoc, setPdfDoc] = useState<pdfjsLib.PDFDocumentProxy | null>(null);
+  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
+  const [pdfRawBytes, setPdfRawBytes] = useState<Uint8Array | null>(null);
   const [pdfPage, setPdfPage] = useState(1);
   const [pdfTotalPages, setPdfTotalPages] = useState(0);
   const [zoom, setZoom] = useState(1.15);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const renderTaskRef = useRef<pdfjsLib.RenderTask | null>(null);
+  const renderTaskRef = useRef<RenderTask | null>(null);
 
   const selectedReport = reports.find((r) => r.id === selectedId) || null;
 
@@ -123,8 +124,9 @@ export const ReportModal: React.FC<ReportModalProps> = ({
     setImageDataUrl("");
     setPdfTotalPages(0);
     setPdfPage(1);
+    setPdfRawBytes(null);
     setPdfDoc((prev) => {
-      prev?.destroy();
+      void prev?.loadingTask.destroy().catch(() => {});
       return null;
     });
 
@@ -141,15 +143,30 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         if (IMAGE_EXTS.has(ext)) {
           setImageDataUrl(`data:${payload.mime};base64,${payload.base64}`);
         } else if (ext === "pdf") {
+          const [pdfjsLib, pdfCore] = await Promise.all([
+            import("pdfjs-dist/legacy/build/pdf.mjs"),
+            import("@/workbench/tools/pdf-balloon/core/pdf"),
+          ]);
+          pdfCore.configurePdfJsWorkers();
           const bin = atob(payload.base64);
           const bytes = new Uint8Array(bin.length);
           for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-          const loadingTask = pdfjsLib.getDocument({ data: bytes });
+          const assetBase = pdfCore.getPdfAssetBase();
+          const loadingTask = pdfjsLib.getDocument({
+            data: bytes.slice(),
+            cMapUrl: `${assetBase}cmaps/`,
+            cMapPacked: true,
+            standardFontDataUrl: `${assetBase}standard_fonts/`,
+            wasmUrl: `${assetBase}wasm/`,
+            iccUrl: `${assetBase}iccs/`,
+            useSystemFonts: true,
+          });
           const doc = await loadingTask.promise;
           if (cancelled) {
-            doc.destroy();
+            void doc.loadingTask.destroy().catch(() => {});
             return;
           }
+          setPdfRawBytes(bytes);
           setPdfDoc(doc);
           setPdfTotalPages(doc.numPages);
           setPdfPage(1);
@@ -182,15 +199,13 @@ export const ReportModal: React.FC<ReportModalProps> = ({
         const viewport = page.getViewport({ scale: zoom * window.devicePixelRatio });
         const cssViewport = page.getViewport({ scale: zoom });
         const canvas = canvasRef.current;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) return;
 
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         canvas.style.width = `${cssViewport.width}px`;
         canvas.style.height = `${cssViewport.height}px`;
 
-        const task = page.render({ canvasContext: ctx, viewport });
+        const task = page.render({ canvas, viewport, background: "#ffffff" });
         renderTaskRef.current = task;
         await task.promise;
       } catch (err: unknown) {
@@ -647,6 +662,28 @@ export const ReportModal: React.FC<ReportModalProps> = ({
                               <ZoomIn className="h-3.5 w-3.5" />
                             </button>
                           </div>
+                        )}
+
+                        {pdfDoc && pdfRawBytes && onOpenInPdfWorkbench && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const file = new File(
+                                [pdfRawBytes.slice()],
+                                selectedReport.fileName.toLowerCase().endsWith(".pdf")
+                                  ? selectedReport.fileName
+                                  : `${selectedReport.fileName}.pdf`,
+                                { type: "application/pdf" }
+                              );
+                              onClose();
+                              onOpenInPdfWorkbench(file);
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-indigo-200/90 dark:border-indigo-400/30 bg-indigo-50/70 dark:bg-indigo-500/10 hover:bg-indigo-100/80 dark:hover:bg-indigo-500/20 text-xs font-medium text-indigo-700 dark:text-indigo-300 transition"
+                            title="在 QI/QC 工具台 PDF 气泡标注中打开此文档"
+                          >
+                            <Crosshair className="h-3.5 w-3.5" />
+                            <span>气泡标注</span>
+                          </button>
                         )}
 
                         <button

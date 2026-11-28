@@ -5,6 +5,7 @@ mod db;
 mod models;
 mod storage;
 mod updater;
+mod workbench_store;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -200,6 +201,19 @@ pub fn run() {
             commands::read_stored_file_base64,
             commands::read_external_file_base64,
             commands::write_external_file_base64,
+            commands::read_workbench_file_raw,
+            commands::write_workbench_file_raw,
+            commands::workbench_pdf_read_workspace,
+            commands::workbench_pdf_write_workspace,
+            commands::workbench_pdf_read_draft_meta,
+            commands::workbench_pdf_read_source_raw,
+            commands::workbench_pdf_list_drafts,
+            commands::workbench_pdf_save_source_raw,
+            commands::workbench_pdf_save_markers,
+            commands::workbench_pdf_delete_draft,
+            commands::workbench_pdf_clear_all,
+            commands::workbench_pdf_cache_stats,
+            commands::workbench_pdf_prune_cache,
             commands::get_settings,
             commands::update_settings,
             commands::upload_company_logo,

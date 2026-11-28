@@ -17,7 +17,59 @@ import type {
   RestoreResult,
   SettingsUpdateInput,
   UpdateCheckResult,
+  WorkbenchCachePruneResult,
+  WorkbenchCacheStats,
 } from "@/types";
+
+function encodeUtf8HeaderBase64(text: string): string {
+  const utf8 = new TextEncoder().encode(text);
+  let bin = "";
+  for (let i = 0; i < utf8.length; i++) {
+    bin += String.fromCharCode(utf8[i]);
+  }
+  return btoa(bin);
+}
+
+export interface NativePdfWorkspaceState {
+  activeId: string | null;
+  screen: "home" | "document";
+}
+
+export interface NativePdfDraftMeta {
+  id: string;
+  name: string;
+  byteLength: number;
+  pageCount: number;
+  markerCount: number;
+  markersJson: string;
+  viewJson: string | null;
+  nextNumber: number;
+  compatibility: boolean;
+  revision: number;
+  updatedAt: number;
+}
+
+export interface NativePdfSummary {
+  id: string;
+  name: string;
+  updatedAt: number;
+  markerCount: number;
+  pageCount: number;
+  byteLength: number;
+}
+
+export interface NativePdfPage {
+  items: NativePdfSummary[];
+  cursorUpdatedAt: number | null;
+  cursorId: string | null;
+  total: number;
+}
+
+export interface NativePdfSaveResult {
+  revision: number;
+  evictedCount: number;
+  freedBytes: number;
+}
 
 const MAX_MEDIA_CACHE_ENTRIES = 120;
 const mediaDataUrlCache = new Map<string, string>();
@@ -157,6 +209,77 @@ export const api = {
     invoke<Base64FilePayload>("read_external_file_base64", { path }),
   writeExternalFileBase64: (path: string, base64Data: string) =>
     invoke<void>("write_external_file_base64", { path, base64Data }),
+  readWorkbenchFileRaw: async (path: string): Promise<Uint8Array> => {
+    const buffer = await invoke<ArrayBuffer>("read_workbench_file_raw", { path });
+    return new Uint8Array(buffer);
+  },
+  writeWorkbenchFileRaw: async (path: string, bytes: Uint8Array): Promise<void> => {
+    await invoke<void>("write_workbench_file_raw", bytes, {
+      headers: { "x-dest-path-b64": encodeUtf8HeaderBase64(path) },
+    });
+  },
+
+  // QI/QC Workbench Native Disk Draft Store (SQLite metadata + content-addressed files + LRU cap)
+  workbenchPdfReadWorkspace: () =>
+    invoke<NativePdfWorkspaceState>("workbench_pdf_read_workspace"),
+  workbenchPdfWriteWorkspace: (activeId: string | null, screen: "home" | "document") =>
+    invoke<void>("workbench_pdf_write_workspace", { activeId, screen }),
+  workbenchPdfReadDraftMeta: (id: string) =>
+    invoke<NativePdfDraftMeta | null>("workbench_pdf_read_draft_meta", { id }),
+  workbenchPdfReadSourceRaw: async (id: string): Promise<Uint8Array> => {
+    const buffer = await invoke<ArrayBuffer>("workbench_pdf_read_source_raw", { id });
+    return new Uint8Array(buffer);
+  },
+  workbenchPdfListDrafts: (params: {
+    cursorUpdatedAt?: number | null;
+    cursorId?: string | null;
+    limit?: number;
+    query?: string;
+  }) =>
+    invoke<NativePdfPage>("workbench_pdf_list_drafts", {
+      cursorUpdatedAt: params.cursorUpdatedAt ?? null,
+      cursorId: params.cursorId ?? null,
+      limit: params.limit ?? 12,
+      query: params.query ?? "",
+    }),
+  workbenchPdfSaveSourceRaw: (
+    meta: {
+      id: string;
+      name: string;
+      pageCount: number;
+      markerCount: number;
+      markersJson: string;
+      viewJson: string | null;
+      nextNumber: number;
+      compatibility: boolean;
+      updatedAt: number;
+    },
+    bytes: Uint8Array | null
+  ) =>
+    invoke<NativePdfSaveResult>("workbench_pdf_save_source_raw", bytes ?? new Uint8Array(0), {
+      headers: { "x-draft-meta-b64": encodeUtf8HeaderBase64(JSON.stringify(meta)) },
+    }),
+  workbenchPdfSaveMarkers: (input: {
+    id: string;
+    markerCount: number;
+    markersJson: string;
+    viewJson: string | null;
+    nextNumber: number;
+    compatibility: boolean;
+    updatedAt: number;
+    screen?: "home" | "document" | null;
+  }) => invoke<number>("workbench_pdf_save_markers", { input }),
+  workbenchPdfDeleteDraft: (id: string) =>
+    invoke<void>("workbench_pdf_delete_draft", { id }),
+  workbenchPdfClearAll: () =>
+    invoke<WorkbenchCachePruneResult>("workbench_pdf_clear_all"),
+  workbenchPdfCacheStats: () =>
+    invoke<WorkbenchCacheStats>("workbench_pdf_cache_stats"),
+  workbenchPdfPruneCache: (limitMb?: number | null, protectedId?: string | null) =>
+    invoke<WorkbenchCachePruneResult>("workbench_pdf_prune_cache", {
+      limitMb: limitMb ?? null,
+      protectedId: protectedId ?? null,
+    }),
 
   async getStoredImageDataUrl(relPath: string): Promise<string> {
     if (!relPath) return "";
@@ -194,8 +317,11 @@ export const api = {
   removeAdminAvatar: () => invoke<void>("remove_admin_avatar"),
   getDataDirInfo: () => invoke<DataDirInfo>("get_data_dir_info"),
   openDataDir: () => invoke<void>("open_data_dir"),
-  createLocalBackup: (destZipPath: string) =>
-    invoke<BackupResult>("create_local_backup", { destZipPath }),
+  createLocalBackup: (destZipPath: string, includeWorkbench?: boolean) =>
+    invoke<BackupResult>("create_local_backup", {
+      destZipPath,
+      includeWorkbench: includeWorkbench ?? null,
+    }),
   restoreLocalBackup: (srcZipPath: string) =>
     invoke<RestoreResult>("restore_local_backup", { srcZipPath }),
   getDefaultDownloadsDir: () => invoke<string>("get_default_downloads_dir"),

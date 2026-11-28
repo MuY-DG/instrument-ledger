@@ -24,6 +24,7 @@ import {
   FileSpreadsheet,
   Gauge,
   Layers,
+  LayoutGrid,
   Loader2,
   Lock,
   LogIn,
@@ -124,6 +125,10 @@ import {
   ThemeSwitcherButton,
 } from "@/components/ui/ThemeSwitcherButton";
 import { WindowTitleBar } from "@/components/ui/WindowTitleBar";
+import { WorkbenchShell } from "@/workbench/WorkbenchShell";
+import { WORKBENCH_TOOLS } from "@/workbench/registry";
+import { wipeAllWorkbenchBrowserState } from "@/workbench/tools/pdf-balloon/core/drafts";
+import type { WorkbenchIncomingFile } from "@/workbench/types";
 import type {
   AppSettings,
   AuthStatus,
@@ -163,6 +168,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   githubRepo: "",
   updateProxyUrl: "",
   companyLogoPath: "",
+  workbenchCacheLimitMb: 1024,
+  backupIncludeWorkbench: false,
 };
 
 const PAGE_SIZE_KEY = "instrument_ledger_page_size";
@@ -170,6 +177,53 @@ const SIDEBAR_COLLAPSED_KEY = "instrument_ledger_sidebar_collapsed";
 const ALERT_MUTED_DATE_KEY = "instrument_ledger_alert_muted_date";
 const ALERT_LAST_SHOWN_DATE_KEY = "instrument_ledger_alert_last_shown_date";
 const ALERT_LAST_SHOWN_TS_KEY = "instrument_ledger_alert_last_shown_ts";
+const SESSION_ROUTE_KEY = "instrument_ledger_session_route_v1";
+
+interface PersistedSessionRoute {
+  workspace: "ledger" | "workbench";
+  toolId: string | null;
+  mountedTools: string[];
+  immersive: boolean;
+}
+
+function loadInitialSessionRoute(): PersistedSessionRoute {
+  const fallback: PersistedSessionRoute = {
+    workspace: "ledger",
+    toolId: null,
+    mountedTools: [],
+    immersive: false,
+  };
+  try {
+    const raw = window.sessionStorage.getItem(SESSION_ROUTE_KEY);
+    if (!raw) return fallback;
+    const parsed = JSON.parse(raw) as Partial<PersistedSessionRoute>;
+    const readyIds = new Set(
+      WORKBENCH_TOOLS.filter((t) => t.status === "ready").map((t) => t.id)
+    );
+    const mountedTools = Array.isArray(parsed.mountedTools)
+      ? Array.from(
+          new Set(
+            parsed.mountedTools.filter(
+              (id): id is string => typeof id === "string" && readyIds.has(id)
+            )
+          )
+        )
+      : [];
+    const toolId =
+      typeof parsed.toolId === "string" && readyIds.has(parsed.toolId)
+        ? parsed.toolId
+        : null;
+    if (toolId && !mountedTools.includes(toolId)) {
+      mountedTools.push(toolId);
+    }
+    const workspace = parsed.workspace === "workbench" ? "workbench" : "ledger";
+    const immersive =
+      workspace === "workbench" && Boolean(toolId) && Boolean(parsed.immersive);
+    return { workspace, toolId, mountedTools, immersive };
+  } catch {
+    return fallback;
+  }
+}
 
 function readStorage(key: string): string {
   try {
@@ -253,14 +307,54 @@ export default function App() {
   } = useActionStatus(1600);
 
   const toggleSidebar = useCallback(() => {
-    setSidebarCollapsed((prev) => {
-      const next = !prev;
-      writeStorage(SIDEBAR_COLLAPSED_KEY, next ? "1" : "");
-      return next;
+    setWorkbenchImmersive((imm) => {
+      if (imm) return false;
+      setSidebarCollapsed((prev) => {
+        const next = !prev;
+        writeStorage(SIDEBAR_COLLAPSED_KEY, next ? "1" : "");
+        return next;
+      });
+      return false;
     });
   }, []);
 
-  // Navigation & Filters
+  // Navigation & Filters (restore in-session route across reloads so user stays in place)
+  const [initialRoute] = useState<PersistedSessionRoute>(loadInitialSessionRoute);
+  const [activeWorkspace, setActiveWorkspace] = useState<"ledger" | "workbench">(
+    initialRoute.workspace
+  );
+  const [activeWorkbenchToolId, setActiveWorkbenchToolId] = useState<string | null>(
+    initialRoute.toolId
+  );
+  const [mountedWorkbenchTools, setMountedWorkbenchTools] = useState<string[]>(
+    initialRoute.mountedTools
+  );
+  const [workbenchImmersive, setWorkbenchImmersive] = useState(
+    initialRoute.immersive
+  );
+  const [workbenchIncomingFiles, setWorkbenchIncomingFiles] = useState<
+    Record<string, WorkbenchIncomingFile | null>
+  >({});
+
+  useEffect(() => {
+    try {
+      const payload: PersistedSessionRoute = {
+        workspace: activeWorkspace,
+        toolId: activeWorkbenchToolId,
+        mountedTools: mountedWorkbenchTools,
+        immersive: workbenchImmersive,
+      };
+      window.sessionStorage.setItem(SESSION_ROUTE_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore storage access issues
+    }
+  }, [
+    activeWorkspace,
+    activeWorkbenchToolId,
+    mountedWorkbenchTools,
+    workbenchImmersive,
+  ]);
+
   const [activeTab, setActiveTab] = useState<CategoryTab>("gauge");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [expiryFilter, setExpiryFilter] = useState<ExpiryFilter>("all");
@@ -1266,6 +1360,7 @@ export default function App() {
   // Esc clears active table selection when no overlay/modal is open
   useEffect(() => {
     if (
+      activeWorkspace !== "ledger" ||
       selectedIds.size === 0 ||
       batchEditOpen ||
       drawerOpen ||
@@ -1305,6 +1400,7 @@ export default function App() {
     closePromptOpen,
     onboardingPreviewOpen,
     auth.isLocked,
+    activeWorkspace,
     clearSelection,
   ]);
 
@@ -1329,6 +1425,10 @@ export default function App() {
 
   const handleAppReset = useCallback((res: ResetAppResult) => {
     clearMediaCache();
+    void wipeAllWorkbenchBrowserState();
+    void import("@/workbench/tools/pdf-balloon/core/pdf")
+      .then((m) => m.clearPdfResourceCache())
+      .catch(() => {});
     setSettingsModalOpen(false);
     setOnboardingPreviewOpen(false);
     setDrawerOpen(false);
@@ -1349,6 +1449,11 @@ export default function App() {
     setLogoDataUrl("");
     setAvatarDataUrl("");
     setSettings(DEFAULT_SETTINGS);
+    setActiveWorkspace("ledger");
+    setActiveWorkbenchToolId(null);
+    setMountedWorkbenchTools([]);
+    setWorkbenchImmersive(false);
+    setWorkbenchIncomingFiles({});
     setActiveTab("gauge");
     setStatusFilter("all");
     setExpiryFilter("all");
@@ -1362,6 +1467,11 @@ export default function App() {
     writeStorage(ALERT_MUTED_DATE_KEY, "");
     writeStorage(ALERT_LAST_SHOWN_DATE_KEY, "");
     writeStorage(ALERT_LAST_SHOWN_TS_KEY, "");
+    try {
+      window.sessionStorage.removeItem(SESSION_ROUTE_KEY);
+    } catch {
+      // ignore
+    }
     setMutedToday(false);
     startupAlertCheckedRef.current = false;
     startupUpdateCheckedRef.current = false;
@@ -1597,6 +1707,8 @@ export default function App() {
   };
 
   const handleApplyFilterFromAlertModal = (next: ExpiryFilter) => {
+    setActiveWorkspace("ledger");
+    setWorkbenchImmersive(false);
     setActiveTab("all");
     setDeptFilter("all");
     setCalTypeFilter("all");
@@ -1604,6 +1716,63 @@ export default function App() {
     handleSelectExpiryFilter(next);
     setSortMode("expiry");
   };
+
+  // QI/QC Workbench navigation handlers
+  const openWorkbenchHub = useCallback(() => {
+    setActiveWorkspace("workbench");
+    setActiveWorkbenchToolId(null);
+    setWorkbenchImmersive(false);
+  }, []);
+
+  const launchWorkbenchTool = useCallback(
+    (toolId: string, incomingFile?: File) => {
+      setActiveWorkspace("workbench");
+      setMountedWorkbenchTools((prev) =>
+        prev.includes(toolId) ? prev : [...prev, toolId]
+      );
+      setActiveWorkbenchToolId(toolId);
+      if (incomingFile) {
+        const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+        setWorkbenchIncomingFiles((prev) => ({
+          ...prev,
+          [toolId]: { id, file: incomingFile },
+        }));
+      }
+    },
+    []
+  );
+
+  const closeWorkbenchTool = useCallback((toolId: string) => {
+    setMountedWorkbenchTools((prev) => prev.filter((id) => id !== toolId));
+    setActiveWorkbenchToolId((current) => {
+      if (current === toolId) {
+        setWorkbenchImmersive(false);
+        return null;
+      }
+      return current;
+    });
+  }, []);
+
+  const consumeWorkbenchIncomingFile = useCallback((toolId: string, fileId: string) => {
+    setWorkbenchIncomingFiles((prev) =>
+      prev[toolId]?.id === fileId ? { ...prev, [toolId]: null } : prev
+    );
+  }, []);
+
+  const hostOverlayOpen =
+    commandOpen ||
+    settingsModalOpen ||
+    alertModalOpen ||
+    importModalOpen ||
+    loginModalOpen ||
+    drawerOpen ||
+    batchEditOpen ||
+    Boolean(lightboxState) ||
+    Boolean(reportInstrument) ||
+    appLockSetupState.open ||
+    closePromptOpen ||
+    onboardingPreviewOpen ||
+    auth.isLocked;
 
   const resetAllFilters = () => {
     setStatusFilter("all");
@@ -1698,7 +1867,12 @@ export default function App() {
           className="flex-1 flex min-h-0 no-print"
         >
           {/* Left Collapsible Desktop Navigation Sidebar + Edge-Mounted Mid-Height Toggle */}
-          <div className="relative shrink-0 flex h-full z-20">
+          <div
+            className={cn(
+              "relative shrink-0 h-full z-20",
+              activeWorkspace === "workbench" && workbenchImmersive ? "hidden" : "flex"
+            )}
+          >
           <motion.aside
             initial={false}
             animate={{ width: sidebarCollapsed ? 64 : 248 }}
@@ -1828,7 +2002,7 @@ export default function App() {
                       },
                     ] as const
                   ).map((item) => {
-                    const active = activeTab === item.id;
+                    const active = activeWorkspace === "ledger" && activeTab === item.id;
                     const Icon = item.icon;
                     const btn = (
                       <motion.button
@@ -1837,6 +2011,8 @@ export default function App() {
                         whileTap={TAP_SCALE_SUBTLE}
                         transition={SPRING_SNAPPY}
                         onClick={() => {
+                          setActiveWorkspace("ledger");
+                          setWorkbenchImmersive(false);
                           setActiveTab(item.id);
                           setDeptFilter("all");
                         }}
@@ -1955,14 +2131,18 @@ export default function App() {
                       },
                     ] as const
                   ).map((st) => {
-                    const active = statusFilter === st.id;
+                    const active = activeWorkspace === "ledger" && statusFilter === st.id;
                     const btn = (
                       <motion.button
                         key={st.id}
                         type="button"
                         whileTap={TAP_SCALE_SUBTLE}
                         transition={SPRING_SNAPPY}
-                        onClick={() => handleSelectStatusFilter(st.id)}
+                        onClick={() => {
+                          setActiveWorkspace("ledger");
+                          setWorkbenchImmersive(false);
+                          handleSelectStatusFilter(st.id);
+                        }}
                         aria-label={`${st.label} (${st.count})`}
                         className={cn(
                           "relative rounded-lg text-xs flex items-center transition-colors",
@@ -2024,6 +2204,149 @@ export default function App() {
                         key={st.id}
                         placement="right"
                         content={`${st.label} · ${st.count} 台`}
+                      >
+                        {btn}
+                      </MorphTooltip>
+                    ) : (
+                      btn
+                    );
+                  })}
+                </nav>
+              </div>
+
+              {/* Group 3: QI/QC Quality Workbench Tools */}
+              <div>
+                {sidebarCollapsed ? (
+                  <div className="mx-auto mb-2 h-px w-6 bg-zinc-200/90 dark:bg-white/[0.08]" />
+                ) : (
+                  <div className="px-2.5 pb-1.5 flex items-center justify-between text-[10.5px] font-medium uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+                    <span>QI / QC 工具台</span>
+                    {mountedWorkbenchTools.length > 0 && (
+                      <span className="font-mono normal-case text-[10px] text-emerald-600 dark:text-emerald-400">
+                        {mountedWorkbenchTools.length} 运行中
+                      </span>
+                    )}
+                  </div>
+                )}
+                <nav className={cn("space-y-0.5", sidebarCollapsed && "flex flex-col items-center")}>
+                  {(() => {
+                    const hubActive =
+                      activeWorkspace === "workbench" && activeWorkbenchToolId === null;
+                    const hubBtn = (
+                      <motion.button
+                        key="workbench-hub"
+                        type="button"
+                        whileTap={TAP_SCALE_SUBTLE}
+                        transition={SPRING_SNAPPY}
+                        onClick={openWorkbenchHub}
+                        aria-label="QI/QC 工具台"
+                        className={cn(
+                          "relative rounded-lg text-xs font-medium flex items-center transition-colors",
+                          sidebarCollapsed
+                            ? "h-9 w-9 justify-center"
+                            : "w-full px-2.5 py-2 justify-between",
+                          hubActive
+                            ? "text-zinc-950 dark:text-white"
+                            : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-white/[0.04]"
+                        )}
+                      >
+                        {hubActive && (
+                          <motion.span
+                            layoutId="sidebar-workbench-pill"
+                            transition={SPRING_SNAPPY}
+                            className="absolute inset-0 rounded-lg bg-white dark:bg-white/[0.08] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile"
+                          />
+                        )}
+                        <span className="relative z-10 inline-flex items-center gap-2">
+                          <LayoutGrid
+                            className={cn(
+                              "h-3.5 w-3.5 transition-colors",
+                              hubActive
+                                ? "text-indigo-600 dark:text-indigo-400"
+                                : "text-zinc-400 dark:text-zinc-500"
+                            )}
+                          />
+                          {!sidebarCollapsed && <span>工具台总览</span>}
+                        </span>
+                        {!sidebarCollapsed && (
+                          <span className="relative z-10 font-mono text-[10.5px] text-zinc-400 dark:text-zinc-500">
+                            {WORKBENCH_TOOLS.filter((t) => t.status === "ready").length}
+                          </span>
+                        )}
+                      </motion.button>
+                    );
+
+                    return sidebarCollapsed ? (
+                      <MorphTooltip
+                        key="workbench-hub-tip"
+                        placement="right"
+                        content="QI / QC 工具台总览"
+                      >
+                        {hubBtn}
+                      </MorphTooltip>
+                    ) : (
+                      hubBtn
+                    );
+                  })()}
+
+                  {WORKBENCH_TOOLS.filter((t) => t.status === "ready").map((tool) => {
+                    const active =
+                      activeWorkspace === "workbench" && activeWorkbenchToolId === tool.id;
+                    const running = mountedWorkbenchTools.includes(tool.id);
+                    const Icon = tool.icon;
+                    const btn = (
+                      <motion.button
+                        key={tool.id}
+                        type="button"
+                        whileTap={TAP_SCALE_SUBTLE}
+                        transition={SPRING_SNAPPY}
+                        onClick={() => launchWorkbenchTool(tool.id)}
+                        aria-label={tool.shortName}
+                        className={cn(
+                          "relative rounded-lg text-xs font-medium flex items-center transition-colors",
+                          sidebarCollapsed
+                            ? "h-9 w-9 justify-center"
+                            : "w-full px-2.5 py-2 justify-between",
+                          active
+                            ? "text-zinc-950 dark:text-white"
+                            : "text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-200 hover:bg-zinc-200/50 dark:hover:bg-white/[0.04]"
+                        )}
+                      >
+                        {active && (
+                          <motion.span
+                            layoutId="sidebar-workbench-pill"
+                            transition={SPRING_SNAPPY}
+                            className="absolute inset-0 rounded-lg bg-white dark:bg-white/[0.08] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile"
+                          />
+                        )}
+                        <span className="relative z-10 inline-flex items-center gap-2 min-w-0">
+                          <Icon
+                            className="h-3.5 w-3.5 shrink-0 transition-colors"
+                            style={{ color: active ? tool.accent : undefined }}
+                          />
+                          {!sidebarCollapsed && (
+                            <span className="truncate">{tool.shortName}</span>
+                          )}
+                        </span>
+                        {running && (
+                          <span
+                            className={cn(
+                              "relative z-10 rounded-full bg-emerald-500 shrink-0",
+                              sidebarCollapsed
+                                ? "absolute top-1.5 right-1.5 h-1.5 w-1.5"
+                                : "h-1.5 w-1.5"
+                            )}
+                            title="工具运行中"
+                          />
+                        )}
+                      </motion.button>
+                    );
+
+                    return sidebarCollapsed ? (
+                      <MorphTooltip
+                        key={tool.id}
+                        placement="right"
+                        content={`${tool.name}${running ? " · 运行中" : ""}`}
                       >
                         {btn}
                       </MorphTooltip>
@@ -2455,8 +2778,13 @@ export default function App() {
           </div>
           </div>
 
-          {/* Main Workspace Canvas */}
-          <div className="relative flex-1 flex flex-col min-w-0 bg-white dark:bg-[#09090b]">
+          {/* Main Workspace Canvas (Ledger) */}
+          <div
+            className={cn(
+              "relative flex-1 flex-col min-w-0 bg-white dark:bg-[#09090b]",
+              activeWorkspace === "ledger" ? "flex" : "hidden"
+            )}
+          >
             {/* Minimalist Workspace Header */}
             <header className="h-14 px-6 border-b border-zinc-200/80 dark:border-white/[0.07] flex items-center justify-between gap-4 shrink-0 bg-white/90 dark:bg-[#09090b]">
               <div className="flex items-center gap-2.5 min-w-0">
@@ -3102,6 +3430,23 @@ export default function App() {
               </div>
             </footer>
           </div>
+
+          {/* QI / QC Quality Workbench Shell (Keep-Alive Lazy Micro-Module Runtime) */}
+          <WorkbenchShell
+            visible={activeWorkspace === "workbench"}
+            activeToolId={activeWorkbenchToolId}
+            mountedToolIds={mountedWorkbenchTools}
+            hostOverlayOpen={hostOverlayOpen}
+            theme={theme}
+            immersive={workbenchImmersive}
+            onToggleImmersive={() => setWorkbenchImmersive((v) => !v)}
+            onLaunchTool={(toolId) => launchWorkbenchTool(toolId)}
+            onBackToHub={openWorkbenchHub}
+            onCloseTool={closeWorkbenchTool}
+            onNotify={notify}
+            incomingFiles={workbenchIncomingFiles}
+            onConsumeIncomingFile={consumeWorkbenchIncomingFile}
+          />
         </motion.div>
       )}
 
@@ -3123,13 +3468,27 @@ export default function App() {
         isAdmin={auth.isAdmin}
         themePreference={themePreference}
         onClose={() => setCommandOpen(false)}
-        onSelectInstrument={(inst) => openViewDrawer(inst)}
+        onSelectInstrument={(inst) => {
+          setActiveWorkspace("ledger");
+          setWorkbenchImmersive(false);
+          openViewDrawer(inst);
+        }}
         onNavigateTab={(tab) => {
+          setActiveWorkspace("ledger");
+          setWorkbenchImmersive(false);
           setActiveTab(tab);
           setDeptFilter("all");
         }}
-        onFilterStatus={(st) => handleSelectStatusFilter(st)}
-        onFilterExpiry={(f) => handleSelectExpiryFilter(f)}
+        onFilterStatus={(st) => {
+          setActiveWorkspace("ledger");
+          setWorkbenchImmersive(false);
+          handleSelectStatusFilter(st);
+        }}
+        onFilterExpiry={(f) => {
+          setActiveWorkspace("ledger");
+          setWorkbenchImmersive(false);
+          handleSelectExpiryFilter(f);
+        }}
         onOpenAlerts={() => openAlertModal()}
         onCreateInstrument={openCreateDrawer}
         onOpenImport={() => setImportModalOpen(true)}
@@ -3142,6 +3501,8 @@ export default function App() {
           if (auth.isAdmin) handleLogout();
           else setLoginModalOpen(true);
         }}
+        onOpenWorkbenchHub={openWorkbenchHub}
+        onLaunchWorkbenchTool={(toolId) => launchWorkbenchTool(toolId)}
       />
 
       {/* Expiry Alert Popup Modal (Alerts Info Only) */}
@@ -3183,6 +3544,7 @@ export default function App() {
         onClose={() => setReportInstrument(null)}
         onChanged={() => refreshAll()}
         onNotify={notify}
+        onOpenInPdfWorkbench={(file) => launchWorkbenchTool("pdf-balloon", file)}
       />
 
       <AdminLoginModal
@@ -3233,7 +3595,12 @@ export default function App() {
             appLockPinLength: next.appLockPinLength,
           }));
         }}
-        onDataRestored={() => refreshAll()}
+        onDataRestored={() => {
+          setMountedWorkbenchTools((prev) => prev.filter((id) => id !== "pdf-balloon"));
+          setActiveWorkbenchToolId((cur) => (cur === "pdf-balloon" ? null : cur));
+          setWorkbenchImmersive(false);
+          refreshAll();
+        }}
         onAppReset={handleAppReset}
         previewingOnboarding={onboardingPreviewOpen}
         onPreviewOnboarding={() => setOnboardingPreviewOpen(true)}
@@ -3244,6 +3611,14 @@ export default function App() {
         }
         onLockNow={handleLock}
         onDisableAppLock={handleDisableAppLock}
+        onWorkbenchCacheCleared={() => {
+          setMountedWorkbenchTools((prev) => prev.filter((id) => id !== "pdf-balloon"));
+          setActiveWorkbenchToolId((cur) => (cur === "pdf-balloon" ? null : cur));
+          setWorkbenchImmersive(false);
+          void import("@/workbench/tools/pdf-balloon/core/pdf")
+            .then((m) => m.clearPdfResourceCache())
+            .catch(() => {});
+        }}
       />
 
       <AppLockSetupModal

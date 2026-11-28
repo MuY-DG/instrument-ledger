@@ -9,6 +9,13 @@ pub fn ensure_storage_dirs(data_dir: &Path) -> Result<(), String> {
         .map_err(|e| format!("创建图片目录失败: {}", e))?;
     fs::create_dir_all(data_dir.join("reports"))
         .map_err(|e| format!("创建报告目录失败: {}", e))?;
+    fs::create_dir_all(
+        data_dir
+            .join("workbench")
+            .join("pdf-balloon")
+            .join("sources"),
+    )
+    .map_err(|e| format!("创建工具台缓存目录失败: {}", e))?;
     Ok(())
 }
 

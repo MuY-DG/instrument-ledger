@@ -1,0 +1,5743 @@
+/* Auto-scoped Folio PDF Workbench styles (strictly isolated under .folio-workbench) */
+.folio-workbench {
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+  color: #262d34;
+  background: #f6f7f9;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  --ink: #252d34;
+  --muted: #8a919a;
+  --line: #e9ebee;
+  --red: #dc4c3e;
+  --accent: #f8ebe8;
+}
+.folio-workbench, .folio-workbench *, .folio-workbench *::before, .folio-workbench *::after {
+  box-sizing: border-box;
+}
+.folio-workbench {
+  margin: 0;
+  overflow: hidden;
+}
+.folio-workbench button, .folio-workbench input, .folio-workbench select {
+  font: inherit;
+}
+.folio-workbench button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  cursor: pointer;
+  border: 1px solid #dfe3e7;
+  background: white;
+  color: var(--ink);
+  border-radius: 7px;
+  padding: 8px 12px;
+  font-size: 12px;
+  line-height: 1.3;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.folio-workbench button:hover:not(:disabled) {
+  background: #f3f5f7;
+  border-color: #c9cfd5;
+}
+.folio-workbench button:disabled {
+  opacity: 0.38;
+  cursor: default;
+}
+/* Keep keyboard focus visible inside each control, without an oversized outer halo. */
+.folio-workbench button:focus-visible, .folio-workbench input:focus-visible, .folio-workbench select:focus-visible, .folio-workbench [role='button']:focus-visible {
+  outline: 2px solid #407aaf;
+  outline-offset: -2px;
+}
+.folio-workbench button svg {
+  flex: none;
+}
+.folio-workbench button.primary-button {
+  background: #27323a;
+  color: #fff;
+  border-color: #27323a;
+  font-weight: 550;
+  box-shadow: 0 2px 3px #0000000a;
+}
+.folio-workbench button.primary-button:hover:not(:disabled) {
+  background: #3d4b56;
+  border-color: #3d4b56;
+}
+.folio-workbench input[type='number'], .folio-workbench input[type='text'], .folio-workbench input[type='password'], .folio-workbench select {
+  border: 1px solid #e0e4e8;
+  border-radius: 6px;
+  background: white;
+  color: #303841;
+  padding: 8px 10px;
+  font-size: 12px;
+  min-width: 0;
+}
+.folio-workbench input[type='number'] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+.folio-workbench input[type='number']::-webkit-inner-spin-button {
+  appearance: none;
+}
+.folio-workbench input[type='range'] {
+  width: 100%;
+  accent-color: #4d5964;
+  height: 3px;
+  margin: 16px 0 0;
+  cursor: pointer;
+}
+.folio-workbench input[type='checkbox'] {
+  accent-color: #384b58;
+  width: 14px;
+  height: 14px;
+}
+.folio-workbench kbd {
+  font:
+    10px ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  border: 1px solid #e2e6ea;
+  border-radius: 4px;
+  color: #969da5;
+  background: #fafbfc;
+  padding: 2px 4px;
+  line-height: 1.1;
+}
+.folio-workbench fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.folio-workbench fieldset:disabled {
+  opacity: 0.5;
+}
+.folio-workbench .muted {
+  color: #a2a8af;
+}
+.folio-workbench .icon-btn {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-color: transparent;
+  background: transparent;
+  color: #6c7580;
+}
+.folio-workbench .icon-btn:hover:not(:disabled) {
+  border-color: transparent;
+  background: #e9edf1;
+}
+.folio-workbench .primary-button .button-shortcut {
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid #ffffff30;
+  color: #ccd2d7;
+  font-size: 10px;
+  font-weight: 400;
+}
+.folio-workbench.app {
+  height: 100%;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.folio-workbench.app-header {
+  height: 72px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 25px;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+  z-index: 4;
+}
+.folio-workbench .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+}
+.folio-workbench .brand-icon {
+  width: 36px;
+  height: 39px;
+  display: grid;
+  place-items: center;
+  background: #29343d;
+  color: #fff;
+  border-radius: 10px;
+}
+.folio-workbench .brand strong {
+  font-size: 21px;
+  letter-spacing: -0.8px;
+  font-weight: 650;
+  line-height: 1.05;
+}
+.folio-workbench .brand strong > span {
+  display: block;
+  font-size: 9px;
+  color: #7f8791;
+  letter-spacing: 1.5px;
+  margin-top: 6px;
+  font-weight: 400;
+}
+.folio-workbench .header-divider {
+  height: 25px;
+  width: 1px;
+  background: #e3e6e9;
+}
+.folio-workbench .document-name {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #727c87;
+  min-width: 0;
+  font-size: 12px;
+  flex: 1;
+}
+.folio-workbench .document-name > svg {
+  flex: none;
+  color: #a6adb4;
+}
+.folio-workbench .document-name > span:first-of-type {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 520px;
+}
+.folio-workbench .document-badge {
+  background: #f0f2f5;
+  color: #848c95;
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 4px;
+  flex: none;
+}
+.folio-workbench .header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.folio-workbench .private-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #9098a1;
+  margin-right: 6px;
+}
+.folio-workbench .header-actions > button {
+  padding: 9px 13px;
+}
+.folio-workbench .command-bar {
+  height: 54px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex: none;
+  border-bottom: 1px solid #e2e6e9;
+  padding: 0 21px;
+  z-index: 3;
+}
+.folio-workbench .command-left, .folio-workbench .command-right {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+.folio-workbench .sidebar-toggle {
+  margin-right: 12px;
+}
+.folio-workbench .tool-group {
+  display: flex;
+  align-items: center;
+  background: #f4f5f7;
+  padding: 3px;
+  border-radius: 7px;
+  gap: 3px;
+}
+.folio-workbench .tool-group button {
+  background: transparent;
+  border-color: transparent;
+  font-size: 11px;
+  padding: 6px 9px;
+  color: #777f87;
+}
+.folio-workbench .tool-group button kbd {
+  margin-left: 3px;
+  border-color: transparent;
+  background: transparent;
+}
+.folio-workbench .tool-group button.active {
+  background: #fff;
+  border-color: #dfe3e7;
+  box-shadow: 0 1px 3px #1621290a;
+  color: #29343d;
+}
+.folio-workbench .tool-group button.active[data-state='marker'] {
+  color: var(--red);
+}
+.folio-workbench .toolbar-divider {
+  height: 19px;
+  width: 1px;
+  background: #e1e5e8;
+  margin: 0 10px;
+  flex: none;
+}
+.folio-workbench .selection-summary {
+  font-size: 10px;
+  letter-spacing: 0.1px;
+  color: #969da5;
+  margin-left: 10px;
+}
+.folio-workbench .command-right > button:not(.icon-btn) {
+  border-color: transparent;
+  background: transparent;
+  font-size: 11px;
+}
+.folio-workbench .command-right > .icon-btn {
+  margin-left: 8px;
+}
+.folio-workbench .workbench {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.folio-workbench .sidebar {
+  width: 210px;
+  background: #fafbfc;
+  flex: none;
+  border-right: 1px solid #e0e4e8;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.folio-workbench .side-tabs {
+  display: flex;
+  margin: 17px 15px 0;
+  background: #eceff2;
+  border-radius: 7px;
+  padding: 3px;
+  gap: 3px;
+}
+.folio-workbench .side-tabs > button {
+  flex: 1;
+  gap: 5px;
+  padding: 7px 5px;
+  color: #8c939c;
+  background: transparent;
+  border-color: transparent;
+  font-size: 11px;
+}
+.folio-workbench .side-tabs > button.active {
+  color: #333e49;
+  background: white;
+  border-color: #dde2e7;
+  box-shadow: 0 1px 2px #00000005;
+}
+.folio-workbench .side-tabs button > span {
+  font-size: 9px;
+  min-width: 12px;
+  opacity: 0.75;
+}
+.folio-workbench .side-heading {
+  padding: 23px 19px 17px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: #737d88;
+  letter-spacing: 0.5px;
+}
+.folio-workbench .side-heading > span {
+  font-size: 8px;
+  color: #b1b7be;
+  letter-spacing: 1px;
+}
+.folio-workbench .side-scroll {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #d8dde1 transparent;
+}
+.folio-workbench .thumbnail-card {
+  height: 151px;
+  display: flex;
+  flex-direction: column;
+  padding: 10px 10px 0;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  justify-content: flex-start;
+  gap: 9px;
+  overflow: hidden;
+}
+.folio-workbench .thumbnail-card:hover:not(:disabled) {
+  background: #f0f2f5;
+  border-color: transparent;
+}
+.folio-workbench .thumbnail-card.current {
+  background: #f0f3f6;
+  border-color: #b9c5cf !important;
+}
+.folio-workbench .thumbnail-paper {
+  position: relative;
+  flex: none;
+  background: #fff;
+  box-shadow: 0 2px 5px #26344315;
+  margin: auto;
+}
+.folio-workbench .thumbnail-caption {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  color: #8d969f;
+  flex: none;
+  height: 24px;
+}
+.folio-workbench .thumbnail-card.current .thumbnail-caption {
+  color: #3a4a58;
+  font-weight: 550;
+}
+.folio-workbench .marker-count {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  color: #c2695c;
+}
+.folio-workbench .side-placeholder {
+  text-align: center;
+  color: #afb6bd;
+  font-size: 11px;
+  line-height: 2;
+  margin: 90px 20px;
+}
+.folio-workbench .side-placeholder svg {
+  opacity: 0.5;
+}
+.folio-workbench .local-note {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #9aa3ac;
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+  font-size: 9px;
+}
+.folio-workbench .marker-list {
+  padding: 0 12px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.folio-workbench .marker-list > button {
+  display: flex;
+  justify-content: flex-start;
+  gap: 11px;
+  padding: 10px;
+  background: transparent;
+  border-color: transparent;
+  text-align: left;
+}
+.folio-workbench .marker-list > button.selected {
+  background: #edf1f5;
+  border-color: #c9d2da;
+}
+.folio-workbench .marker-list > button > span:last-child {
+  font-size: 11px;
+  font-weight: 500;
+}
+.folio-workbench .marker-list small {
+  display: block;
+  color: #9ba3ac;
+  font-size: 9px;
+  margin-top: 5px;
+  font-weight: 400;
+}
+.folio-workbench .number-badge {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid;
+  border-radius: 50%;
+  font: 700 11px Arial;
+}
+.folio-workbench .document-workspace {
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  background: #e9edf0;
+}
+.folio-workbench .viewer {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: none;
+  scrollbar-width: thin;
+  scrollbar-color: #bfc7ce #e5e9ed;
+  user-select: none;
+}
+.folio-workbench .viewer:focus {
+  outline: none;
+}
+.folio-workbench .pages-space {
+  position: relative;
+}
+.folio-workbench .pdf-page {
+  position: absolute;
+  background: #fff;
+  box-shadow:
+    0 2px 4px #1e293b0b,
+    0 12px 28px #1e293b10;
+  isolation: isolate;
+}
+.folio-workbench .page-label {
+  position: absolute;
+  left: 0;
+  bottom: -19px;
+  font-size: 8px;
+  letter-spacing: 1px;
+  color: #9ba4ad;
+  pointer-events: none;
+}
+.folio-workbench .canvas-host {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.folio-workbench .canvas-host canvas {
+  position: absolute;
+  display: block;
+}
+.folio-workbench .page-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #aab2ba;
+  pointer-events: none;
+}
+.folio-workbench .page-error {
+  position: absolute;
+  left: 16px;
+  top: 16px;
+  right: 16px;
+  max-width: 440px;
+  background: #fff3ef;
+  border: 1px solid #edc1b5;
+  border-radius: 8px;
+  padding: 16px;
+  z-index: 4;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  color: #a84e38;
+  font-size: 12px;
+}
+.folio-workbench .page-error strong {
+  font-size: 12px;
+}
+.folio-workbench .page-error span {
+  width: 100%;
+  font-size: 10px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.folio-workbench .page-error button {
+  font-size: 11px;
+  color: #944c39;
+  border-color: #e8c6bb;
+}
+.folio-workbench .marker-layer {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.folio-workbench .marker {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: move;
+  outline: 0;
+  border-radius: 50%;
+  touch-action: none;
+  line-height: 0;
+}
+.folio-workbench .marker svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  overflow: visible;
+  pointer-events: none;
+}
+.folio-workbench .marker.is-selected {
+  outline: 1.5px solid #5785b5;
+  outline-offset: 4px;
+}
+.folio-workbench .marker-delete {
+  position: absolute;
+  right: -13px;
+  top: -13px;
+  width: 19px;
+  height: 19px;
+  padding: 0;
+  line-height: 1;
+  border: 2px solid white;
+  border-radius: 50%;
+  font-size: 14px;
+  background: #dc4c3e;
+  color: white;
+  box-shadow: 0 2px 4px #0002;
+}
+.folio-workbench .marker-delete:hover:not(:disabled) {
+  background: #bb392d;
+  color: #fff;
+  border-color: white;
+}
+.folio-workbench .ghost {
+  position: fixed;
+  z-index: 8;
+  pointer-events: none;
+  opacity: 0.6;
+}
+.folio-workbench .selection-box {
+  position: fixed;
+  border: 1px solid #648fb5;
+  background: #6d98bf1a;
+  pointer-events: none;
+  z-index: 7;
+}
+.folio-workbench .tool-marker {
+  cursor: crosshair;
+}
+.folio-workbench .tool-hand, .folio-workbench .space-pan {
+  cursor: grab;
+}
+.folio-workbench .panning, .folio-workbench .panning * {
+  cursor: grabbing !important;
+}
+.folio-workbench .canvas-controls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  position: absolute;
+  bottom: 22px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #ffffffef;
+  border: 1px solid #dce1e6;
+  box-shadow: 0 4px 16px #2739490e;
+  border-radius: 10px;
+  padding: 6px 8px;
+  z-index: 2;
+  backdrop-filter: blur(12px);
+  white-space: nowrap;
+}
+.folio-workbench .canvas-controls .icon-btn {
+  height: 28px;
+  width: 27px;
+}
+.folio-workbench .canvas-controls > .toolbar-divider {
+  margin: 0 7px;
+  height: 17px;
+}
+.folio-workbench .canvas-controls select {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  border: 0;
+  background: transparent;
+  text-align: center;
+  appearance: none;
+  padding: 6px 4px;
+  width: 49px;
+  cursor: pointer;
+}
+.folio-workbench .page-control {
+  display: flex;
+  align-items: center;
+}
+.folio-workbench .page-control label {
+  display: flex;
+  align-items: center;
+  font-size: 10px;
+  color: #8b959f;
+  padding-right: 5px;
+}
+.folio-workbench .page-control input {
+  width: 29px;
+  background: transparent;
+  padding: 4px 3px;
+  border: 0;
+  font-size: 10px;
+  text-align: center;
+  color: #485664;
+}
+.folio-workbench .fit-button {
+  border: 0;
+  background: transparent;
+  font-size: 10px;
+  color: #75818c;
+  padding: 6px;
+}
+.folio-workbench .inspector {
+  width: 264px;
+  flex: none;
+  background: #fff;
+  border-left: 1px solid #dfe4e8;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  z-index: 1;
+}
+.folio-workbench .inspector-header {
+  height: 58px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  border-bottom: 1px solid #f0f1f3;
+}
+.folio-workbench .inspector-header > span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 550;
+}
+.folio-workbench .inspector-header > span svg {
+  color: #7e8994;
+}
+.folio-workbench .inspector-scroll {
+  padding: 20px 22px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: #e1e5e8 transparent;
+}
+.folio-workbench .property-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  color: #919aa4;
+}
+.folio-workbench .tiny-dot {
+  width: 5px;
+  height: 5px;
+  background: #c0c7ce;
+  border-radius: 50%;
+}
+.folio-workbench .marker-preview {
+  margin: 17px 0 22px;
+  border: 1px solid #eceef1;
+  background: #fbfcfd;
+  border-radius: 8px;
+  height: 123px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  background-image: radial-gradient(#dfe4e8 0.65px, transparent 0.65px);
+  background-size: 10px 10px;
+}
+.folio-workbench .marker-preview svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.folio-workbench .marker-preview > span {
+  font-size: 8px;
+  color: #b0b7be;
+  background: #fbfcfd;
+  padding: 0 5px;
+  letter-spacing: 1px;
+}
+.folio-workbench .section-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #76818d;
+  font-weight: 550;
+  letter-spacing: 0.5px;
+  margin-bottom: 16px;
+}
+.folio-workbench .section-divider {
+  height: 1px;
+  background: #edf0f2;
+  margin: 23px 0;
+}
+.folio-workbench .form-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+}
+.folio-workbench .form-row label {
+  font-size: 11px;
+  color: #586570;
+}
+.folio-workbench .form-row > input {
+  width: 65px;
+  text-align: center;
+  padding: 7px;
+  font-size: 11px;
+}
+.folio-workbench .link-toggle {
+  padding: 3px 5px;
+  gap: 3px;
+  font-size: 9px;
+  color: #9ba3ab;
+  background: transparent;
+  border-color: transparent;
+}
+.folio-workbench .link-toggle.active {
+  color: #5d7485;
+  background: #eef3f6;
+  border-color: transparent;
+}
+.folio-workbench .range-field {
+  margin-top: 19px;
+}
+.folio-workbench .range-field > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.folio-workbench .range-field label {
+  font-size: 10px;
+  color: #687580;
+}
+.folio-workbench .number-unit {
+  display: flex;
+  align-items: center;
+  border: 1px solid #e4e8ec;
+  border-radius: 5px;
+  height: 26px;
+}
+.folio-workbench .number-unit input {
+  width: 41px;
+  border: 0;
+  padding: 4px 1px 4px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  text-align: center;
+}
+.folio-workbench .number-unit > span {
+  font-size: 9px;
+  color: #a9b0b7;
+  padding: 0 7px 0 0;
+}
+.folio-workbench .color-fields {
+  display: flex;
+  gap: 5px;
+}
+.folio-workbench .color-fields > button {
+  flex: 1;
+  border-color: #e8ebee;
+  background: #fff;
+  font-size: 10px;
+  padding: 6px 5px;
+  gap: 5px;
+  color: #929aa2;
+}
+.folio-workbench .color-fields > button.active {
+  border-color: #bbc6cf;
+  color: #495969;
+  background: #f6f8fa;
+}
+.folio-workbench .color-dot {
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1px solid #0000000d;
+}
+.folio-workbench .palette {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+  margin: 17px 0 12px;
+}
+.folio-workbench .palette > button {
+  aspect-ratio: 1;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid #00000012;
+  position: relative;
+}
+.folio-workbench .palette > button.chosen::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+  border: 1px solid #b0bbc4;
+  border-radius: 50%;
+}
+.folio-workbench .custom-color {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 5px;
+}
+.folio-workbench .custom-color label {
+  font-size: 9px;
+  color: #9ca4ac;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.folio-workbench .custom-color input {
+  width: 19px;
+  height: 19px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.folio-workbench .custom-color input::-webkit-color-swatch-wrapper {
+  padding: 1px;
+}
+.folio-workbench .custom-color input::-webkit-color-swatch {
+  border: 1px solid #dce1e5;
+  border-radius: 3px;
+}
+.folio-workbench .custom-color > button {
+  font-size: 9px;
+  color: #98a1a9;
+  background: transparent;
+  border-color: transparent;
+  padding: 3px;
+  gap: 4px;
+}
+.folio-workbench .custom-color > button.active {
+  color: #48637a;
+}
+.folio-workbench .transparent-color {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 1px solid #dfe3e7 !important;
+  border-radius: 2px;
+  background: linear-gradient(135deg, white 43%, #d67871 44%, #d67871 54%, white 55%) !important;
+}
+.folio-workbench .shortcut-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #9ba4ac;
+  margin-top: 13px;
+}
+.folio-workbench .shortcut-row > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.folio-workbench .shortcut-row > span svg {
+  opacity: 0.6;
+}
+.folio-workbench .shortcut-row kbd {
+  font-size: 8px;
+  color: #a1aab3;
+  padding: 3px 5px;
+}
+.folio-workbench .delete-selection {
+  margin-top: 22px;
+  color: #c9685d;
+  border-color: #f0d9d5;
+  background: #fef8f7;
+  width: 100%;
+  font-size: 10px;
+}
+.folio-workbench .delete-selection > span {
+  margin-left: auto;
+  opacity: 0.6;
+}
+.folio-workbench .inspector-footer {
+  padding: 15px 12px;
+  text-align: center;
+  font-size: 9px;
+  color: #a5adb5;
+  border-top: 1px solid #edf0f2;
+  background: #fcfdfe;
+}
+.folio-workbench .status-bar {
+  height: 31px;
+  flex: none;
+  border-top: 1px solid #dfe4e8;
+  background: #fafbfc;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: #97a0aa;
+  font-size: 9px;
+}
+.folio-workbench .status-bar > span, .folio-workbench .status-bar > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.folio-workbench .status-bar > div {
+  gap: 12px;
+}
+.folio-workbench .status-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #70a385;
+  margin-right: 2px;
+}
+.folio-workbench .status-separator {
+  height: 10px;
+  width: 1px;
+  background: #dfe4e8;
+}
+.folio-workbench .status-bar button {
+  border: 0;
+  padding: 3px 0;
+  background: transparent;
+  color: #8d98a3;
+  font-size: 9px;
+}
+.folio-workbench .warning-text {
+  color: #b27e37;
+}
+.folio-workbench .empty-workspace {
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 25px;
+  overflow: auto;
+  background-color: #f1f3f5;
+  background-image: radial-gradient(#dce1e6 0.7px, transparent 0.7px);
+  background-size: 19px 19px;
+}
+.folio-workbench .empty-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #929ea8;
+  font-size: 8px;
+  letter-spacing: 2.1px;
+  margin-bottom: 32px;
+}
+.folio-workbench .empty-eyebrow > span {
+  height: 4px;
+  width: 4px;
+  border-radius: 50%;
+  background: #9caeb9;
+}
+.folio-workbench .paper-illustration {
+  position: relative;
+  width: 210px;
+  height: 184px;
+  margin-bottom: 23px;
+}
+.folio-workbench .illus-paper {
+  position: absolute;
+  width: 141px;
+  height: 172px;
+  border: 1px solid #cfd8df;
+  border-radius: 5px;
+  background: white;
+  box-shadow: 0 6px 15px #3d54630a;
+}
+.folio-workbench .illus-paper.back {
+  left: 44px;
+  top: 3px;
+  transform: rotate(10deg);
+  background: #f7f9fb;
+  border-color: #d6dee5;
+}
+.folio-workbench .illus-paper.front {
+  left: 25px;
+  top: 2px;
+  transform: rotate(-7deg);
+  box-shadow: 0 9px 14px #3d54630b;
+}
+.folio-workbench .illus-heading {
+  position: absolute;
+  left: 17px;
+  top: 18px;
+  width: 55px;
+  height: 3px;
+  background: #bac9d5;
+  border-radius: 1px;
+}
+.folio-workbench .illus-lines {
+  position: absolute;
+  top: 29px;
+  left: 17px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.folio-workbench .illus-lines i {
+  height: 2px;
+  background: #e1e6ec;
+  width: 82px;
+}
+.folio-workbench .illus-lines i:last-child {
+  width: 57px;
+}
+.folio-workbench .illus-part {
+  position: absolute;
+  left: 29px;
+  top: 65px;
+  width: 84px;
+  height: 52px;
+  border: 1.2px solid #a1b3c2;
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  transform: skewY(-8deg);
+  background: #f7fafc;
+  box-shadow: 3px 4px 0 #e8edf2;
+}
+.folio-workbench .illus-part i {
+  display: block;
+  width: 9px;
+  height: 33px;
+  border: 1px solid #b4c4d1;
+  border-radius: 3px;
+}
+.folio-workbench .illus-marker {
+  position: absolute;
+  border: 1.5px solid #d96658;
+  color: #d96658;
+  border-radius: 50%;
+  width: 25px;
+  height: 25px;
+  display: grid;
+  place-items: center;
+  font: 600 12px Arial;
+  background: #fff8f5;
+}
+.folio-workbench .illus-marker.one {
+  left: 9px;
+  top: 60px;
+}
+.folio-workbench .illus-marker.two {
+  right: 6px;
+  top: 108px;
+}
+.folio-workbench .illus-dimension {
+  position: absolute;
+  left: 27px;
+  top: 134px;
+  width: 86px;
+  height: 1px;
+  background: #aebfcd;
+}
+.folio-workbench .illus-dimension:before, .folio-workbench .illus-dimension:after {
+  content: '';
+  position: absolute;
+  height: 7px;
+  width: 1px;
+  background: #aebfcd;
+  top: -3px;
+}
+.folio-workbench .illus-dimension:after {
+  right: 0;
+}
+.folio-workbench .illus-block {
+  position: absolute;
+  bottom: 12px;
+  right: 13px;
+  width: 47px;
+  height: 13px;
+  border: 1px solid #dce3ea;
+  background: repeating-linear-gradient(
+    90deg,
+    transparent,
+    transparent 15px,
+    #dce3ea 15px,
+    #dce3ea 16px
+  );
+}
+.folio-workbench .illus-check {
+  position: absolute;
+  bottom: 0;
+  right: 20px;
+  width: 35px;
+  height: 35px;
+  background: #fff;
+  border: 1px solid #e2e8e4;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #80a18d;
+  box-shadow: 0 5px 10px #00000007;
+}
+.folio-workbench .empty-workspace h1 {
+  font-size: 27px;
+  font-weight: 550;
+  letter-spacing: 1px;
+  margin: 0 0 15px;
+  color: #3b4853;
+}
+.folio-workbench .empty-workspace > p {
+  font-size: 11px;
+  line-height: 2.1;
+  text-align: center;
+  color: #98a1aa;
+  margin: 0 0 24px;
+}
+.folio-workbench .empty-open {
+  padding: 12px 18px !important;
+  font-size: 12px !important;
+  gap: 10px;
+}
+.folio-workbench .empty-open > svg:last-child {
+  margin-left: 12px;
+  opacity: 0.7;
+}
+.folio-workbench .empty-drop {
+  font-size: 10px;
+  color: #a4adb5;
+  margin-top: 13px;
+}
+.folio-workbench .empty-features {
+  display: flex;
+  gap: 20px;
+  margin-top: 35px;
+  color: #9aa6af;
+  font-size: 8px;
+}
+.folio-workbench .empty-features > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.folio-workbench .empty-features svg {
+  width: 12px;
+}
+.folio-workbench .restore-draft {
+  margin-top: 26px;
+  background: #ffffffb8;
+  box-shadow: 0 2px 8px #00000002;
+  border-color: #dce3e8;
+  max-width: 370px;
+  gap: 11px;
+  padding: 11px 15px;
+  text-align: left;
+  font-size: 10px;
+  color: #7c8c98;
+}
+.folio-workbench .restore-draft > span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  overflow: hidden;
+}
+.folio-workbench .restore-draft strong {
+  font-size: 9px;
+  font-weight: 400;
+  color: #a1aab2;
+  text-overflow: ellipsis;
+  overflow: hidden;
+}
+.folio-workbench .restore-draft > svg:last-child {
+  margin-left: 15px;
+}
+.folio-workbench .spinner {
+  width: 15px;
+  height: 15px;
+  border: 1.5px solid #d9e0e6;
+  border-top-color: #677d8f;
+  border-radius: 50%;
+  animation: folio-spin 0.8s linear infinite;
+  display: inline-block;
+  flex: none;
+}
+.folio-workbench .spinner.small {
+  width: 10px;
+  height: 10px;
+  border-width: 1px;
+}
+@keyframes folio-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.folio-workbench .job-banner {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: white;
+  box-shadow: 0 5px 25px #243a4b18;
+  border: 1px solid #dfe5ea;
+  border-radius: 9px;
+  padding: 14px 14px 14px 18px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  min-width: 300px;
+  z-index: 5;
+}
+.folio-workbench .job-banner > div {
+  flex: 1;
+}
+.folio-workbench .job-banner strong {
+  font-size: 11px;
+  font-weight: 500;
+  color: #657583;
+}
+.folio-workbench .progress-track {
+  height: 3px;
+  background: #eef1f4;
+  border-radius: 2px;
+  margin-top: 9px;
+  overflow: hidden;
+}
+.folio-workbench .progress-track > span {
+  display: block;
+  background: #7c94a6;
+  height: 100%;
+  transition: width 0.2s;
+}
+.folio-workbench .resource-warning {
+  position: absolute;
+  top: 10px;
+  left: 15px;
+  right: 15px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #fff5e9;
+  color: #ac783a;
+  border: 1px solid #ead7bb;
+  padding: 12px;
+  border-radius: 8px;
+  font-size: 10px;
+  z-index: 4;
+}
+.folio-workbench .resource-warning > button {
+  font-size: 10px;
+  padding: 3px 7px;
+  color: #a7753a;
+  background: transparent;
+  margin-left: auto;
+}
+.folio-workbench .toast-region {
+  position: fixed;
+  top: max(20px, env(safe-area-inset-top));
+  right: max(24px, env(safe-area-inset-right));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+  width: min(380px, calc(100vw - 32px));
+  z-index: 70;
+  pointer-events: none;
+}
+/* Canvas-relative notices stay below the toolbar properties at every viewport size. */
+.folio-workbench.app:not(.has-home) .document-workspace > .toast-region {
+  position: absolute;
+  top: 12px;
+  width: min(380px, calc(100% - 32px));
+}
+.folio-workbench .toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  max-width: 100%;
+  background: #fffffff5;
+  border: 1px solid #dce6df;
+  box-shadow: 0 8px 30px #263e4814, 0 2px 6px #263e4808;
+  padding: 12px 10px 12px 14px;
+  border-radius: 10px;
+  color: #6d8d79;
+  font-size: 12px;
+  pointer-events: auto;
+  animation: folio-toast-enter .32s cubic-bezier(.22, 1, .36, 1) both;
+}
+.folio-workbench .toast > svg, .folio-workbench .toast .icon-btn {
+  flex: none;
+}
+.folio-workbench .toast span {
+  min-width: 0;
+  color: #606e76;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.folio-workbench .toast.error {
+  color: #c46a50;
+  border-color: #efd9cd;
+}
+.folio-workbench .toast .icon-btn {
+  width: 24px;
+  height: 24px;
+  margin-left: 6px;
+}
+.folio-workbench .toast.is-leaving { animation: folio-toast-leave .2s ease-in both; }
+@keyframes folio-toast-enter {
+  from { opacity: 0; transform: translateX(calc(100% + 24px)); }
+  to { opacity: 1; transform: translateX(0); }
+}
+@keyframes folio-toast-leave {
+  from { opacity: 1; transform: translateX(0); }
+  to { opacity: 0; transform: translateX(calc(100% + 24px)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .folio-workbench .toast, .folio-workbench .toast.is-leaving { animation: none; }
+}
+.folio-workbench .dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #1e2c3a3d;
+  backdrop-filter: blur(3px);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.folio-workbench .dialog {
+  width: 460px;
+  max-width: 100%;
+  max-height: calc(100% - 48px);
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #e0e6eb;
+  box-shadow: 0 25px 80px #182d452e;
+  border-radius: 14px;
+  padding: 24px;
+}
+.folio-workbench .dialog-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+}
+.folio-workbench .dialog h2 {
+  font-size: 17px;
+  font-weight: 550;
+  margin: 0;
+  letter-spacing: 0.3px;
+}
+.folio-workbench .dialog > input, .folio-workbench .dialog > select {
+  display: block;
+  width: 100%;
+  margin: 9px 0;
+  padding: 11px;
+}
+.folio-workbench .dialog-label {
+  font-size: 11px;
+  color: #7d8993;
+  display: block;
+  margin: 20px 0 10px;
+}
+.folio-workbench .dialog-intro {
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  margin: 0 0 24px;
+}
+.folio-workbench .dialog-intro strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+.folio-workbench .dialog-intro p {
+  font-size: 10px;
+  color: #99a3ac;
+  margin: 7px 0 0;
+  line-height: 1.7;
+}
+.folio-workbench .dialog-icon {
+  background: #f0f4f7;
+  color: #7b93a5;
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+.folio-workbench .format-options {
+  display: flex;
+  gap: 10px;
+}
+.folio-workbench .format-options > button {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  flex: 1;
+  padding: 14px;
+  border-color: #e5e9ed;
+  text-align: left;
+  align-items: flex-start;
+  background: #fff;
+}
+.folio-workbench .format-options strong {
+  font-size: 12px;
+  font-weight: 550;
+}
+.folio-workbench .format-options span {
+  font-size: 9px;
+  color: #a3acb4;
+}
+.folio-workbench .format-options > button.active {
+  border-color: #879aaa;
+  box-shadow: 0 0 0 1px #879aaa;
+  background: #f7f9fb;
+}
+.folio-workbench .dialog-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-top: 24px;
+}
+.folio-workbench .dialog-form-grid label {
+  font-size: 11px;
+  color: #7d8993;
+}
+.folio-workbench .dialog-form-grid select {
+  display: block;
+  margin-top: 10px;
+  width: 100%;
+  padding: 10px 8px;
+}
+.folio-workbench .checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: #778590;
+  margin: 20px 0;
+}
+.folio-workbench .export-info {
+  display: flex;
+  gap: 9px;
+  background: #f5f7f9;
+  padding: 12px;
+  border-radius: 7px;
+  color: #9aa5ae;
+  align-items: flex-start;
+}
+.folio-workbench .export-info > svg {
+  flex: none;
+  margin-top: 2px;
+}
+.folio-workbench .export-info p {
+  font-size: 9px;
+  line-height: 1.9;
+  margin: 0;
+}
+.folio-workbench .export-info span {
+  display: block;
+  color: #a9b1b9;
+}
+.folio-workbench .dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+  margin-top: 26px;
+  padding-top: 20px;
+  border-top: 1px solid #eef1f3;
+}
+.folio-workbench .dialog-actions button {
+  padding: 9px 14px;
+  font-size: 11px;
+}
+.folio-workbench .form-error {
+  font-size: 11px;
+  color: #b85e4c;
+}
+.folio-workbench .dialog-description {
+  font-size: 11px;
+  color: #98a3ac;
+  line-height: 1.9;
+  margin: 10px 0 18px;
+}
+.folio-workbench .settings-section {
+  margin-bottom: 25px;
+}
+.folio-workbench .dialog.workbench-settings {
+  position: relative;
+  width: 940px;
+  height: 640px;
+  padding: 0;
+  overflow: hidden;
+  border-radius: 20px;
+}
+.folio-workbench .workbench-settings > .dialog-heading {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  z-index: 1;
+  margin: 0;
+}
+.folio-workbench .workbench-settings > .dialog-heading h2 {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.folio-workbench .settings-layout {
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+  height: 100%;
+}
+.folio-workbench .settings-sidebar {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 26px 12px 20px;
+  background: #f8f8f9;
+  border-right: 1px solid #f0f0f2;
+}
+.folio-workbench .settings-sidebar-heading {
+  padding: 0 12px;
+  margin-bottom: 16px;
+  color: #81818b;
+  font-size: 12px;
+  font-weight: 550;
+}
+.folio-workbench .settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.folio-workbench .settings-nav button {
+  justify-content: flex-start;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #60616b;
+  font-size: 13px;
+  text-align: left;
+}
+.folio-workbench .settings-nav button:hover {
+  background: #eeeef0;
+}
+.folio-workbench .settings-nav button[aria-current='page'] {
+  background: #e8e8eb;
+  color: #272a30;
+  font-weight: 550;
+}
+.folio-workbench .settings-nav-warning {
+  display: inline-flex;
+  margin-left: auto;
+  color: #b67b48;
+}
+.folio-workbench .settings-sidebar-footer {
+  margin-top: auto;
+  padding: 18px 12px 0;
+  border-top: 1px solid #e9e9ed;
+  color: #878993;
+}
+.folio-workbench .settings-sidebar-footer > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 10px;
+}
+.folio-workbench .settings-sidebar-footer small {
+  display: block;
+  margin-top: 8px;
+  color: #9b9da5;
+  font-size: 9px;
+}
+.folio-workbench .settings-content {
+  min-width: 0;
+  overflow: auto;
+  padding: 46px 44px 36px;
+  scrollbar-gutter: stable;
+}
+.folio-workbench .settings-page-heading {
+  margin-bottom: 34px;
+  padding-right: 10px;
+}
+.folio-workbench .settings-page-heading h3 {
+  margin: 0 0 10px;
+  color: #272b32;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.5px;
+}
+.folio-workbench .settings-page-heading p {
+  margin: 0;
+  color: #85858f;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.folio-workbench .settings-group {
+  margin-bottom: 28px;
+}
+.folio-workbench .settings-group > h3, .folio-workbench .settings-group > h4 {
+  margin: 0 0 12px;
+  color: #4b4e57;
+  font-size: 12px;
+  font-weight: 550;
+}
+.folio-workbench .settings-card {
+  overflow: hidden;
+  border: 1px solid #e9e9ee;
+  border-radius: 12px;
+}
+.folio-workbench .settings-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  min-height: 79px;
+  padding: 16px 18px;
+  border: 0;
+  border-bottom: 1px solid #eeeef2;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+  white-space: normal;
+}
+.folio-workbench .settings-row:last-child {
+  border-bottom: 0;
+}
+.folio-workbench .settings-row-copy {
+  flex: 1;
+  min-width: 0;
+}
+.folio-workbench .settings-row-copy strong, .folio-workbench .settings-row-copy small {
+  display: block;
+}
+.folio-workbench .settings-row-copy strong {
+  color: #42454e;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+.folio-workbench .settings-row-copy small {
+  margin-top: 4px;
+  color: #888993;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.folio-workbench button.settings-toggle:hover:not(:disabled) {
+  background: #fafafb;
+  border-color: #eeeef2;
+}
+.folio-workbench button.settings-toggle:disabled {
+  opacity: 1;
+}
+.folio-workbench .settings-toggle:disabled .settings-row-copy {
+  opacity: 0.56;
+}
+.folio-workbench .settings-toggle:disabled .toggle-switch {
+  opacity: 0.4;
+}
+.folio-workbench .settings-toggle.active .toggle-switch {
+  background: #74968b;
+}
+.folio-workbench .settings-toggle.active .toggle-switch:after {
+  left: 15px;
+}
+.folio-workbench .settings-row .settings-text-button {
+  flex: none;
+  padding: 8px 10px;
+  border-color: #e8e8ee;
+  background: #f7f7f9;
+  color: #696b76;
+  font-size: 10px;
+}
+.folio-workbench .settings-row .settings-danger-action {
+  color: #b7685d;
+  background: #fff;
+  border-color: #eedfdb;
+}
+.folio-workbench .settings-content .shortcut-grid {
+  grid-template-columns: 1fr;
+  gap: 0;
+  margin: 0;
+  padding: 0 18px;
+  border: 1px solid #e9e9ee;
+  border-radius: 12px;
+}
+.folio-workbench .settings-content .shortcut-grid > span {
+  min-height: 44px;
+  padding: 9px 0;
+  border-bottom: 1px solid #eeeef2;
+  color: #646672;
+  font-size: 12px;
+}
+.folio-workbench .settings-content .shortcut-grid > span:last-child {
+  border-bottom: 0;
+}
+.folio-workbench .settings-content .shortcut-grid kbd {
+  font-size: 10px;
+  color: #777984;
+}
+.folio-workbench .settings-help {
+  padding: 18px;
+  border: 1px solid #e9e9ee;
+  border-radius: 12px;
+  color: #7c7e89;
+  font-size: 12px;
+  line-height: 2;
+}
+.folio-workbench .settings-help p {
+  margin: 0 0 16px;
+}
+.folio-workbench .workbench-settings .diagnostic-errors {
+  margin: 14px 0 0;
+}
+@media (max-width: 700px) {
+  .folio-workbench .dialog.workbench-settings {
+    height: min(720px, calc(100% - 32px));
+    border-radius: 16px;
+  }
+  .folio-workbench .settings-layout {
+    display: flex;
+    flex-direction: column;
+  }
+  .folio-workbench .settings-sidebar {
+    flex: none;
+    padding: 23px 18px 13px;
+    border: 0;
+    border-bottom: 1px solid #ededf1;
+  }
+  .folio-workbench .settings-sidebar-heading {
+    padding: 0;
+    margin-bottom: 18px;
+  }
+  .folio-workbench .settings-nav {
+    flex-direction: row;
+    gap: 4px;
+  }
+  .folio-workbench .settings-nav button {
+    justify-content: center;
+    flex: 1;
+    min-height: 36px;
+    padding: 8px;
+    font-size: 12px;
+  }
+  .folio-workbench .settings-sidebar-footer {
+    display: none;
+  }
+  .folio-workbench .settings-content {
+    flex: 1;
+    padding: 26px 20px 20px;
+  }
+  .folio-workbench .settings-page-heading {
+    margin-bottom: 24px;
+  }
+  .folio-workbench .settings-page-heading h3 {
+    font-size: 21px;
+  }
+  .folio-workbench .settings-row {
+    gap: 12px;
+    padding: 14px;
+  }
+  .folio-workbench .settings-row:has(.settings-text-button) {
+    flex-wrap: wrap;
+  }
+  .folio-workbench .settings-row:has(.settings-text-button) .settings-row-copy {
+    flex-basis: 100%;
+  }
+}
+.folio-workbench .clear-draft-dialog {
+  width: 440px;
+}
+.folio-workbench .clear-draft-dialog .dialog-heading {
+  margin-bottom: 22px;
+}
+.folio-workbench .clear-draft-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+.folio-workbench .clear-draft-icon {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  color: #c36b5b;
+  background: #fcf0ec;
+  border: 1px solid #f4e3dd;
+  border-radius: 14px;
+}
+.folio-workbench .clear-draft-summary strong {
+  display: block;
+  color: #414c55;
+  font-size: 12px;
+  font-weight: 550;
+  line-height: 1.8;
+}
+.folio-workbench .clear-draft-summary p {
+  margin: 6px 0 0;
+  color: #78858e;
+  font-size: 11px;
+  line-height: 1.9;
+}
+.folio-workbench .clear-draft-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 11px 12px;
+  margin-top: 20px;
+  color: #997b61;
+  background: #faf7f2;
+  border-radius: 8px;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.folio-workbench .clear-draft-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+.folio-workbench .clear-draft-error {
+  color: #b8594c;
+  font-size: 11px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+}
+.folio-workbench button.danger-button {
+  color: #fff;
+  background: #bf6254;
+  border-color: #bf6254;
+}
+.folio-workbench button.danger-button:hover:not(:disabled) {
+  background: #ab5144;
+  border-color: #ab5144;
+}
+@media (max-width: 520px) {
+  .folio-workbench .clear-draft-dialog {
+    padding: 20px;
+  }
+}
+.folio-workbench .settings-section h3 {
+  font-size: 12px;
+  font-weight: 550;
+  margin: 0 0 9px;
+}
+.folio-workbench .settings-section p {
+  font-size: 10px;
+  line-height: 1.9;
+  color: #94a0a9;
+  margin: 0 0 15px;
+}
+.folio-workbench .compatibility-button {
+  width: 100%;
+  gap: 11px;
+  justify-content: flex-start;
+  white-space: normal;
+  text-align: left;
+  padding: 13px;
+  border-color: #e4e9ed;
+  background: #fafcfd;
+  color: #7d909e;
+}
+.folio-workbench .compatibility-button > span:not(.toggle-switch) {
+  font-size: 11px;
+}
+.folio-workbench .compatibility-button small {
+  display: block;
+  font-size: 9px;
+  color: #a0aab2;
+  margin-top: 5px;
+  line-height: 1.7;
+}
+.folio-workbench .toggle-switch {
+  display: block;
+  width: 29px;
+  height: 16px;
+  border-radius: 10px;
+  background: #d9e0e5;
+  margin-left: auto;
+  position: relative;
+  flex: none;
+}
+.folio-workbench .toggle-switch:after {
+  content: '';
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: #fff;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  box-shadow: 0 1px 2px #0001;
+}
+.folio-workbench .compatibility-button.active .toggle-switch {
+  background: #74968b;
+}
+.folio-workbench .compatibility-button.active .toggle-switch:after {
+  left: 15px;
+}
+.folio-workbench .shortcut-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 24px;
+  margin-top: 17px;
+}
+.folio-workbench .shortcut-grid > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9px;
+  color: #8c99a4;
+}
+.folio-workbench .shortcut-grid kbd {
+  font-size: 8px;
+}
+.folio-workbench .about-engine {
+  border-top: 1px solid #edf1f4;
+  padding-top: 18px;
+  display: flex;
+  justify-content: space-between;
+  color: #b0b8bf;
+  font-size: 9px;
+}
+.folio-workbench .diagnostic-errors {
+  background: #fff4ec;
+  border: 1px solid #edd9c8;
+  border-radius: 6px;
+  padding: 10px 13px;
+  color: #b07c4f;
+  font-size: 10px;
+  line-height: 1.8;
+  overflow-wrap: anywhere;
+  margin-bottom: 20px;
+}
+.folio-workbench .file-drop-overlay {
+  position: fixed;
+  inset: 10px;
+  border: 2px dashed #9aafbe;
+  background: #f4f8fbe8;
+  backdrop-filter: blur(5px);
+  z-index: 60;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+.folio-workbench .file-drop-overlay > div {
+  display: flex;
+  align-items: center;
+  flex-direction: column;
+  gap: 23px;
+  color: #728b9e;
+}
+.folio-workbench .file-drop-overlay strong {
+  font-size: 24px;
+  letter-spacing: 1px;
+  font-weight: 500;
+}
+.folio-workbench .file-drop-overlay span {
+  font-size: 12px;
+  color: #a0adb7;
+}
+.folio-workbench .fatal-error {
+  max-width: 500px;
+  padding: 48px;
+  margin: 10vh auto;
+  font-size: 13px;
+  line-height: 2;
+  color: #566977;
+}
+.folio-workbench .fatal-error h1 {
+  font-size: 24px;
+}
+.folio-workbench .fatal-error button {
+  margin-top: 16px;
+}
+@media (min-width: 1600px) {
+  .folio-workbench .sidebar {
+    width: 234px;
+  }
+  .folio-workbench .inspector {
+    width: 286px;
+  }
+  .folio-workbench.app-header {
+    height: 78px;
+  }
+  .folio-workbench .empty-workspace h1 {
+    font-size: 30px;
+  }
+  .folio-workbench .empty-workspace > p {
+    font-size: 12px;
+  }
+  .folio-workbench .paper-illustration {
+    transform: scale(1.1);
+    margin-bottom: 38px;
+  }
+  .folio-workbench .inspector-scroll {
+    padding: 22px 26px;
+  }
+  .folio-workbench .marker-preview {
+    height: 140px;
+  }
+}
+@media (max-width: 1150px) {
+  .folio-workbench .sidebar {
+    width: 176px;
+  }
+  .folio-workbench .inspector {
+    width: 238px;
+  }
+  .folio-workbench.app-header {
+    padding: 0 18px;
+    gap: 16px;
+  }
+  .folio-workbench .private-label {
+    display: none;
+  }
+  .folio-workbench .selection-summary {
+    display: none;
+  }
+  .folio-workbench .inspector-scroll {
+    padding: 17px 18px;
+  }
+  .folio-workbench .thumbnail-card {
+    left: 9px !important;
+    right: 9px !important;
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+  .folio-workbench .empty-workspace h1 {
+    font-size: 23px;
+  }
+  .folio-workbench .empty-features {
+    gap: 12px;
+  }
+  .folio-workbench .command-bar {
+    padding: 0 15px;
+  }
+  .folio-workbench .brand strong > span {
+    letter-spacing: 0.8px;
+    font-size: 8px;
+  }
+}
+@media (max-width: 900px) {
+  .folio-workbench .sidebar {
+    width: 155px;
+  }
+  .folio-workbench .inspector {
+    width: 216px;
+  }
+  .folio-workbench .header-divider {
+    display: none;
+  }
+  .folio-workbench .document-name {
+    font-size: 10px;
+  }
+  .folio-workbench .brand strong > span {
+    display: none;
+  }
+  .folio-workbench .brand-icon {
+    width: 30px;
+    height: 34px;
+  }
+  .folio-workbench .brand strong {
+    font-size: 20px;
+  }
+  .folio-workbench.app-header {
+    height: 60px;
+    gap: 15px;
+  }
+  .folio-workbench .button-shortcut {
+    display: none;
+  }
+  .folio-workbench .tool-group button {
+    padding: 6px;
+  }
+  .folio-workbench .tool-group kbd {
+    display: none;
+  }
+  .folio-workbench .inspector-scroll {
+    padding: 16px 14px;
+  }
+  .folio-workbench .color-fields > button {
+    font-size: 9px;
+  }
+  .folio-workbench .empty-features {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+  }
+  .folio-workbench .empty-workspace {
+    padding: 16px;
+  }
+  .folio-workbench .empty-eyebrow {
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+  .folio-workbench .empty-workspace h1 {
+    font-size: 20px;
+  }
+  .folio-workbench .empty-workspace > p {
+    font-size: 10px;
+  }
+  .folio-workbench .paper-illustration {
+    transform: scale(0.85);
+    margin-bottom: 2px;
+  }
+  .folio-workbench .canvas-controls {
+    padding: 5px;
+    gap: 0;
+  }
+  .folio-workbench .canvas-controls > .toolbar-divider {
+    margin: 0 4px;
+  }
+  .folio-workbench .fit-button > span {
+    display: none;
+  }
+  .folio-workbench .side-tabs {
+    margin: 15px 8px 0;
+  }
+  .folio-workbench .side-tabs > button {
+    font-size: 10px;
+  }
+  .folio-workbench .thumbnail-paper {
+    max-width: 126px;
+    overflow: hidden;
+  }
+  .folio-workbench .header-actions > button {
+    font-size: 10px;
+    padding: 8px 10px;
+  }
+  .folio-workbench .status-bar {
+    padding: 0 13px;
+  }
+  .folio-workbench .command-right > button {
+    font-size: 10px !important;
+  }
+  .folio-workbench .marker-preview {
+    height: 115px;
+  }
+  .folio-workbench .range-field {
+    margin-top: 16px;
+  }
+  .folio-workbench .section-divider {
+    margin: 19px 0;
+  }
+}
+@media (max-width: 720px) {
+  .folio-workbench .sidebar {
+    display: none;
+  }
+  .folio-workbench .inspector {
+    width: 195px;
+  }
+  .folio-workbench .document-name > svg, .folio-workbench .document-badge {
+    display: none;
+  }
+  .folio-workbench .brand {
+    gap: 7px;
+  }
+  .folio-workbench .brand-icon {
+    width: 27px;
+    height: 30px;
+  }
+  .folio-workbench .brand strong {
+    font-size: 18px;
+  }
+  .folio-workbench .header-actions {
+    gap: 5px;
+  }
+  .folio-workbench .header-actions > button {
+    padding: 8px;
+  }
+  .folio-workbench .save-button .button-shortcut {
+    display: none;
+  }
+  .folio-workbench.app-header {
+    padding: 0 12px;
+    gap: 10px;
+  }
+  .folio-workbench .command-bar {
+    padding: 0 8px;
+  }
+  .folio-workbench .sidebar-toggle {
+    display: none;
+  }
+  .folio-workbench .command-right > .icon-btn {
+    margin-left: 0;
+  }
+  .folio-workbench .tool-group button > span {
+    display: none;
+  }
+  .folio-workbench .tool-group button {
+    width: 32px;
+    height: 30px;
+  }
+  .folio-workbench .toolbar-divider {
+    margin: 0 5px;
+  }
+  .folio-workbench .empty-workspace h1 {
+    font-size: 18px;
+    letter-spacing: 0;
+  }
+  .folio-workbench .empty-workspace > p {
+    font-size: 9px;
+  }
+  .folio-workbench .empty-eyebrow {
+    display: none;
+  }
+  .folio-workbench .empty-features {
+    margin-top: 23px;
+  }
+  .folio-workbench .empty-features span:last-child {
+    display: none;
+  }
+  .folio-workbench .empty-open {
+    font-size: 10px !important;
+    padding: 10px 12px !important;
+  }
+  .folio-workbench .empty-open svg:last-child {
+    display: none;
+  }
+  .folio-workbench .paper-illustration {
+    transform: scale(0.7);
+    margin: -15px 0 -8px;
+  }
+  .folio-workbench .canvas-controls .icon-btn {
+    width: 23px;
+  }
+  .folio-workbench .canvas-controls {
+    bottom: 15px;
+    max-width: calc(100% - 12px);
+  }
+  .folio-workbench .canvas-controls select {
+    width: 43px;
+    font-size: 10px;
+  }
+  .folio-workbench .page-control label > span {
+    font-size: 9px;
+  }
+  .folio-workbench .page-control input {
+    width: 24px;
+  }
+  .folio-workbench .status-bar > div > .status-separator:last-of-type, .folio-workbench .status-bar > div > button:last-child {
+    display: none;
+  }
+  .folio-workbench .status-bar {
+    font-size: 8px;
+  }
+  .folio-workbench .status-bar button {
+    font-size: 8px;
+  }
+  .folio-workbench .inspector-header {
+    padding: 0 14px;
+  }
+  .folio-workbench .inspector-header > span {
+    font-size: 11px;
+  }
+  .folio-workbench .inspector-footer {
+    font-size: 8px;
+  }
+  .folio-workbench .custom-color {
+    flex-wrap: wrap;
+  }
+  .folio-workbench .marker-preview {
+    height: 105px;
+  }
+  .folio-workbench .marker-preview > div {
+    width: 55px !important;
+    height: 55px !important;
+  }
+  .folio-workbench .color-fields > button {
+    gap: 3px;
+    padding: 6px 3px;
+  }
+  .folio-workbench .palette {
+    gap: 5px;
+  }
+  .folio-workbench .empty-drop {
+    font-size: 9px;
+  }
+  .folio-workbench .command-right > button > span {
+    display: none;
+  }
+  .folio-workbench .restore-draft {
+    max-width: 180px;
+    font-size: 9px;
+    padding: 8px;
+    gap: 6px;
+  }
+  .folio-workbench .restore-draft svg:last-child {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .folio-workbench .inspector {
+    width: 170px;
+  }
+  .folio-workbench .inspector-scroll {
+    padding: 14px 11px;
+  }
+  .folio-workbench .inspector-header {
+    height: 48px;
+    padding: 0 10px;
+  }
+  .folio-workbench .inspector-header .icon-btn {
+    width: 24px;
+  }
+  .folio-workbench .marker-preview {
+    margin: 13px 0 18px;
+    height: 92px;
+  }
+  .folio-workbench .property-context {
+    font-size: 8px;
+  }
+  .folio-workbench .number-unit input {
+    width: 32px;
+  }
+  .folio-workbench .range-field label, .folio-workbench .form-row label {
+    font-size: 9px;
+  }
+  .folio-workbench .section-label {
+    font-size: 9px;
+  }
+  .folio-workbench .form-row > input {
+    width: 53px;
+  }
+  .folio-workbench .color-fields {
+    gap: 3px;
+  }
+  .folio-workbench .color-fields > button {
+    font-size: 8px;
+    gap: 3px;
+  }
+  .folio-workbench .color-dot {
+    width: 9px;
+    height: 9px;
+  }
+  .folio-workbench .palette {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px 13px;
+    margin: 16px 5px;
+  }
+  .folio-workbench .palette > button {
+    height: 18px;
+    aspect-ratio: 1;
+    width: 18px;
+  }
+  .folio-workbench .custom-color {
+    gap: 8px;
+  }
+  .folio-workbench .shortcut-row {
+    font-size: 8px;
+  }
+  .folio-workbench .shortcut-row kbd {
+    font-size: 7px;
+  }
+  .folio-workbench .document-name {
+    display: none;
+  }
+  .folio-workbench .header-actions {
+    margin-left: auto;
+  }
+  .folio-workbench .brand-icon {
+    width: 24px;
+    height: 28px;
+  }
+  .folio-workbench .brand-icon svg {
+    width: 17px;
+  }
+  .folio-workbench.app-header {
+    height: 55px;
+  }
+  .folio-workbench .header-actions > button {
+    font-size: 9px;
+    gap: 4px;
+  }
+  .folio-workbench .header-actions > button svg {
+    width: 13px;
+  }
+  .folio-workbench .command-bar {
+    height: 49px;
+  }
+  .folio-workbench .command-left > .icon-btn {
+    width: 24px;
+  }
+  .folio-workbench .command-left > .toolbar-divider {
+    margin: 0 3px;
+  }
+  .folio-workbench .tool-group button {
+    width: 27px;
+  }
+  .folio-workbench .command-right .icon-btn {
+    width: 26px;
+  }
+  .folio-workbench .canvas-controls {
+    gap: 0;
+    border-radius: 7px;
+    padding: 4px;
+  }
+  .folio-workbench .canvas-controls .icon-btn {
+    width: 20px;
+    height: 24px;
+  }
+  .folio-workbench .canvas-controls > .toolbar-divider {
+    margin: 0 2px;
+  }
+  .folio-workbench .canvas-controls select {
+    width: 37px;
+    font-size: 9px;
+  }
+  .folio-workbench .page-control input {
+    width: 20px;
+    padding: 3px 0;
+    font-size: 9px;
+  }
+  .folio-workbench .page-control label {
+    padding: 0;
+  }
+  .folio-workbench .page-control > button {
+    width: 17px !important;
+  }
+  .folio-workbench .fit-button {
+    padding: 4px;
+  }
+  .folio-workbench .fit-button svg {
+    width: 13px;
+  }
+  .folio-workbench .empty-workspace h1 {
+    font-size: 15px;
+  }
+  .folio-workbench .empty-workspace > p {
+    font-size: 8px;
+  }
+  .folio-workbench .empty-open {
+    font-size: 9px !important;
+    padding: 9px 10px !important;
+    gap: 6px;
+  }
+  .folio-workbench .empty-open svg {
+    width: 14px;
+  }
+  .folio-workbench .empty-drop {
+    font-size: 8px;
+  }
+  .folio-workbench .empty-features {
+    font-size: 7px;
+    gap: 8px;
+  }
+  .folio-workbench .empty-features svg {
+    width: 10px;
+  }
+  .folio-workbench .status-bar {
+    height: 28px;
+    font-size: 7px;
+    padding: 0 8px;
+  }
+  .folio-workbench .status-bar > div > span:first-child {
+    display: none;
+  }
+  .folio-workbench .status-bar > div {
+    gap: 7px;
+  }
+  .folio-workbench .status-bar > div > .status-separator:first-of-type {
+    display: none;
+  }
+  .folio-workbench .dialog {
+    padding: 20px;
+  }
+  .folio-workbench .dialog-backdrop {
+    padding: 15px;
+  }
+  .folio-workbench .dialog-heading {
+    margin-bottom: 20px;
+  }
+  .folio-workbench .dialog h2 {
+    font-size: 16px;
+  }
+  .folio-workbench .dialog-form-grid {
+    gap: 11px;
+  }
+  .folio-workbench .dialog-form-grid select {
+    font-size: 11px;
+  }
+  .folio-workbench .format-options > button {
+    padding: 12px;
+  }
+  .folio-workbench .shortcut-grid {
+    gap: 14px 15px;
+  }
+  .folio-workbench .about-engine {
+    font-size: 8px;
+  }
+  .folio-workbench .resource-warning {
+    left: 8px;
+    right: 8px;
+    flex-wrap: wrap;
+  }
+  .folio-workbench .job-banner {
+    min-width: 180px;
+    width: calc(100% - 20px);
+    padding: 11px;
+    gap: 8px;
+  }
+  .folio-workbench .job-banner strong {
+    font-size: 9px;
+  }
+  .folio-workbench .job-banner > .spinner {
+    width: 12px;
+    height: 12px;
+  }
+  .folio-workbench .job-banner > .icon-btn {
+    width: 22px;
+  }
+  .folio-workbench .toast-region { top: max(12px, env(safe-area-inset-top)); right: max(12px, env(safe-area-inset-right)); }
+  .folio-workbench .toast { font-size: 11px; }
+  .folio-workbench .empty-workspace {
+    padding: 12px;
+  }
+  .folio-workbench .restore-draft {
+    max-width: 150px;
+  }
+  .folio-workbench .paper-illustration {
+    transform: scale(0.6);
+    margin: -25px 0 -17px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .folio-workbench, .folio-workbench *, .folio-workbench *::before, .folio-workbench *::after, .folio-workbench *:before, .folio-workbench *:after {
+    animation-duration: 0.01ms !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+/* Keep secondary copy readable on the neutral workbench surfaces. */
+.folio-workbench .document-name {
+  color: #687581;
+}
+.folio-workbench .property-context, .folio-workbench .side-heading, .folio-workbench .thumbnail-caption, .folio-workbench .shortcut-row, .folio-workbench .inspector-footer, .folio-workbench .section-label, .folio-workbench .status-bar, .folio-workbench .status-bar button {
+  color: #74818c;
+}
+.folio-workbench .range-field label, .folio-workbench .form-row label {
+  color: #5e6d79;
+}
+.folio-workbench .empty-workspace > p {
+  color: #76848f;
+}
+.folio-workbench .empty-drop, .folio-workbench .empty-features {
+  color: #7d8b96;
+}
+.folio-workbench .color-fields > button, .folio-workbench .custom-color label, .folio-workbench .custom-color > button {
+  color: #778590;
+}
+.folio-workbench .shortcut-row kbd {
+  color: #7f8b95;
+}
+.folio-workbench .marker-preview > span {
+  color: #84929d;
+}
+.folio-workbench .dialog-intro p, .folio-workbench .dialog-description, .folio-workbench .settings-section p, .folio-workbench .dialog-form-grid label, .folio-workbench .dialog-label {
+  color: #74838e;
+}
+.folio-workbench .export-info, .folio-workbench .export-info span {
+  color: #7d8c98;
+}
+.folio-workbench .format-options span {
+  color: #81909c;
+}
+.folio-workbench .shortcut-grid > span {
+  color: #73838f;
+}
+.folio-workbench .number-unit > span {
+  color: #82909b;
+}
+@media (min-width: 901px) {
+  .folio-workbench .property-context, .folio-workbench .section-label, .folio-workbench .range-field label, .folio-workbench .form-row label {
+    font-size: 11px;
+  }
+  .folio-workbench .number-unit input {
+    font-size: 12px;
+    width: 43px;
+  }
+  .folio-workbench .number-unit > span {
+    font-size: 10px;
+  }
+  .folio-workbench .thumbnail-caption {
+    font-size: 11px;
+  }
+  .folio-workbench .side-heading {
+    font-size: 11px;
+  }
+  .folio-workbench .shortcut-row {
+    font-size: 10px;
+  }
+  .folio-workbench .shortcut-row kbd {
+    font-size: 9px;
+  }
+  .folio-workbench .empty-workspace > p {
+    font-size: 12px;
+  }
+  .folio-workbench .empty-drop {
+    font-size: 11px;
+  }
+  .folio-workbench .empty-features {
+    font-size: 9px;
+  }
+  .folio-workbench .inspector-footer {
+    font-size: 10px;
+  }
+  .folio-workbench .canvas-controls select {
+    font-size: 12px;
+  }
+  .folio-workbench .status-bar {
+    font-size: 10px;
+  }
+  .folio-workbench .status-bar button {
+    font-size: 10px;
+  }
+}
+.folio-workbench .mobile-property-toggle {
+  display: none;
+}
+@media (max-width: 720px) {
+  .folio-workbench .mobile-property-toggle {
+    display: inline-flex;
+  }
+  .folio-workbench .mobile-property-toggle[aria-expanded='true'] {
+    background: #e9eff4;
+    color: #4f6d83;
+  }
+  .folio-workbench .inspector {
+    display: none;
+    position: fixed;
+    right: 0;
+    top: 114px;
+    bottom: 31px;
+    width: 252px;
+    box-shadow: -8px 5px 30px #243c4f14;
+    border-left: 1px solid #d7e0e7;
+    z-index: 10;
+  }
+  .folio-workbench .inspector-open .inspector {
+    display: flex;
+  }
+  .folio-workbench .inspector-scroll {
+    padding: 18px 20px;
+  }
+  .folio-workbench .inspector-header {
+    padding: 0 19px;
+  }
+  .folio-workbench .inspector-header > span {
+    font-size: 12px;
+  }
+  .folio-workbench .property-context, .folio-workbench .section-label {
+    font-size: 10px;
+  }
+  .folio-workbench .form-row label, .folio-workbench .range-field label {
+    font-size: 11px;
+  }
+  .folio-workbench .number-unit input {
+    width: 42px;
+    font-size: 11px;
+  }
+  .folio-workbench .marker-preview {
+    height: 112px;
+  }
+  .folio-workbench .color-fields > button {
+    font-size: 10px;
+    padding: 7px 6px;
+  }
+  .folio-workbench .color-dot {
+    width: 12px;
+    height: 12px;
+  }
+  .folio-workbench .palette {
+    grid-template-columns: repeat(8, 1fr);
+    gap: 7px;
+    margin: 17px 0 13px;
+  }
+  .folio-workbench .palette > button {
+    height: auto;
+    width: auto;
+  }
+  .folio-workbench .shortcut-row {
+    font-size: 10px;
+  }
+  .folio-workbench .shortcut-row kbd {
+    font-size: 9px;
+  }
+  .folio-workbench .empty-workspace h1 {
+    font-size: 25px;
+    letter-spacing: 0.5px;
+  }
+  .folio-workbench .empty-workspace > p {
+    font-size: 11px;
+  }
+  .folio-workbench .empty-eyebrow {
+    display: flex;
+    font-size: 8px;
+    letter-spacing: 1.8px;
+  }
+  .folio-workbench .paper-illustration {
+    transform: scale(0.95);
+    margin-bottom: 20px;
+  }
+  .folio-workbench .empty-open {
+    font-size: 12px !important;
+    padding: 12px 17px !important;
+  }
+  .folio-workbench .empty-drop {
+    font-size: 10px;
+  }
+  .folio-workbench .empty-features {
+    font-size: 9px;
+    gap: 18px;
+    margin-top: 30px;
+  }
+  .folio-workbench .restore-draft {
+    max-width: 280px;
+    padding: 10px 14px;
+    font-size: 10px;
+  }
+}
+@media (max-width: 480px) {
+  .folio-workbench .inspector {
+    top: 104px;
+    bottom: 28px;
+  }
+  .folio-workbench .canvas-controls {
+    max-width: calc(100% - 32px);
+    padding: 5px 7px;
+  }
+  .folio-workbench .canvas-controls .icon-btn {
+    width: 25px;
+    height: 27px;
+  }
+  .folio-workbench .canvas-controls select {
+    width: 45px;
+    font-size: 11px;
+  }
+  .folio-workbench .canvas-controls > .toolbar-divider {
+    margin: 0 5px;
+  }
+  .folio-workbench .page-control input {
+    width: 25px;
+    font-size: 10px;
+  }
+  .folio-workbench .page-control > button {
+    width: 23px !important;
+  }
+  .folio-workbench .page-control label {
+    font-size: 10px;
+  }
+  .folio-workbench .page-control label > span {
+    font-size: 10px;
+  }
+  .folio-workbench .fit-button {
+    padding: 6px;
+  }
+  .folio-workbench .fit-button svg {
+    width: 15px;
+  }
+  .folio-workbench .empty-workspace h1 {
+    font-size: 23px;
+  }
+  .folio-workbench .empty-workspace > p {
+    font-size: 10px;
+  }
+  .folio-workbench .empty-features {
+    font-size: 8px;
+    gap: 15px;
+  }
+  .folio-workbench .empty-features span:last-child {
+    display: flex;
+  }
+  .folio-workbench .inspector-footer {
+    font-size: 9px;
+  }
+  .folio-workbench .custom-color label, .folio-workbench .custom-color > button {
+    font-size: 9px;
+  }
+  .folio-workbench .range-field {
+    margin-top: 18px;
+  }
+  .folio-workbench .section-divider {
+    margin: 21px 0;
+  }
+}
+
+/* Compact chrome: document identity above, actions below, file entry in the footer. */
+.folio-workbench.app {
+  --header-height: 40px;
+  --toolbar-height: 44px;
+  --status-height: 34px;
+}
+.folio-workbench.app .app-header {
+  height: var(--header-height);
+  padding: 0 17px;
+  gap: 15px;
+}
+.folio-workbench.app .brand {
+  gap: 7px;
+}
+.folio-workbench.app .brand-icon {
+  width: 24px;
+  height: 27px;
+  border-radius: 7px;
+}
+.folio-workbench.app .brand-icon svg {
+  width: 16px;
+  height: 18px;
+}
+.folio-workbench.app .brand strong {
+  font-size: 17px;
+  letter-spacing: -0.5px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+.folio-workbench.app .brand strong > span {
+  display: none;
+}
+.folio-workbench.app .header-divider {
+  display: block;
+  height: 16px;
+}
+.folio-workbench.app .document-name {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  margin: 0 auto;
+  gap: 8px;
+  max-width: 680px;
+  font-size: 11px;
+}
+.folio-workbench.app .document-name > svg {
+  display: block;
+  width: 13px;
+  height: 13px;
+  color: #9ca7b0;
+}
+.folio-workbench.app .document-name > .filename-text {
+  display: block;
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: none;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: nowrap;
+  text-align: center;
+}
+.folio-workbench.app .private-label {
+  display: flex;
+  font-size: 9px;
+  gap: 5px;
+  margin: 0;
+  margin-left: auto;
+  color: #89949e;
+  white-space: nowrap;
+}
+.folio-workbench.app .command-bar {
+  height: var(--toolbar-height);
+  padding: 0 14px;
+  z-index: 12;
+}
+.folio-workbench.app .tool-group {
+  padding: 2px;
+}
+.folio-workbench.app .tool-group button {
+  padding: 5px 8px;
+  font-size: 10px;
+}
+.folio-workbench.app .sidebar-toggle {
+  margin-right: 7px;
+}
+.folio-workbench.app .selection-summary {
+  font-size: 9px;
+}
+.folio-workbench.app .command-right {
+  gap: 6px;
+}
+.folio-workbench.app .command-right > .icon-btn {
+  margin-left: 0;
+}
+.folio-workbench.app .property-toggle {
+  display: inline-flex;
+}
+.folio-workbench.app .property-toggle[aria-expanded='true'] {
+  color: #4d6e88;
+  background: #edf3f7;
+  border-color: transparent;
+}
+.folio-workbench.app .inspector {
+  display: flex;
+  position: relative;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  z-index: 8;
+  box-shadow: none;
+  flex: none;
+}
+.folio-workbench .inspector-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.folio-workbench .inspector-header-actions .icon-btn {
+  width: 25px;
+  height: 26px;
+}
+.folio-workbench.app .status-bar {
+  height: var(--status-height);
+  padding: 0 14px;
+  gap: 12px;
+}
+.folio-workbench.app .status-left, .folio-workbench.app .status-right {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-width: 0;
+}
+.folio-workbench .status-left > span:not(.status-separator) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 9px;
+  white-space: nowrap;
+}
+.folio-workbench.app .status-bar .footer-open {
+  display: inline-flex;
+  padding: 4px 7px;
+  margin-left: -7px;
+  gap: 6px;
+  color: #5a6c7a;
+  font-size: 10px;
+  border-radius: 4px;
+}
+.folio-workbench.app .status-bar .footer-open:hover:not(:disabled) {
+  background: #e9eef3;
+}
+.folio-workbench .document-page-count {
+  color: #6b7e8d;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.folio-workbench.app .status-marker-count {
+  display: inline;
+}
+.folio-workbench .export-menu {
+  position: relative;
+}
+.folio-workbench.app .export-trigger {
+  background: #f4f7f9;
+  border: 1px solid #dfe6eb !important;
+  border-radius: 6px;
+  font-size: 11px;
+  padding: 6px 10px;
+  gap: 7px;
+  color: #425767;
+}
+.folio-workbench.app .export-trigger:hover:not(:disabled) {
+  background: #eaf0f5;
+}
+.folio-workbench .export-trigger[aria-expanded='true'] {
+  background: #eaf0f5 !important;
+}
+.folio-workbench .export-options {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 252px;
+  background: #fff;
+  border: 1px solid #dde5eb;
+  box-shadow: 0 10px 35px #22384c20;
+  padding: 5px;
+  border-radius: 9px;
+  z-index: 25;
+}
+.folio-workbench .export-options > button {
+  display: flex;
+  align-items: center;
+  text-align: left;
+  justify-content: flex-start;
+  width: 100%;
+  gap: 12px;
+  border: 0;
+  border-radius: 5px;
+  padding: 12px 10px;
+  background: transparent;
+  color: #657b8d;
+}
+.folio-workbench .export-options > button:hover, .folio-workbench .export-options > button:focus-visible {
+  background: #eef4f8;
+}
+.folio-workbench .export-options > button > span {
+  font-size: 12px;
+  color: #3d5263;
+}
+.folio-workbench .export-options small {
+  display: block;
+  font-size: 9px;
+  color: #8b9ba7;
+  font-weight: 400;
+  margin-top: 5px;
+}
+.folio-workbench .export-options > .export-editable-toggle {
+  border-top: 1px solid #e5ebf0;
+  border-radius: 0;
+}
+.folio-workbench .export-editable-toggle[aria-checked='true'] .toggle-switch {
+  background: #74968b;
+}
+.folio-workbench .export-editable-toggle[aria-checked='true'] .toggle-switch:after {
+  left: 15px;
+}
+.folio-workbench .export-options kbd {
+  margin-left: auto;
+  font-size: 9px;
+  align-self: flex-start;
+  margin-top: 3px;
+  color: #8c99a5;
+}
+.folio-workbench.app .marker-list {
+  padding: 0 11px 18px;
+  gap: 2px;
+}
+.folio-workbench.app .marker-list > button {
+  height: 33px;
+  min-height: 33px;
+  padding: 4px 9px;
+  gap: 10px;
+  justify-content: space-between;
+  border-radius: 4px;
+  border: 0;
+  box-shadow: none;
+}
+.folio-workbench.app .marker-list > button.selected {
+  background: #e9f0f6;
+  border: 0;
+  box-shadow: inset 2px 0 #7795ad;
+}
+.folio-workbench.app .marker-list .number-badge {
+  width: 21px;
+  height: 21px;
+  font-size: 9px;
+  border-width: 1px;
+  flex: none;
+}
+.folio-workbench.app .marker-list .marker-row-page {
+  font-size: 10px;
+  color: #8a9aa6;
+  font-weight: 400;
+  margin-left: auto;
+}
+.folio-workbench.app .resource-warning {
+  align-items: flex-start;
+  font-size: 10px;
+}
+.folio-workbench.app .resource-warning > span {
+  flex: 1;
+  line-height: 1.8;
+}
+.folio-workbench.app .resource-warning > button {
+  margin-left: 0;
+  white-space: nowrap;
+  gap: 4px;
+}
+.folio-workbench .settings-help .reload-resources {
+  font-size: 10px;
+  gap: 6px;
+  background: #f7f9fb;
+  color: #617d93;
+  border-color: #dce5ed;
+  padding: 8px 10px;
+}
+.folio-workbench.app .dialog-backdrop, .folio-workbench .dialog-backdrop:has(> .pwa-dialog) {
+  z-index: 60;
+}
+.folio-workbench.app .toast {
+  z-index: 70;
+}
+.folio-workbench.app .resource-warning {
+  z-index: 4;
+}
+@media (min-width: 1600px) {
+  .folio-workbench.app .app-header {
+    height: var(--header-height);
+  }
+  .folio-workbench.app .inspector {
+    width: 276px;
+  }
+}
+@media (max-width: 1150px) {
+  .folio-workbench.app .selection-summary {
+    display: none;
+  }
+  .folio-workbench.app .command-bar {
+    padding: 0 12px;
+  }
+  .folio-workbench.app .brand strong {
+    font-size: 16px;
+  }
+  .folio-workbench.app .app-header {
+    gap: 12px;
+  }
+}
+@media (max-width: 900px) {
+  .folio-workbench.app .private-label {
+    display: none;
+  }
+  .folio-workbench.app .inspector {
+    width: 244px;
+  }
+  .folio-workbench.app .status-bar {
+    padding: 0 12px;
+  }
+  .folio-workbench.app .status-right {
+    gap: 9px;
+  }
+  .folio-workbench .status-left > span:not(.status-separator) {
+    font-size: 8px;
+  }
+  .folio-workbench.app .status-right > button:last-child {
+    display: none;
+  }
+  .folio-workbench.app .status-right > .status-separator:last-of-type {
+    display: none;
+  }
+}
+@media (max-width: 720px) {
+  .folio-workbench.app .sidebar-toggle {
+    display: inline-flex;
+    margin-right: 3px;
+  }
+  .folio-workbench.app .sidebar {
+    display: none;
+  }
+  .folio-workbench.app:not(.sidebar-collapsed) .sidebar {
+    display: flex;
+    position: fixed;
+    z-index: 9;
+    left: 0;
+    top: calc(var(--header-height) + var(--toolbar-height));
+    bottom: var(--status-height);
+    width: 184px;
+    box-shadow: 8px 4px 25px #253a4a14;
+  }
+  .folio-workbench.app .inspector {
+    position: fixed;
+    right: 0;
+    top: calc(var(--header-height) + var(--toolbar-height));
+    bottom: var(--status-height);
+    width: 252px;
+    box-shadow: -8px 4px 25px #253a4a14;
+  }
+  .folio-workbench.app .status-left > span:not(.status-separator) {
+    display: none;
+  }
+  .folio-workbench.app .status-left > .status-separator {
+    display: none;
+  }
+  .folio-workbench.app .status-right {
+    gap: 9px;
+  }
+  .folio-workbench.app .command-right > button > span {
+    display: none;
+  }
+  .folio-workbench.app .command-right {
+    gap: 3px;
+  }
+  .folio-workbench.app .tool-group button {
+    padding: 5px 6px;
+  }
+  .folio-workbench.app .export-trigger {
+    padding: 6px 8px;
+  }
+  .folio-workbench.app .export-trigger > span {
+    display: inline;
+  }
+  .folio-workbench.app .document-name > svg {
+    display: none;
+  }
+}
+@media (max-width: 480px) {
+  .folio-workbench.app {
+    --header-height: 38px;
+    --toolbar-height: 42px;
+    --status-height: 32px;
+  }
+  .folio-workbench.app .app-header {
+    padding: 0 11px;
+    gap: 10px;
+  }
+  .folio-workbench.app .brand-icon {
+    width: 22px;
+    height: 25px;
+  }
+  .folio-workbench.app .brand strong {
+    font-size: 15px;
+  }
+  .folio-workbench.app .header-divider {
+    height: 14px;
+  }
+  .folio-workbench.app .document-name {
+    font-size: 10px;
+  }
+  .folio-workbench.app .command-bar {
+    padding: 0 7px;
+  }
+  .folio-workbench.app .command-left {
+    gap: 2px;
+  }
+  .folio-workbench.app .tool-group button {
+    width: 27px;
+  }
+  .folio-workbench.app .command-left > .toolbar-divider {
+    margin: 0 3px;
+  }
+  .folio-workbench.app .command-left > .icon-btn {
+    width: 24px;
+  }
+  .folio-workbench.app .command-right > .icon-btn {
+    width: 26px;
+  }
+  .folio-workbench.app .command-right {
+    gap: 2px;
+  }
+  .folio-workbench.app .export-trigger {
+    font-size: 10px;
+    gap: 4px;
+    padding: 6px;
+  }
+  .folio-workbench.app .export-trigger > svg:first-child {
+    width: 13px;
+  }
+  .folio-workbench.app .export-trigger > svg:last-child {
+    width: 10px;
+  }
+  .folio-workbench.app .status-bar {
+    padding: 0 10px;
+    gap: 6px;
+    font-size: 9px;
+  }
+  .folio-workbench.app .status-left, .folio-workbench.app .status-right {
+    gap: 7px;
+  }
+  .folio-workbench.app .status-bar .footer-open {
+    font-size: 9px;
+    margin-left: -4px;
+    padding: 4px;
+  }
+  .folio-workbench.app .document-page-count {
+    display: inline !important;
+    font-size: 9px;
+  }
+  .folio-workbench.app .status-marker-count, .folio-workbench.app .status-right > .status-separator, .folio-workbench.app .status-right > button:not(.pwa-status):not(.footer-settings) {
+    display: none !important;
+  }
+  .folio-workbench.app .inspector-header {
+    height: 49px;
+  }
+  .folio-workbench.app .export-options {
+    width: 244px;
+  }
+  .folio-workbench.app .resource-warning {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .folio-workbench.app .resource-warning > span {
+    flex-basis: calc(100% - 25px);
+  }
+}
+
+/* Document identity lives in the footer; properties can dock in the toolbar. */
+.folio-workbench.app {
+  --header-height: 0px;
+  --toolbar-height: 44px;
+  --status-height: 36px;
+}
+.folio-workbench.app.properties-toolbar {
+  --toolbar-height: 80px;
+}
+.folio-workbench.app .command-bar {
+  height: var(--toolbar-height);
+  min-height: var(--toolbar-height);
+  padding: 4px 12px;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  row-gap: 4px;
+}
+.folio-workbench.app .command-left, .folio-workbench.app .command-right {
+  height: 32px;
+}
+.folio-workbench.app .command-right {
+  margin-left: auto;
+}
+.folio-workbench.app .inspector-header-actions > select {
+  font-size: 10px;
+  padding: 5px 6px;
+  width: 76px;
+  background: #f7f9fb;
+  border-color: #e2e8ed;
+}
+.folio-workbench.app .inspector-toolbar {
+  position: relative;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex: 0 0 100%;
+  width: 100%;
+  height: 36px;
+  min-height: 36px;
+  padding: 3px 0 0;
+  gap: 8px;
+  top: auto;
+  right: auto;
+  bottom: auto;
+  border: 0;
+  border-top: 1px solid #edf0f3;
+  background: transparent;
+  box-shadow: none;
+  z-index: auto;
+}
+.folio-workbench.app .inspector-toolbar .inspector-header {
+  order: 3;
+  flex: none;
+  width: auto;
+  height: 30px;
+  padding: 0 0 0 7px;
+  border: 0;
+  border-left: 1px solid #e5e9ed;
+  background: transparent;
+}
+.folio-workbench.app .inspector-toolbar .inspector-header > span {
+  display: none;
+}
+.folio-workbench.app .inspector-toolbar .inspector-header-actions {
+  gap: 3px;
+}
+.folio-workbench.app .inspector-toolbar .inspector-header-actions > .icon-btn {
+  width: 22px;
+  height: 25px;
+}
+.folio-workbench.app .inspector-toolbar .inspector-scroll {
+  display: contents;
+}
+.folio-workbench.app .inspector-toolbar .inspector-scroll > fieldset {
+  order: 1;
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  scrollbar-color: #d2dce4 transparent;
+  gap: 12px;
+  height: 32px;
+  padding: 0 0 1px;
+  white-space: nowrap;
+}
+.folio-workbench.app .inspector-toolbar .property-context, .folio-workbench.app .inspector-toolbar .marker-preview, .folio-workbench.app .inspector-toolbar .section-divider, .folio-workbench.app .inspector-toolbar .section-label, .folio-workbench.app .inspector-toolbar .shortcut-row, .folio-workbench.app .inspector-toolbar .inspector-footer {
+  display: none;
+}
+.folio-workbench.app .inspector-toolbar fieldset > .section-label:has(.link-toggle) {
+  display: block;
+  flex: none;
+  order: 5;
+  font-size: 0;
+  margin: 0;
+  line-height: 0;
+}
+.folio-workbench.app .inspector-toolbar .link-toggle {
+  font-size: 9px;
+  line-height: 1.2;
+  padding: 5px;
+  gap: 3px;
+}
+.folio-workbench.app .inspector-toolbar .form-row {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 6px;
+  margin: 0;
+}
+.folio-workbench.app .inspector-toolbar .form-row label {
+  font-size: 10px;
+  color: #71828e;
+}
+.folio-workbench.app .inspector-toolbar .form-row > input {
+  width: 40px;
+  padding: 4px 5px;
+  height: 25px;
+  font-size: 10px;
+}
+.folio-workbench.app .inspector-toolbar .range-field {
+  flex: none;
+  margin: 0;
+}
+.folio-workbench.app .inspector-toolbar .range-field > div {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.folio-workbench.app .inspector-toolbar .range-field label {
+  font-size: 10px;
+  color: #71828e;
+}
+.folio-workbench.app .inspector-toolbar .range-field > input[type='range'] {
+  display: none;
+}
+.folio-workbench.app .inspector-toolbar .number-unit {
+  height: 25px;
+}
+.folio-workbench.app .inspector-toolbar .number-unit input {
+  width: 32px;
+  font-size: 10px;
+  padding: 4px 1px 4px 4px;
+}
+.folio-workbench.app .inspector-toolbar .number-unit > span {
+  font-size: 8px;
+  padding-right: 5px;
+}
+.folio-workbench.app .inspector-toolbar .toolbar-colors-trigger {
+  order: 6;
+  padding: 5px 6px;
+  border-color: #e3e9ee;
+  gap: 5px;
+  font-size: 10px;
+  height: 25px;
+  flex: none;
+  background: #fff;
+  color: #71828e;
+}
+.folio-workbench.app .inspector-toolbar .toolbar-colors-trigger .color-dot {
+  height: 11px;
+  width: 11px;
+}
+.folio-workbench.app .inspector-toolbar .delete-selection {
+  order: 2;
+  flex: none;
+  font-size: 0;
+  line-height: 0;
+  width: 25px;
+  height: 25px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.folio-workbench.app .inspector-toolbar .delete-selection > span {
+  display: none;
+}
+.folio-workbench.app .inspector-toolbar .delete-selection svg {
+  height: 13px;
+  width: 13px;
+}
+.folio-workbench .toolbar-color-popover {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: 226px;
+  max-width: calc(100vw - 16px);
+  padding: 14px;
+  background: #fff;
+  border: 1px solid #dce4eb;
+  border-radius: 9px;
+  box-shadow: 0 9px 30px #233c521f;
+  color: #6c7f8f;
+}
+.folio-workbench .toolbar-color-popover::backdrop {
+  background: transparent;
+}
+.folio-workbench .toolbar-color-popover .palette {
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+  margin: 17px 0 13px;
+}
+.folio-workbench .toolbar-color-popover .palette > button {
+  width: auto;
+  height: auto;
+  aspect-ratio: 1;
+}
+.folio-workbench .toolbar-color-popover .color-fields {
+  display: flex;
+  gap: 5px;
+}
+.folio-workbench .toolbar-color-popover .color-fields > button {
+  font-size: 10px;
+  flex: 1;
+  padding: 6px 5px;
+}
+.folio-workbench .toolbar-color-popover .custom-color {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.folio-workbench .toolbar-color-popover .custom-color label {
+  font-size: 9px;
+}
+.folio-workbench .toolbar-color-popover .custom-color button {
+  font-size: 9px;
+}
+.folio-workbench .palette-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+  color: #6c7f8f;
+  font-size: 10px;
+}
+.folio-workbench .palette-simplify {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  cursor: pointer;
+}
+.folio-workbench .palette-simplify input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.folio-workbench .palette-switch-track {
+  width: 26px;
+  height: 15px;
+  padding: 2px;
+  border-radius: 999px;
+  background: #d1dae2;
+  pointer-events: none;
+  transition: background .15s;
+}
+.folio-workbench .palette-switch-track::after {
+  content: '';
+  display: block;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px #233c5226;
+  transition: transform .15s;
+}
+.folio-workbench .palette-simplify input:checked + .palette-switch-track {
+  background: #597d98;
+}
+.folio-workbench .palette-simplify input:checked + .palette-switch-track::after {
+  transform: translateX(11px);
+}
+.folio-workbench .palette-simplify input:focus-visible + .palette-switch-track {
+  outline: 2px solid #597d98;
+  outline-offset: -2px;
+}
+.folio-workbench .palette-simplify input:disabled + .palette-switch-track {
+  opacity: .5;
+}
+.folio-workbench .office-palette {
+  margin: 7px 0 13px;
+}
+.folio-workbench .office-palette-label {
+  padding: 5px 6px;
+  margin-bottom: 7px;
+  background: #f3f5f7;
+  color: #657888;
+  font-size: 10px;
+}
+.folio-workbench .office-theme-grid, .folio-workbench .office-standard-grid {
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 4px;
+}
+.folio-workbench .office-theme-grid {
+  margin-bottom: 11px;
+}
+.folio-workbench .office-color-column {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.folio-workbench .office-color-column > button, .folio-workbench .office-standard-grid > button {
+  position: relative;
+  display: block;
+  width: 100%;
+  min-height: 0;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 1px solid #00000014;
+  border-radius: 0;
+  box-shadow: none;
+}
+.folio-workbench .office-color-column > button:first-child {
+  margin-bottom: 7px;
+}
+.folio-workbench .office-color-column > button:hover, .folio-workbench .office-standard-grid > button:hover {
+  z-index: 1;
+  outline: 2px solid #819bad;
+  outline-offset: 1px;
+}
+.folio-workbench .office-color-column > button.chosen::after, .folio-workbench .office-standard-grid > button.chosen::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border: 2px solid #476d8a;
+  box-shadow: inset 0 0 0 1px #fff;
+  pointer-events: none;
+  z-index: 2;
+}
+.folio-workbench.app .status-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+  height: var(--status-height);
+  padding: 0 12px;
+  position: relative;
+}
+.folio-workbench.app .status-left {
+  display: flex;
+  min-width: 0;
+  gap: 8px;
+  width: 100%;
+}
+.folio-workbench.app .status-left .footer-open {
+  flex: none;
+}
+.folio-workbench.app .status-left .document-name {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  max-width: none;
+  margin: 0;
+  font-size: 10px;
+  color: #83909b;
+}
+.folio-workbench.app .status-left .filename-text {
+  text-align: left;
+}
+.folio-workbench.app .status-left .draft-state {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 4px 2px;
+}
+.folio-workbench.app .status-left .draft-state > span {
+  display: flex;
+  align-items: center;
+  font-size: 0;
+  gap: 0;
+}
+.folio-workbench.app .status-left .draft-state.has-warning > span {
+  font-size: 10px;
+  gap: 4px;
+}
+.folio-workbench.app .status-left .draft-state svg {
+  width: 12px;
+  height: 12px;
+}
+.folio-workbench.app .status-left .draft-state .status-dot {
+  width: 4px;
+  height: 4px;
+}
+.folio-workbench .footer-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+  color: #84919b;
+  font-size: 11px;
+  letter-spacing: -0.2px;
+  line-height: 1;
+}
+.folio-workbench .footer-brand-icon {
+  width: 16px;
+  height: 18px;
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+  color: #8998a4;
+  background: #e9eef2;
+}
+.folio-workbench.app .status-right {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  white-space: nowrap;
+  gap: 9px;
+}
+.folio-workbench.app .status-right > span {
+  flex: none;
+}
+.folio-workbench.app .status-right > button {
+  font-size: 9px;
+  flex: none;
+}
+.folio-workbench.app .status-right .status-marker-count {
+  font-size: 9px;
+}
+@media (max-width: 1150px) {
+  .folio-workbench.app .status-right > button:last-child, .folio-workbench.app .status-right > .status-separator:last-of-type {
+    display: none;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-scroll > fieldset {
+    gap: 10px;
+  }
+}
+@media (max-width: 720px) {
+  .folio-workbench.app .command-bar {
+    padding: 4px 8px;
+  }
+  .folio-workbench.app .inspector-toolbar {
+    gap: 6px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-scroll > fieldset {
+    gap: 10px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header {
+    padding-left: 5px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions > select {
+    width: 70px;
+    font-size: 9px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions > .icon-btn {
+    width: 21px;
+  }
+  .folio-workbench.app .status-left > .draft-state {
+    display: flex !important;
+  }
+  .folio-workbench.app .status-left .document-name {
+    font-size: 9px;
+  }
+  .folio-workbench.app .status-left .footer-open > span {
+    display: none;
+  }
+  .folio-workbench.app .status-left .footer-open {
+    margin: 0;
+    padding: 3px 0;
+  }
+  .folio-workbench.app .status-bar {
+    padding: 0 9px;
+    gap: 8px;
+  }
+  .folio-workbench.app .status-right .status-marker-count {
+    display: none;
+  }
+  .folio-workbench.app .status-right > button, .folio-workbench.app .status-right > .status-separator {
+    display: none;
+  }
+  .folio-workbench .footer-brand {
+    font-size: 10px;
+    gap: 4px;
+  }
+  .folio-workbench .footer-brand-icon {
+    width: 14px;
+    height: 16px;
+  }
+  .folio-workbench .footer-brand-icon svg {
+    height: 10px;
+    width: 10px;
+  }
+}
+@media (max-width: 480px) {
+  .folio-workbench.app {
+    --header-height: 0px;
+    --toolbar-height: 42px;
+    --status-height: 32px;
+  }
+  .folio-workbench.app.properties-toolbar {
+    --toolbar-height: 78px;
+  }
+  .folio-workbench.app .command-bar {
+    padding: 3px 7px;
+    row-gap: 3px;
+  }
+  .folio-workbench.app .inspector-toolbar {
+    height: 36px;
+    min-height: 36px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions > .icon-btn[aria-label='恢复默认样式'] {
+    display: none;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions > select {
+    width: 66px;
+    padding: 5px 3px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions {
+    gap: 1px;
+  }
+  .folio-workbench.app .inspector-toolbar .number-unit input {
+    width: 30px;
+  }
+  .folio-workbench.app .status-right {
+    gap: 0;
+  }
+  .folio-workbench.app .status-left .document-name {
+    font-size: 9px;
+  }
+  .folio-workbench.app .status-left {
+    gap: 5px;
+  }
+  .folio-workbench.app .status-left .draft-state {
+    padding: 3px 0;
+  }
+  .folio-workbench.app .status-left .footer-open {
+    font-size: 0;
+    width: 16px;
+  }
+  .folio-workbench.app .status-bar {
+    gap: 7px;
+  }
+}
+
+/* Persistent workspace: dock controls travel with the properties, on their left. */
+.folio-workbench.app .inspector-toolbar .inspector-header {
+  order: 0;
+  border: 0;
+  border-right: 1px solid #e4e9ed;
+  padding: 0 7px 0 0;
+  margin: 0;
+  flex: none;
+  height: 27px;
+}
+.folio-workbench.app .inspector-toolbar .inspector-header-actions {
+  gap: 3px;
+}
+.folio-workbench.app .inspector-toolbar .inspector-header-actions > .icon-btn {
+  width: 25px;
+  height: 26px;
+}
+.folio-workbench.app .inspector-toolbar .inspector-scroll > fieldset {
+  order: 1;
+}
+.folio-workbench.app .inspector-sidebar .inspector-header {
+  justify-content: flex-start;
+  gap: 11px;
+}
+.folio-workbench.app .inspector-sidebar .inspector-header-actions {
+  order: -1;
+  gap: 3px;
+}
+.folio-workbench.app .inspector-sidebar .inspector-header > span {
+  font-size: 11px;
+}
+.folio-workbench .dock-button {
+  color: #6c7b87;
+}
+.folio-workbench .dock-button:hover {
+  color: #365e7c;
+}
+.folio-workbench .wheel-key {
+  margin-left: 1px;
+  font-size: 8px;
+  border-color: #dce4eb;
+  padding: 1px 3px;
+  line-height: 1.15;
+}
+.folio-workbench.app .sidebar {
+  width: 176px;
+}
+.folio-workbench.app .side-tabs {
+  margin: 10px 10px 9px;
+  padding: 2px;
+}
+.folio-workbench.app .side-tabs > button {
+  padding: 6px 4px;
+  font-size: 10px;
+  gap: 4px;
+}
+.folio-workbench.app .side-scroll {
+  padding-top: 2px;
+}
+.folio-workbench.app .thumbnail-card {
+  height: 124px;
+  padding: 8px 7px 3px;
+  gap: 4px;
+  border-radius: 5px;
+}
+.folio-workbench.app .thumbnail-paper {
+  margin: auto;
+  max-width: none;
+  overflow: visible;
+}
+.folio-workbench.app .thumbnail-caption {
+  font-size: 9px;
+  height: 18px;
+}
+.folio-workbench.app .thumbnail-card.current {
+  border-color: #cad5df !important;
+  background: #eef3f7;
+}
+.folio-workbench.app .thumbnail-card.current .thumbnail-caption {
+  font-weight: 500;
+}
+.folio-workbench.app .marker-count {
+  font-size: 9px;
+}
+.folio-workbench.app .local-note {
+  padding: 11px 0;
+  font-size: 8px;
+}
+.folio-workbench.app .marker-list {
+  padding: 2px 10px 15px;
+}
+@media (max-width: 720px) {
+  .folio-workbench.app:not(.sidebar-collapsed) .sidebar {
+    width: 176px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header {
+    padding-right: 5px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions > .icon-btn {
+    width: 24px;
+  }
+  .folio-workbench.app .inspector-sidebar .inspector-header {
+    padding: 0 13px;
+    gap: 9px;
+  }
+}
+@media (max-width: 480px) {
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions > .icon-btn[aria-label='恢复默认样式'] {
+    display: inline-flex;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions {
+    gap: 0;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header {
+    padding-right: 4px;
+  }
+  .folio-workbench.app .inspector-toolbar .inspector-header-actions > .icon-btn {
+    width: 23px;
+  }
+}
+
+/* Installed windows use the visible viewport and keep controls clear of cutouts. */
+.folio-workbench.app {
+  min-height: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+  padding-right: env(safe-area-inset-right, 0px);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  padding-left: env(safe-area-inset-left, 0px);
+}
+.folio-workbench.app .command-right > .pwa-install {
+  height: 28px;
+  padding: 4px 7px;
+  font-size: 10px;
+  color: #627583;
+  border-color: transparent;
+  background: transparent;
+}
+.folio-workbench.app .command-right > .pwa-install {
+  border-color: #dce3e8;
+}
+.folio-workbench .pwa-dialog {
+  width: min(480px, 100%);
+}
+.folio-workbench .pwa-dialog [role="alert"] {
+  color: #a56832;
+  overflow-wrap: anywhere;
+}
+.folio-workbench.app .status-bar .status-right > .pwa-status, .folio-workbench.app .status-bar .status-right > .footer-settings {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.folio-workbench.app .status-bar .pwa-status:hover, .folio-workbench.app .status-bar .footer-settings:hover {
+  background: #e9eef3;
+  color: #476d8a;
+}
+.folio-workbench.app .status-bar .pwa-status:focus-visible, .folio-workbench.app .status-bar .footer-settings:focus-visible {
+  outline: 2px solid #476d8a;
+  outline-offset: 1px;
+}
+.folio-workbench.app .dialog-backdrop, .folio-workbench .dialog-backdrop:has(> .pwa-dialog) {
+  padding-top: max(16px, env(safe-area-inset-top, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-bottom: max(16px, env(safe-area-inset-bottom, 0px));
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+}
+@media (max-width: 900px) {
+  .folio-workbench .pwa-status > span, .folio-workbench .footer-settings > span, .folio-workbench .pwa-install > span {
+    display: none;
+  }
+  .folio-workbench.app .command-right > .pwa-install {
+    width: 26px;
+    padding: 4px;
+  }
+}
+@media (max-width: 480px) {
+  .folio-workbench.app .command-bar {
+    column-gap: 0;
+  }
+}
+@media (max-width: 380px) {
+  .folio-workbench.app .export-trigger {
+    width: 26px;
+    min-height: 28px;
+    padding: 4px;
+  }
+  .folio-workbench.app .export-trigger > span, .folio-workbench.app .export-trigger > svg:last-child {
+    display: none;
+  }
+  .folio-workbench.app .export-trigger > svg:first-child {
+    width: 16px;
+  }
+}
+
+/* Image export: common controls, a lightweight preview and persistent actions. */
+.folio-workbench .dialog.export-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 850px;
+  max-height: calc(100% - 48px);
+  padding: 0;
+  overflow: hidden;
+  border-radius: 18px;
+}
+.folio-workbench .export-dialog > .dialog-heading {
+  flex: none;
+  margin: 0;
+  padding: 20px 24px;
+  border-bottom: 1px solid #eceef1;
+}
+.folio-workbench .export-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(0, 1fr);
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.folio-workbench .export-settings {
+  min-width: 0;
+  padding: 26px 28px;
+}
+.folio-workbench .export-field {
+  margin-bottom: 22px;
+}
+.folio-workbench .export-field > label, .folio-workbench .export-field-label {
+  display: block;
+  margin-bottom: 9px;
+  color: #59656f;
+  font-size: 12px;
+  font-weight: 500;
+}
+.folio-workbench .export-field > input, .folio-workbench .export-field > select {
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  padding: 9px 11px;
+  border-color: #e3e7eb;
+  border-radius: 7px;
+  color: #47535e;
+  background: #fff;
+  font-size: 12px;
+}
+.folio-workbench .export-field > input {
+  margin-top: 9px;
+}
+.folio-workbench .export-field > small {
+  display: block;
+  margin-top: 8px;
+  color: #84909a;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.folio-workbench .export-dialog .format-options {
+  gap: 5px;
+  padding: 4px;
+  border: 1px solid #e9ecf0;
+  border-radius: 9px;
+  background: #f5f6f8;
+}
+.folio-workbench .export-dialog .format-options > button {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: #7b8691;
+  background: transparent;
+  font-size: 12px;
+}
+.folio-workbench .export-dialog .format-options > button.active {
+  border-color: #e0e5ea;
+  color: #3c4a55;
+  background: #fff;
+  box-shadow: 0 1px 3px #25384a0b;
+  font-weight: 550;
+}
+.folio-workbench .export-dialog .checkbox-row {
+  gap: 9px;
+  margin: 0 0 24px;
+  color: #65727d;
+  font-size: 12px;
+}
+.folio-workbench .export-dialog .checkbox-row input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: #75978b;
+}
+.folio-workbench .export-advanced {
+  border-top: 1px solid #edf0f3;
+}
+.folio-workbench .export-advanced summary {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 15px 0 0;
+  color: #71818e;
+  font-size: 12px;
+  list-style: none;
+  cursor: pointer;
+}
+.folio-workbench .export-dialog summary::-webkit-details-marker {
+  display: none;
+}
+.folio-workbench .export-dialog summary:focus-visible {
+  outline: 2px solid #407aaf;
+  outline-offset: -2px;
+  border-radius: 3px;
+}
+.folio-workbench .export-advanced > summary > svg:last-child {
+  margin-left: auto;
+}
+.folio-workbench .export-advanced[open] > summary > svg:last-child, .folio-workbench .export-technical[open] > summary > svg {
+  transform: rotate(180deg);
+}
+.folio-workbench .export-advanced-fields {
+  padding-top: 22px;
+}
+.folio-workbench .export-lossless {
+  padding: 10px 11px;
+  border-radius: 7px;
+  background: #f5f7f8;
+  color: #7b8993;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.folio-workbench .export-technical > summary {
+  justify-content: space-between;
+  padding: 0;
+  font-size: 11px;
+}
+.folio-workbench .export-technical .export-info {
+  display: block;
+  margin-top: 12px;
+  padding: 12px;
+  color: #7d8a94;
+}
+.folio-workbench .export-technical .export-info p {
+  margin-bottom: 9px;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.folio-workbench .export-technical .export-info p:last-child {
+  margin: 0;
+}
+.folio-workbench .export-dialog .form-error {
+  margin: 9px 0 0;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.folio-workbench .export-preview {
+  min-width: 0;
+  padding: 25px 26px;
+  border-left: 1px solid #eceef1;
+  background: #f8f9fb;
+}
+.folio-workbench .export-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #788692;
+  font-size: 11px;
+}
+.folio-workbench .export-preview-pager {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+}
+.folio-workbench .export-preview-pager .icon-btn {
+  width: 25px;
+  height: 25px;
+  border: 0;
+  border-radius: 5px;
+}
+.folio-workbench .export-preview-pager > span {
+  min-width: 32px;
+  text-align: center;
+}
+.folio-workbench .export-preview-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 214px;
+  padding: 14px 12px;
+}
+.folio-workbench .export-preview-paper {
+  position: relative;
+  flex: none;
+  max-width: 100%;
+  overflow: hidden;
+  background: #fff;
+  box-shadow: 0 3px 14px #25384a17, 0 0 0 1px #25384a0b;
+}
+.folio-workbench .export-preview-paper .canvas-host, .folio-workbench .export-preview-paper .page-loading {
+  position: absolute;
+  inset: 0;
+}
+.folio-workbench .export-preview-marker {
+  position: absolute;
+  display: block;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+.folio-workbench .export-preview-marker svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.folio-workbench .export-preview-paper .page-error {
+  padding: 8px;
+  gap: 5px;
+  font-size: 10px;
+}
+.folio-workbench .export-preview-paper .page-error > span {
+  display: none;
+}
+.folio-workbench .export-preview-caption, .folio-workbench .export-preview-note, .folio-workbench .export-preview-empty {
+  margin: 0;
+  color: #909ba5;
+  font-size: 10px;
+  line-height: 1.8;
+  text-align: center;
+}
+.folio-workbench .export-output-summary {
+  display: grid;
+  gap: 13px;
+  margin: 22px 0 0;
+  padding-top: 20px;
+  border-top: 1px solid #e8edf1;
+  font-size: 11px;
+}
+.folio-workbench .export-output-summary > div {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.folio-workbench .export-output-summary dt {
+  flex: none;
+  color: #84909b;
+}
+.folio-workbench .export-output-summary dd {
+  margin: 0;
+  color: #596b79;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.folio-workbench .export-preview-note {
+  margin-top: 14px;
+  text-align: left;
+}
+.folio-workbench .export-dialog .export-actions {
+  flex: none;
+  align-items: center;
+  margin: 0;
+  padding: 17px 24px;
+  border-top: 1px solid #eceef1;
+  background: #fff;
+}
+.folio-workbench .export-action-summary {
+  flex: 1;
+  color: #89959f;
+  font-size: 11px;
+  line-height: 1.6;
+}
+@media (max-width: 680px) {
+  .folio-workbench .dialog.export-dialog {
+    max-height: calc(100% - 32px);
+    border-radius: 14px;
+  }
+  .folio-workbench .export-dialog > .dialog-heading {
+    padding: 17px 20px;
+  }
+  .folio-workbench .export-body {
+    display: block;
+  }
+  .folio-workbench .export-settings, .folio-workbench .export-preview {
+    padding: 22px 20px;
+  }
+  .folio-workbench .export-preview {
+    border: 0;
+    border-top: 1px solid #eceef1;
+  }
+  .folio-workbench .export-dialog .export-actions {
+    padding: 14px 18px;
+  }
+  .folio-workbench .export-action-summary {
+    font-size: 10px;
+  }
+  .folio-workbench .export-preview-stage {
+    min-height: 200px;
+  }
+}
+
+/* Keep offline preparation active while hiding workbench controls on home. */
+.folio-workbench.app .command-bar[hidden] { display: none; }
+
+/* Recent work is anchored to the edge; the welcome content keeps its page center. */
+.folio-workbench.app.has-home .workbench {
+  position: relative;
+  align-items: stretch;
+  padding: 0;
+  overflow: auto;
+  background: radial-gradient(#dce1e6 .7px, transparent .7px) 0 0 / 19px 19px #f1f3f5;
+}
+.folio-workbench.app.has-home .document-workspace {
+  flex: 1;
+  min-height: 100%;
+  overflow: visible;
+  background: transparent;
+}
+.folio-workbench.app.has-home .empty-workspace {
+  background: transparent;
+}
+.folio-workbench .recent-documents { position: absolute; top: clamp(160px, 23vh, 240px); left: 24px; width: clamp(220px, 22vw, 300px); min-width: 0; padding: 18px 0; text-align: left; z-index: 1; }
+.folio-workbench .recent-heading { display: flex; align-items: baseline; gap: 12px; margin: 0 8px 18px; }
+.folio-workbench .recent-heading h2 { margin: 0; font-size: 17px; font-weight: 550; color: #344450; letter-spacing: .5px; }
+.folio-workbench .recent-heading > span { font-size: 10px; color: #87939d; white-space: nowrap; }
+.folio-workbench .home-local { position: fixed; right: max(24px, env(safe-area-inset-right)); bottom: max(18px, env(safe-area-inset-bottom)); display: inline-flex; align-items: center; gap: 6px; font-size: 10px; color: #87939d; z-index: 3; pointer-events: none; }
+.folio-workbench .home-local svg { flex: none; }
+.folio-workbench .home-offline { position: fixed; left: max(24px, env(safe-area-inset-left)); bottom: max(18px, env(safe-area-inset-bottom)); z-index: 3; }
+.folio-workbench .home-offline .pwa-status { padding: 0; min-height: 24px; border: 0; background: transparent; color: #87939d; font-size: 10px; }
+.folio-workbench .pwa-update-notice {
+  position: fixed;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(54px, calc(env(safe-area-inset-bottom) + 42px));
+  z-index: 35;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: min(380px, calc(100% - 32px));
+  padding: 16px;
+  border: 1px solid #d4def9;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 30px #253a4a24;
+  color: #4262fb;
+}
+.folio-workbench .pwa-update-notice > svg { flex: none; margin-top: 2px; }
+.folio-workbench .pwa-update-notice > div { min-width: 0; }
+.folio-workbench .pwa-update-notice strong { font-size: 13px; color: #344450; }
+.folio-workbench .pwa-update-notice p { margin: 7px 0 12px; font-size: 11px; line-height: 1.7; color: #657888; }
+.folio-workbench .pwa-update-notice small { display: block; margin-bottom: 10px; font-size: 10px; color: #87939d; }
+.folio-workbench .pwa-update-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.folio-workbench .pwa-update-actions button { font-size: 11px; padding: 7px 10px; }
+.folio-workbench .pwa-check-update { margin: 12px 8px 0 0; }
+.folio-workbench.app.is-updating > .folio-loading { z-index: 100; }
+.folio-workbench .recent-list { display: flex; flex-direction: column; gap: 2px; }
+.folio-workbench .recent-row { display: flex; align-items: center; min-width: 0; border-radius: 6px; transition: background .18s; }
+.folio-workbench .recent-row:hover, .folio-workbench .recent-row:focus-within, .folio-workbench .recent-row.is-peeking { background: #e5eaee; }
+.folio-workbench .recent-open { position: relative; display: flex; align-items: center; gap: 0; flex: 1; min-width: 0; height: 38px; padding: 0 8px; border: 0; background: transparent; text-align: left; box-shadow: none; color: #4e6b80; }
+.folio-workbench .recent-open:hover:not(:disabled) { background: transparent; color: #2e536e; }
+.folio-workbench .recent-name { display: block; min-width: 0; max-width: 100%; flex: 0 1 auto; }
+.folio-workbench .recent-name .filename-text { display: block; width: 100%; min-width: 0; overflow: hidden; white-space: nowrap; font-size: 13px; line-height: 1.5; text-align: left; }
+.folio-workbench .recent-details { display: flex; flex: 0 0 auto; align-items: center; gap: 9px; max-width: 0; margin-left: 0; overflow: hidden; white-space: nowrap; opacity: 0; color: #83909a; font-size: 10px; transition: max-width .24s ease, opacity .2s ease, margin-left .24s ease; }
+.folio-workbench .recent-details > * { flex: none; }
+.folio-workbench .recent-row .recent-details { position: absolute; left: calc(100% + 40px); top: 50%; transform: translateY(-50%); max-width: none; width: max-content; margin-left: 0; padding: 6px 8px; border-radius: 4px; background: #f1f3f5; visibility: hidden; transition: opacity .2s ease, visibility .2s ease; pointer-events: none; }
+.folio-workbench .recent-row:hover .recent-details, .folio-workbench .recent-row:focus-within .recent-details, .folio-workbench .recent-row.is-peeking .recent-details { opacity: 1; visibility: visible; }
+.folio-workbench .recent-details time { font-variant-numeric: tabular-nums; }
+.folio-workbench .recent-delete { flex: none; width: 25px; height: 28px; margin-right: 3px; opacity: 0; transition: opacity .18s; color: #97a3ac; }
+.folio-workbench .recent-row:hover .recent-delete, .folio-workbench .recent-row:focus-within .recent-delete, .folio-workbench .recent-row.is-peeking .recent-delete { opacity: 1; }
+.folio-workbench .recent-delete:hover:not(:disabled) { color: #ac554c; background: #f9edeb; }
+.folio-workbench .recent-more { display: inline-flex; align-items: center; gap: 14px; padding: 8px; margin-top: 10px; border: 0; background: transparent; box-shadow: none; color: #5b778b; font-size: 12px; }
+.folio-workbench .recent-more:hover:not(:disabled) { color: #2e536e; background: #e5eaee; }
+.folio-workbench .recent-error { margin: 10px 8px; color: #a9574b; font-size: 11px; line-height: 1.8; }
+.folio-workbench .recent-error button { margin-left: 10px; }
+.folio-workbench .dialog-backdrop:has(> .recent-picker) { align-items: flex-start; padding-top: clamp(20px, 8vh, 88px); background: #24344330; backdrop-filter: blur(2px); }
+.folio-workbench.app .recent-picker { display: flex; flex-direction: column; width: 760px; max-height: calc(100% - clamp(20px, 8vh, 88px) - 24px); padding: 10px; border-radius: 10px; overflow: hidden; box-shadow: 0 16px 65px #20354430, 0 2px 8px #20354412; }
+.folio-workbench .recent-picker .dialog-heading { flex: none; margin: 0 2px 6px 8px; }
+.folio-workbench .recent-picker .dialog-heading h2 { font-size: 12px; color: #697b88; letter-spacing: 0; }
+.folio-workbench .recent-picker .dialog-heading .icon-btn { width: 25px; height: 25px; }
+.folio-workbench .recent-search { display: flex; align-items: center; gap: 10px; flex: none; padding: 0 11px; min-height: 42px; border: 1px solid #c0ced8; border-radius: 5px; background: #fbfcfd; color: #8a9aa6; }
+.folio-workbench .recent-search:focus-within { border-color: #7b9aaf; box-shadow: 0 0 0 2px #7b9aaf18; }
+.folio-workbench .recent-search input { flex: 1; min-width: 0; width: 100%; height: 40px; padding: 0; border: 0; outline: 0; background: transparent; font-size: 13px; color: #3d505f; box-shadow: none; }
+.folio-workbench .recent-search input:focus { outline: 0; box-shadow: none; }
+.folio-workbench .recent-search input::placeholder { color: #93a0aa; }
+.folio-workbench .recent-search kbd { border: 0; background: #f0f3f5; font-size: 9px; }
+.folio-workbench .recent-picker-caption { display: flex; justify-content: space-between; flex: none; gap: 12px; padding: 14px 9px 7px; font-size: 10px; color: #909da7; }
+.folio-workbench .recent-touch-hint { display: none; margin: 8px; color: #95a1aa; font-size: 10px; }
+.folio-workbench .recent-picker-results { max-height: min(52vh, 480px); flex: 1 1 auto; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
+.folio-workbench .recent-picker-option { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 40px; padding: 8px 10px; border-radius: 5px; cursor: pointer; color: #8396a4; }
+.folio-workbench .recent-picker-option.active { background: #e7eef3; color: #4e6c82; }
+.folio-workbench .recent-picker-option > svg { flex: none; }
+.folio-workbench .recent-picker-option .recent-name { color: #485d6d; }
+.folio-workbench .recent-picker-option .recent-details { font-size: 10px; }
+.folio-workbench .recent-picker-option.active .recent-details { max-width: 320px; opacity: 1; }
+.folio-workbench .recent-picker-delete, .folio-workbench .recent-picker-action-space { flex: none; width: 25px; height: 25px; margin-left: auto; }
+.folio-workbench .recent-picker-delete { opacity: 0; visibility: hidden; color: #8799a7; }
+.folio-workbench .recent-picker-option.active .recent-picker-delete { opacity: 1; visibility: visible; }
+.folio-workbench .recent-picker-delete:hover:not(:disabled) { color: #ac554c; background: #f6e7e4; }
+.folio-workbench .recent-picker-empty { padding: 28px 10px; margin: 0; text-align: center; color: #8a97a0; font-size: 12px; }
+.folio-workbench .recent-picker-loading { flex: none; padding: 8px; margin: 0; font-size: 11px; color: #8a97a0; }
+.folio-workbench .recent-load-more { flex: none; align-self: center; margin: 8px 0; font-size: 11px; background: transparent; border: 0; color: #5b778b; }
+.folio-workbench .recent-picker-footer { display: flex; align-items: center; justify-content: space-between; flex: none; gap: 12px; min-height: 34px; padding: 8px 8px 0; margin-top: 8px; border-top: 1px solid #edf0f3; color: #91a0aa; font-size: 10px; }
+.folio-workbench .recent-picker-footer > span { display: flex; align-items: center; gap: 5px; }
+.folio-workbench .recent-picker-footer kbd { font-size: 9px; border: 0; background: #f3f5f7; }
+@media (max-width: 1100px) {
+  .folio-workbench .recent-documents { width: 230px; left: 16px; }
+  .folio-workbench .recent-heading { flex-wrap: wrap; justify-content: flex-start; gap: 8px 14px; }
+  .folio-workbench .recent-row .recent-details { left: 8px; top: 26px; transform: none; padding: 0; background: transparent; }
+  .folio-workbench .recent-row .recent-details time { display: none; }
+  .folio-workbench .recent-row .recent-name { align-self: flex-start; margin-top: 3px; }
+  .folio-workbench .recent-open { height: 44px; }
+}
+@media (max-width: 900px) {
+  .folio-workbench.app.has-home .workbench { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; }
+  .folio-workbench.app.has-home .document-workspace { grid-row: 1; min-height: 0; }
+  .folio-workbench .recent-documents { position: relative; grid-row: 2; top: auto; left: auto; width: calc(100% - 32px); max-width: 500px; margin: 0 16px 24px; padding: 12px 0; }
+  .folio-workbench .home-local { right: max(16px, env(safe-area-inset-right)); bottom: max(12px, env(safe-area-inset-bottom)); }
+  .folio-workbench .home-offline { left: max(16px, env(safe-area-inset-left)); bottom: max(12px, env(safe-area-inset-bottom)); }
+  .folio-workbench .recent-heading h2 { font-size: 15px; }
+  .folio-workbench .recent-name .filename-text { font-size: 12px; }
+}
+@media (max-width: 720px) {
+  .folio-workbench .recent-picker-option .recent-details > span:nth-child(2), .folio-workbench .recent-picker-option .recent-details time { display: none; }
+  .folio-workbench .recent-picker-option.active .recent-details { max-width: 110px; }
+  .folio-workbench .recent-picker-option { gap: 8px; }
+  .folio-workbench .recent-picker-footer { gap: 8px; font-size: 9px; padding-inline: 2px; }
+}
+@media (hover: none) and (pointer: coarse) {
+  .folio-workbench .recent-touch-hint { display: block; }
+}
+
+/* A quick-open field gives the workbench direct access to recent documents. */
+.folio-workbench.app .command-right > .workspace-recent-search {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  width: 160px;
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid #dde4e9;
+  border-radius: 5px;
+  background: #fff;
+  box-shadow: none;
+  color: #8696a2;
+  font-size: 10px;
+}
+.folio-workbench.app .command-right > .workspace-recent-search:hover:not(:disabled) {
+  border-color: #b9c8d3;
+  background: #fff;
+}
+.folio-workbench.app .workspace-recent-search > svg { flex: none; }
+.folio-workbench.app .workspace-recent-search > span { display: inline; flex: 1; white-space: nowrap; text-align: left; }
+.folio-workbench.app .workspace-recent-search > kbd { flex: none; border: 0; background: transparent; color: #a0acb5; font-size: 9px; padding: 0; }
+@media (max-width: 900px) {
+  .folio-workbench.app .command-right > .workspace-recent-search { width: 26px; padding: 4px; gap: 0; border-color: transparent; background: #fff; }
+  .folio-workbench.app .workspace-recent-search > span, .folio-workbench.app .workspace-recent-search > kbd { display: none; }
+}
+@media (max-width: 480px) {
+  .folio-workbench.app { --toolbar-height: 73px; }
+  .folio-workbench.app.properties-toolbar { --toolbar-height: 112px; }
+  .folio-workbench.app .command-left { flex: 0 0 100%; }
+  .folio-workbench.app .command-right { flex: 0 0 100%; justify-content: flex-end; margin-left: 0; }
+  .folio-workbench.app .command-right > .workspace-recent-search {
+    width: clamp(110px, calc(100vw - 200px), 150px);
+    padding: 0 7px;
+    gap: 7px;
+    border-color: #dde4e9;
+    background: #fff;
+  }
+  .folio-workbench.app .command-right > .workspace-recent-search > span { display: inline; }
+}
+
+/* Numeric controls keep the unit outside the field and the focus inside its border. */
+.folio-workbench.app .inspector .numeric-field { display: inline-flex; align-items: center; flex: none; gap: 5px; }
+.folio-workbench.app .inspector .numeric-field-value { display: flex; align-items: stretch; flex: none; width: 76px; height: 28px; border: 1px solid #dfe5ea; border-radius: 4px; background: #fff; overflow: hidden; }
+.folio-workbench.app .inspector .numeric-field-value:focus-within { border-color: #7897af; box-shadow: inset 0 0 0 1px #7897af30; }
+.folio-workbench.app .inspector .numeric-field input { flex: 1; width: 0; min-width: 0; height: 100%; padding: 0 5px; border: 0; border-radius: 0; background: transparent; color: #4a5d6b; font-size: 11px; text-align: right; outline: none; box-shadow: none; }
+.folio-workbench.app .inspector .numeric-field input:focus-visible { outline: none; box-shadow: none; }
+.folio-workbench.app .inspector .numeric-field-unit { color: #8b9aa5; font-size: 10px; }
+.folio-workbench.app .inspector .numeric-field-stepper { display: grid; flex: none; grid-template-rows: 1fr 1fr; width: 15px; border-left: 1px solid #edf0f3; }
+.folio-workbench.app .inspector .numeric-field-stepper button { display: flex; align-items: center; justify-content: center; min-height: 0; width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; color: #7a8b98; box-shadow: none; }
+.folio-workbench.app .inspector .numeric-field-stepper button:hover:not(:disabled) { background: #eaf0f5; color: #405e76; }
+.folio-workbench.app .inspector .numeric-field-stepper button:focus-visible { outline: 1px solid #7897af; outline-offset: -1px; }
+.folio-workbench.app .inspector-toolbar .numeric-field-value { width: 60px; height: 25px; }
+.folio-workbench.app .inspector-toolbar .numeric-field input { font-size: 10px; padding: 0 4px; }
+.folio-workbench.app .inspector-toolbar .numeric-field-unit { font-size: 9px; }
+.folio-workbench.app .inspector-toolbar .inspector-header { border-right: 0; padding-right: 0; }
+.folio-workbench.app .inspector-toolbar .reset-style { order: 7; flex: none; width: 25px; height: 25px; padding: 0; color: #7a8b98; }
+
+/* Tool names are optional; field labels and navigation values remain readable. */
+.folio-workbench.app.hide-tool-window-names .tool-window-name, .folio-workbench.app.hide-tool-window-names .tool-group kbd, .folio-workbench.app.hide-tool-window-names .side-tabs .tool-window-count {
+  display: none;
+}
+.folio-workbench.app.show-tool-window-names .tool-group button > .tool-window-name {
+  display: inline;
+}
+.folio-workbench.app.show-tool-window-names .tool-group button {
+  width: auto;
+}
+.folio-workbench.app .side-tabs .tool-window-name {
+  font-size: inherit;
+  opacity: 1;
+  min-width: 0;
+}
+
+.folio-workbench .settings-spacing-controls {
+  display: flex;
+  flex: 0 1 280px;
+  min-width: 220px;
+  align-items: center;
+  gap: 14px;
+}
+.folio-workbench .settings-spacing-controls input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  width: 0;
+  margin: 0;
+  accent-color: #74968b;
+}
+.folio-workbench .numeric-field-stepper {
+  touch-action: none;
+}
+@media (max-width: 600px) {
+  .folio-workbench .settings-spacing-row {
+    flex-wrap: wrap;
+    row-gap: 12px;
+  }
+  .folio-workbench .settings-spacing-controls {
+    flex-basis: 100%;
+    min-width: 0;
+  }
+}
+.folio-workbench .settings-spacing-row .numeric-field {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+.folio-workbench .settings-spacing-row .numeric-field-value {
+  display: flex;
+  width: 88px;
+  height: 32px;
+  border: 1px solid #e0e4e8;
+  border-radius: 6px;
+  overflow: hidden;
+}
+.folio-workbench .settings-spacing-row .numeric-field-value:focus-within {
+  border-color: #7897af;
+  box-shadow: inset 0 0 0 1px #7897af30;
+}
+.folio-workbench .settings-spacing-row .numeric-field input {
+  flex: 1;
+  width: 0;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  text-align: right;
+  outline: none;
+}
+.folio-workbench .settings-spacing-row .numeric-field-stepper {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  width: 17px;
+  border-left: 1px solid #edf0f3;
+}
+.folio-workbench .settings-spacing-row .numeric-field-stepper button {
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #7a8b98;
+}
+.folio-workbench .settings-spacing-row .numeric-field-stepper button:hover:not(:disabled) {
+  background: #eaf0f5;
+}
+.folio-workbench .settings-spacing-row .numeric-field-unit {
+  color: #8b9aa5;
+  font-size: 11px;
+}
+
+/* Match DeepSeek's sidebar motion while retaining navigation and scroll state. */
+.folio-workbench.app {
+  --navigation-width: 176px;
+  --navigation-duration: 300ms;
+  --navigation-easing: cubic-bezier(0.4, 0, 0.2, 1);
+}
+.folio-workbench.app .command-bar {
+  position: relative;
+}
+.folio-workbench .workspace-save-state {
+  position: absolute;
+  left: 50%;
+  top: 20px;
+  transform: translate(-50%, -50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: #a97438;
+}
+.folio-workbench .workspace-save-state .status-dot {
+  width: 4px;
+  height: 4px;
+}
+.folio-workbench .workspace-save-state .spinner.small {
+  width: 10px;
+  height: 10px;
+}
+.folio-workbench .save-state-label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+.folio-workbench.app .page-navigation-shell {
+  flex: none;
+  width: var(--navigation-width);
+  max-width: var(--navigation-width);
+  min-width: 0;
+  overflow: hidden;
+  visibility: visible;
+  transition: max-width var(--navigation-duration) var(--navigation-easing), visibility 0s;
+}
+.folio-workbench.app .page-navigation-shell .sidebar {
+  display: flex;
+  position: relative;
+  inset: auto;
+  width: var(--navigation-width);
+  height: 100%;
+  box-shadow: none;
+  transform: translateX(0);
+  opacity: 1;
+  transition: transform var(--navigation-duration) var(--navigation-easing), opacity var(--navigation-duration) var(--navigation-easing);
+}
+.folio-workbench.app.sidebar-collapsed .page-navigation-shell {
+  max-width: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: max-width var(--navigation-duration) var(--navigation-easing), visibility 0s var(--navigation-duration);
+}
+.folio-workbench.app.sidebar-collapsed .page-navigation-shell .sidebar {
+  transform: translateX(-100%);
+  opacity: 0;
+}
+.folio-workbench.app .status-bar {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+@media (max-width: 1150px) {
+  .folio-workbench .workspace-save-state {
+    top: 3px;
+    height: 8px;
+    transform: translateX(-50%);
+  }
+}
+@media (max-width: 720px) {
+  .folio-workbench.app .page-navigation-shell {
+    position: fixed;
+    left: 0;
+    top: var(--toolbar-height);
+    bottom: var(--status-height);
+    z-index: 9;
+    box-shadow: 8px 4px 25px #253a4a14;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .folio-workbench.app .page-navigation-shell, .folio-workbench.app.sidebar-collapsed .page-navigation-shell, .folio-workbench.app .page-navigation-shell .sidebar {
+    transition: none;
+  }
+}
+
+
+/* Loading screen */
+/* Shared by the pre-JavaScript splash and document loading screen.
+   Circular sweep inspired by Material UI: https://mui.com/material-ui/react-progress/ */
+.folio-workbench .folio-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #fff;
+  color: #3f5263;
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    'PingFang SC',
+    'Microsoft YaHei',
+    sans-serif;
+}
+.folio-workbench .loading-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transform: translateY(-15px);
+  min-width: 210px;
+}
+.folio-workbench .loading-mark {
+  position: relative;
+  width: 100px;
+  height: 100px;
+  margin-bottom: 24px;
+  color: #4262fb;
+}
+.folio-workbench .loading-orbit {
+  position: absolute;
+  inset: 0;
+  animation: folio-orbit 1.5s linear infinite;
+}
+.folio-workbench .loading-orbit svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+.folio-workbench .loading-track {
+  stroke: #e8ecff;
+  stroke-width: 2.5;
+}
+.folio-workbench .loading-arc {
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 42 201;
+  animation: folio-sweep 1.5s ease-in-out infinite;
+}
+.folio-workbench .loading-caption {
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.4px;
+  line-height: 1.8;
+  color: #576779;
+  min-height: 26px;
+}
+.folio-workbench .loading-progress {
+  height: 2px;
+  width: 145px;
+  overflow: hidden;
+  background: #edf2f7;
+  border-radius: 4px;
+  margin-top: 16px;
+}
+.folio-workbench .loading-progress > span {
+  display: block;
+  height: 100%;
+  background: #4262fb;
+  border-radius: 4px;
+  transition: width 0.2s ease;
+}
+.folio-workbench .loading-cancel {
+  margin-top: 16px;
+  padding: 5px 10px !important;
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-size: 12px !important;
+  letter-spacing: 0.5px;
+  color: #98a4b0 !important;
+  cursor: pointer;
+}
+.folio-workbench .loading-cancel:hover {
+  color: #4262fb !important;
+}
+.folio-workbench .loading-cancel:focus-visible {
+  outline: 2px solid #4262fb;
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.folio-workbench .loading-brand {
+  position: absolute;
+  bottom: max(34px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #63707c;
+}
+.folio-workbench .loading-brand-icon {
+  width: 31px;
+  height: 31px;
+  border-radius: 9px;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  color: #fff;
+}
+.folio-workbench .loading-brand strong {
+  font-size: 21px;
+  font-weight: 550;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+.folio-workbench .loading-brand strong > span {
+  display: block;
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: 1.6px;
+  color: #9ba5ae;
+  margin-top: 6px;
+  white-space: nowrap;
+}
+@keyframes folio-orbit {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes folio-sweep {
+  0% {
+    stroke-dasharray: 24 201;
+    stroke-dashoffset: 0;
+  }
+  50% {
+    stroke-dasharray: 144 201;
+    stroke-dashoffset: -36;
+  }
+  100% {
+    stroke-dasharray: 24 201;
+    stroke-dashoffset: -201;
+  }
+}
+@media (max-width: 600px) {
+  .folio-workbench .loading-mark {
+    transform: scale(0.88);
+    margin-bottom: 24px;
+  }
+  .folio-workbench .loading-caption {
+    font-size: 13px;
+  }
+  .folio-workbench .loading-brand {
+    bottom: 28px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .folio-workbench .loading-orbit, .folio-workbench .loading-arc {
+    animation: none;
+  }
+  .folio-workbench .loading-progress > span {
+    transition: none;
+  }
+}
+
+
+/* ============================================================================
+ * Desktop Workbench Host Integration & Container Scoping Overrides
+ * ========================================================================== */
+.folio-workbench.app {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+/* Keep overlays scoped inside the PDF tool pane so the host sidebar, ⌘K, and ⌘L stay accessible */
+.folio-workbench .folio-loading,
+.folio-workbench .dialog-backdrop,
+.folio-workbench .file-drop-overlay {
+  position: absolute;
+  inset: 0;
+}
+
+.folio-workbench .folio-loading {
+  z-index: 45;
+}
+
+.folio-workbench .dialog-backdrop {
+  z-index: 50;
+}
+
+.folio-workbench .file-drop-overlay {
+  z-index: 55;
+}
+
+.folio-workbench .toast-region {
+  position: absolute;
+  top: 14px;
+  right: 18px;
+  width: min(380px, calc(100% - 32px));
+  z-index: 60;
+}
+
+.folio-workbench .home-local {
+  position: absolute;
+  right: 20px;
+  bottom: 14px;
+  z-index: 3;
+}
+
+.folio-workbench .toolbar-color-popover {
+  z-index: 65;
+}
+
+.folio-workbench .toolbar-colors-trigger.is-open {
+  background: #edf1f5;
+  border-color: #c5ced6;
+}
+
+.folio-workbench .desktop-offline-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: #3f7c5e;
+  font-size: 10px;
+  white-space: nowrap;
+  padding: 2px 4px;
+}
+
+.folio-workbench .desktop-offline-badge svg {
+  flex: none;
+}
+
+/* Ensure dialogs never exceed the embedded pane height */
+.folio-workbench .dialog {
+  max-height: calc(100% - 32px);
+}
+
+.folio-workbench.app .recent-picker {
+  max-height: calc(100% - 36px);
+}
+
+.folio-workbench .export-dialog {
+  max-height: calc(100% - 32px);
+}
+
+/* ============================================================================
+ * Obsidian Dark Mode Theme (Synced with InstrumentLedger dark appearance)
+ * Keeps PDF drawing paper crisp #ffffff for engineering accuracy.
+ * ========================================================================== */
+.dark .folio-workbench,
+.folio-workbench[data-folio-theme="dark"] {
+  --ink: #eceef2;
+  --muted: #8b919d;
+  --line: rgba(255, 255, 255, 0.08);
+  --accent: rgba(220, 76, 62, 0.16);
+  color: #e4e4e7;
+  background: #0c0c10;
+}
+
+.dark .folio-workbench button,
+.folio-workbench[data-folio-theme="dark"] button {
+  background: #17171d;
+  border-color: rgba(255, 255, 255, 0.11);
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench button:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] button:hover:not(:disabled) {
+  background: #22222b;
+  border-color: rgba(255, 255, 255, 0.19);
+}
+
+.dark .folio-workbench button.primary-button,
+.folio-workbench[data-folio-theme="dark"] button.primary-button {
+  background: #f4f4f5;
+  border-color: #f4f4f5;
+  color: #09090b;
+}
+
+.dark .folio-workbench button.primary-button:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] button.primary-button:hover:not(:disabled) {
+  background: #e4e4e7;
+  border-color: #e4e4e7;
+}
+
+.dark .folio-workbench .icon-btn,
+.folio-workbench[data-folio-theme="dark"] .icon-btn {
+  background: transparent;
+  border-color: transparent;
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .icon-btn:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .icon-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: transparent;
+  color: #fafafa;
+}
+
+.dark .folio-workbench input[type='number'],
+.dark .folio-workbench input[type='text'],
+.dark .folio-workbench input[type='password'],
+.dark .folio-workbench select,
+.folio-workbench[data-folio-theme="dark"] input[type='number'],
+.folio-workbench[data-folio-theme="dark"] input[type='text'],
+.folio-workbench[data-folio-theme="dark"] input[type='password'],
+.folio-workbench[data-folio-theme="dark"] select {
+  background: #141419;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench kbd,
+.folio-workbench[data-folio-theme="dark"] kbd {
+  background: #1c1c23;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #a1a1aa;
+}
+
+/* Command Bar & Top Toolbar Inspector */
+.dark .folio-workbench .command-bar,
+.folio-workbench[data-folio-theme="dark"] .command-bar {
+  background: #111115;
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .folio-workbench .tool-group,
+.folio-workbench[data-folio-theme="dark"] .tool-group {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .folio-workbench .tool-group button,
+.folio-workbench[data-folio-theme="dark"] .tool-group button {
+  background: transparent;
+  border-color: transparent;
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .tool-group button.active,
+.folio-workbench[data-folio-theme="dark"] .tool-group button.active {
+  background: #23232c;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #fafafa;
+}
+
+.dark .folio-workbench .tool-group button.active[data-state='marker'],
+.folio-workbench[data-folio-theme="dark"] .tool-group button.active[data-state='marker'] {
+  color: #f87171;
+}
+
+.dark .folio-workbench .toolbar-divider,
+.folio-workbench[data-folio-theme="dark"] .toolbar-divider {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .folio-workbench .workspace-recent-search,
+.folio-workbench[data-folio-theme="dark"] .workspace-recent-search {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .workspace-recent-search:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .workspace-recent-search:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .export-trigger,
+.folio-workbench[data-folio-theme="dark"] .export-trigger {
+  background: #f4f4f5;
+  border-color: #f4f4f5;
+  color: #09090b;
+}
+
+.dark .folio-workbench .export-trigger:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .export-trigger:hover:not(:disabled) {
+  background: #e4e4e7;
+  border-color: #e4e4e7;
+}
+
+.dark .folio-workbench .export-options,
+.folio-workbench[data-folio-theme="dark"] .export-options {
+  background: #16161c;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.55);
+}
+
+.dark .folio-workbench .export-options > button,
+.folio-workbench[data-folio-theme="dark"] .export-options > button {
+  background: transparent;
+  border-color: transparent;
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .export-options > button:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .export-options > button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.dark .folio-workbench .export-options small,
+.folio-workbench[data-folio-theme="dark"] .export-options small {
+  color: #8b919d;
+}
+
+/* Sidebar (Pages & Markers) */
+.dark .folio-workbench .sidebar,
+.folio-workbench[data-folio-theme="dark"] .sidebar {
+  background: #0f0f13;
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .folio-workbench .side-tabs,
+.folio-workbench[data-folio-theme="dark"] .side-tabs {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .folio-workbench .side-tabs > button,
+.folio-workbench[data-folio-theme="dark"] .side-tabs > button {
+  background: transparent;
+  border-color: transparent;
+  color: #8b919d;
+}
+
+.dark .folio-workbench .side-tabs > button.active,
+.folio-workbench[data-folio-theme="dark"] .side-tabs > button.active {
+  background: #202028;
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .thumbnail-card:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .thumbnail-card:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .folio-workbench .thumbnail-card.current,
+.folio-workbench[data-folio-theme="dark"] .thumbnail-card.current {
+  background: rgba(99, 102, 241, 0.14);
+  border-color: rgba(129, 140, 248, 0.45) !important;
+}
+
+.dark .folio-workbench .thumbnail-card.current .thumbnail-caption,
+.folio-workbench[data-folio-theme="dark"] .thumbnail-card.current .thumbnail-caption {
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .marker-list > button,
+.folio-workbench[data-folio-theme="dark"] .marker-list > button {
+  background: transparent;
+  border-color: transparent;
+  color: #d4d4d8;
+}
+
+.dark .folio-workbench .marker-list > button:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .marker-list > button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.dark .folio-workbench .marker-list > button.selected,
+.folio-workbench[data-folio-theme="dark"] .marker-list > button.selected {
+  background: rgba(99, 102, 241, 0.16);
+  border-color: rgba(129, 140, 248, 0.35);
+  color: #ffffff;
+}
+
+/* Canvas Backdrop (PDF paper stays crisp white!) */
+.dark .folio-workbench .document-workspace,
+.folio-workbench[data-folio-theme="dark"] .document-workspace {
+  background: #141419;
+}
+
+.dark .folio-workbench .viewer,
+.folio-workbench[data-folio-theme="dark"] .viewer {
+  scrollbar-color: rgba(255, 255, 255, 0.18) #141419;
+}
+
+.dark .folio-workbench .pdf-page,
+.folio-workbench[data-folio-theme="dark"] .pdf-page {
+  background: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.38), 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+/* Floating Canvas Controls Pill */
+.dark .folio-workbench .canvas-controls,
+.folio-workbench[data-folio-theme="dark"] .canvas-controls {
+  background: rgba(22, 22, 28, 0.92);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .canvas-controls select,
+.dark .folio-workbench .page-control input,
+.folio-workbench[data-folio-theme="dark"] .canvas-controls select,
+.folio-workbench[data-folio-theme="dark"] .page-control input {
+  background: transparent;
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .canvas-controls select option,
+.folio-workbench[data-folio-theme="dark"] .canvas-controls select option {
+  background: #16161c;
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .fit-button,
+.folio-workbench[data-folio-theme="dark"] .fit-button {
+  background: transparent;
+  border-color: transparent;
+  color: #d4d4d8;
+}
+
+.dark .folio-workbench .fit-button:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .fit-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+/* Inspector (Top Toolbar & Right Docked Sidebar) & Color Popover */
+.dark .folio-workbench .inspector,
+.folio-workbench[data-folio-theme="dark"] .inspector {
+  background: #111115;
+  border-left-color: rgba(255, 255, 255, 0.08);
+  border-top-color: rgba(255, 255, 255, 0.08);
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .inspector-header,
+.folio-workbench[data-folio-theme="dark"] .inspector-header {
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+}
+
+.dark .folio-workbench .marker-preview,
+.folio-workbench[data-folio-theme="dark"] .marker-preview {
+  background-color: #16161c;
+  background-image: radial-gradient(rgba(255, 255, 255, 0.11) 0.7px, transparent 0.7px);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .folio-workbench .marker-preview > span,
+.folio-workbench[data-folio-theme="dark"] .marker-preview > span {
+  background: #16161c;
+  color: #8b919d;
+}
+
+.dark .folio-workbench .section-divider,
+.folio-workbench[data-folio-theme="dark"] .section-divider {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.dark .folio-workbench .numeric-field-value,
+.folio-workbench[data-folio-theme="dark"] .numeric-field-value {
+  background: #18181f;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.dark .folio-workbench .numeric-field-value input,
+.folio-workbench[data-folio-theme="dark"] .numeric-field-value input {
+  background: transparent;
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .numeric-field-stepper,
+.folio-workbench[data-folio-theme="dark"] .numeric-field-stepper {
+  border-left-color: rgba(255, 255, 255, 0.09);
+}
+
+.dark .folio-workbench .numeric-field-stepper button,
+.folio-workbench[data-folio-theme="dark"] .numeric-field-stepper button {
+  background: transparent;
+  border-color: transparent;
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .numeric-field-stepper button:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .numeric-field-stepper button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.dark .folio-workbench .toolbar-colors-trigger,
+.folio-workbench[data-folio-theme="dark"] .toolbar-colors-trigger {
+  background: #18181f;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .toolbar-colors-trigger.is-open,
+.folio-workbench[data-folio-theme="dark"] .toolbar-colors-trigger.is-open {
+  background: #23232d;
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.dark .folio-workbench .toolbar-color-popover,
+.folio-workbench[data-folio-theme="dark"] .toolbar-color-popover {
+  background: #16161c;
+  border-color: rgba(255, 255, 255, 0.13);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.6);
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .color-fields > button,
+.folio-workbench[data-folio-theme="dark"] .color-fields > button {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .color-fields > button.active,
+.folio-workbench[data-folio-theme="dark"] .color-fields > button.active {
+  background: #252530;
+  border-color: rgba(255, 255, 255, 0.22);
+  color: #fafafa;
+}
+
+.dark .folio-workbench .link-toggle.active,
+.folio-workbench[data-folio-theme="dark"] .link-toggle.active {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(129, 140, 248, 0.4);
+  color: #c7d2fe;
+}
+
+/* Status Bar */
+.dark .folio-workbench .status-bar,
+.folio-workbench[data-folio-theme="dark"] .status-bar {
+  background: #0d0d11;
+  border-top-color: rgba(255, 255, 255, 0.08);
+  color: #8b919d;
+}
+
+.dark .folio-workbench .status-bar button,
+.folio-workbench[data-folio-theme="dark"] .status-bar button {
+  background: transparent;
+  border-color: transparent;
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .status-bar button:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .status-bar button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.07);
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .status-separator,
+.folio-workbench[data-folio-theme="dark"] .status-separator {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.dark .folio-workbench .document-name,
+.folio-workbench[data-folio-theme="dark"] .document-name {
+  color: #d4d4d8;
+}
+
+.dark .folio-workbench .desktop-offline-badge,
+.folio-workbench[data-folio-theme="dark"] .desktop-offline-badge {
+  color: #34d399;
+}
+
+/* Home Empty Screen & Recent Documents */
+.dark .folio-workbench.app.has-home,
+.folio-workbench[data-folio-theme="dark"].app.has-home {
+  background: radial-gradient(circle at 55% 24%, rgba(66, 98, 251, 0.09), transparent 52%), #0b0b0f;
+}
+
+.dark .folio-workbench .empty-workspace h1,
+.folio-workbench[data-folio-theme="dark"] .empty-workspace h1 {
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .empty-workspace p,
+.folio-workbench[data-folio-theme="dark"] .empty-workspace p {
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .empty-drop,
+.dark .folio-workbench .empty-features,
+.folio-workbench[data-folio-theme="dark"] .empty-drop,
+.folio-workbench[data-folio-theme="dark"] .empty-features {
+  color: #71717a;
+}
+
+.dark .folio-workbench .illus-paper.back,
+.folio-workbench[data-folio-theme="dark"] .illus-paper.back {
+  background: #17171f;
+  border-color: rgba(255, 255, 255, 0.09);
+}
+
+.dark .folio-workbench .illus-paper.front,
+.folio-workbench[data-folio-theme="dark"] .illus-paper.front {
+  background: #1c1c25;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.45);
+}
+
+.dark .folio-workbench .illus-heading,
+.dark .folio-workbench .illus-lines i,
+.dark .folio-workbench .illus-part i,
+.dark .folio-workbench .illus-block,
+.folio-workbench[data-folio-theme="dark"] .illus-heading,
+.folio-workbench[data-folio-theme="dark"] .illus-lines i,
+.folio-workbench[data-folio-theme="dark"] .illus-part i,
+.folio-workbench[data-folio-theme="dark"] .illus-block {
+  background: rgba(255, 255, 255, 0.11);
+}
+
+.dark .folio-workbench .recent-heading h2,
+.folio-workbench[data-folio-theme="dark"] .recent-heading h2 {
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .recent-open,
+.folio-workbench[data-folio-theme="dark"] .recent-open {
+  background: transparent;
+  border-color: transparent;
+  color: #d4d4d8;
+}
+
+.dark .folio-workbench .recent-open:hover:not(:disabled),
+.folio-workbench[data-folio-theme="dark"] .recent-open:hover:not(:disabled) {
+  background: transparent;
+  color: #ffffff;
+}
+
+.dark .folio-workbench .recent-row:hover,
+.dark .folio-workbench .recent-row:focus-within,
+.dark .folio-workbench .recent-row.is-peeking,
+.folio-workbench[data-folio-theme="dark"] .recent-row:hover,
+.folio-workbench[data-folio-theme="dark"] .recent-row:focus-within,
+.folio-workbench[data-folio-theme="dark"] .recent-row.is-peeking {
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.dark .folio-workbench .recent-row .recent-details,
+.folio-workbench[data-folio-theme="dark"] .recent-row .recent-details {
+  background: #1a1a22;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .home-local,
+.folio-workbench[data-folio-theme="dark"] .home-local {
+  color: #71717a;
+}
+
+/* Dialogs, Settings, Export Dialog & Recent Picker */
+.dark .folio-workbench .dialog-backdrop,
+.folio-workbench[data-folio-theme="dark"] .dialog-backdrop {
+  background: rgba(0, 0, 0, 0.62);
+}
+
+.dark .folio-workbench .dialog,
+.folio-workbench[data-folio-theme="dark"] .dialog {
+  background: #131318;
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.65);
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .settings-sidebar,
+.folio-workbench[data-folio-theme="dark"] .settings-sidebar {
+  background: #0f0f14;
+  border-right-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .folio-workbench .settings-nav button,
+.folio-workbench[data-folio-theme="dark"] .settings-nav button {
+  background: transparent;
+  border-color: transparent;
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .settings-nav button[aria-current="page"],
+.folio-workbench[data-folio-theme="dark"] .settings-nav button[aria-current="page"] {
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.dark .folio-workbench .settings-card,
+.folio-workbench[data-folio-theme="dark"] .settings-card {
+  background: #18181f;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .folio-workbench .settings-row,
+.folio-workbench[data-folio-theme="dark"] .settings-row {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.06);
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .settings-row-copy strong,
+.folio-workbench[data-folio-theme="dark"] .settings-row-copy strong {
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .settings-row-copy small,
+.folio-workbench[data-folio-theme="dark"] .settings-row-copy small {
+  color: #8b919d;
+}
+
+.dark .folio-workbench .shortcut-grid > span,
+.folio-workbench[data-folio-theme="dark"] .shortcut-grid > span {
+  background: #18181f;
+  border-color: rgba(255, 255, 255, 0.07);
+  color: #d4d4d8;
+}
+
+.dark .folio-workbench .export-preview,
+.folio-workbench[data-folio-theme="dark"] .export-preview {
+  background: #0f0f14;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .folio-workbench .export-preview-stage,
+.folio-workbench[data-folio-theme="dark"] .export-preview-stage {
+  background: #15151c;
+}
+
+.dark .folio-workbench .export-output-summary,
+.folio-workbench[data-folio-theme="dark"] .export-output-summary {
+  background: #16161d;
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .folio-workbench .export-output-summary dd,
+.folio-workbench[data-folio-theme="dark"] .export-output-summary dd {
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .format-options > button.active,
+.folio-workbench[data-folio-theme="dark"] .format-options > button.active {
+  background: #f4f4f5;
+  border-color: #f4f4f5;
+  color: #09090b;
+}
+
+.dark .folio-workbench .recent-search,
+.folio-workbench[data-folio-theme="dark"] .recent-search {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .folio-workbench .recent-search input,
+.folio-workbench[data-folio-theme="dark"] .recent-search input {
+  background: transparent;
+  color: #f4f4f5;
+}
+
+.dark .folio-workbench .recent-picker-option.active,
+.folio-workbench[data-folio-theme="dark"] .recent-picker-option.active {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+}
+
+.dark .folio-workbench .recent-picker-footer,
+.folio-workbench[data-folio-theme="dark"] .recent-picker-footer {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+/* Loading screen, Toasts, Job Banner, File Drop Overlay */
+.dark .folio-workbench .folio-loading,
+.folio-workbench[data-folio-theme="dark"] .folio-loading {
+  background: #0c0c10;
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .loading-track,
+.folio-workbench[data-folio-theme="dark"] .loading-track {
+  stroke: rgba(99, 102, 241, 0.22);
+}
+
+.dark .folio-workbench .loading-caption,
+.folio-workbench[data-folio-theme="dark"] .loading-caption {
+  color: #a1a1aa;
+}
+
+.dark .folio-workbench .loading-progress,
+.folio-workbench[data-folio-theme="dark"] .loading-progress {
+  background: rgba(255, 255, 255, 0.09);
+}
+
+.dark .folio-workbench .loading-brand,
+.folio-workbench[data-folio-theme="dark"] .loading-brand {
+  color: #d4d4d8;
+}
+
+.dark .folio-workbench .toast,
+.folio-workbench[data-folio-theme="dark"] .toast {
+  background: rgba(22, 22, 28, 0.96);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+  color: #34d399;
+}
+
+.dark .folio-workbench .toast span,
+.folio-workbench[data-folio-theme="dark"] .toast span {
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .toast.error,
+.folio-workbench[data-folio-theme="dark"] .toast.error {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.3);
+}
+
+.dark .folio-workbench .job-banner,
+.folio-workbench[data-folio-theme="dark"] .job-banner {
+  background: #17171e;
+  border-color: rgba(255, 255, 255, 0.12);
+  color: #e4e4e7;
+}
+
+.dark .folio-workbench .file-drop-overlay,
+.folio-workbench[data-folio-theme="dark"] .file-drop-overlay {
+  background: rgba(12, 12, 16, 0.86);
+}
+
+.dark .folio-workbench .file-drop-overlay > div,
+.folio-workbench[data-folio-theme="dark"] .file-drop-overlay > div {
+  background: #16161d;
+  border-color: rgba(129, 140, 248, 0.45);
+  color: #f4f4f5;
+}

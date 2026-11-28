@@ -11,7 +11,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::auth::{hash_password, validate_pin, verify_password, SessionState};
-use crate::backup::{create_backup, reset_app_data_with_backup, restore_backup};
+use crate::backup::{create_backup_with_options, reset_app_data_with_backup, restore_backup};
 use crate::db::{
     calc_next_cal_date, get_setting, is_account_initialized, is_app_lock_configured,
     load_app_settings, now_iso, query_instrument_by_id, query_instruments,
@@ -29,6 +29,14 @@ use crate::storage::{
     save_image_from_path, save_report_from_base64, save_report_from_path,
 };
 use crate::updater::{check_github_release, download_and_install_update, PendingUpdate};
+use crate::workbench_store::{
+    clear_all_pdf_drafts, delete_pdf_draft, enforce_pdf_cache_limit, get_backup_include_workbench,
+    get_workbench_cache_limit_mb, get_workbench_cache_stats, list_pdf_drafts, read_pdf_draft_meta,
+    read_pdf_source_bytes, read_pdf_workspace_state, save_pdf_markers, save_pdf_source,
+    set_workbench_cache_limit_and_prune, write_pdf_workspace_state, SavePdfMarkersInput,
+    SavePdfSourceMeta, WorkbenchCachePruneResult, WorkbenchCacheStats, WorkbenchPdfDraftMeta,
+    WorkbenchPdfPage, WorkbenchPdfSaveResult, WorkbenchPdfWorkspaceState,
+};
 
 pub struct AppState {
     pub db: Mutex<Connection>,
@@ -1359,6 +1367,203 @@ pub fn write_external_file_base64(
     fs::write(dest, bytes).map_err(|e| format!("保存导出文件失败: {}", e))
 }
 
+fn decode_base64_utf8_path(encoded: &str) -> Result<String, String> {
+    let raw = base64::engine::general_purpose::STANDARD
+        .decode(encoded.trim())
+        .map_err(|e| format!("目标路径编码无效: {}", e))?;
+    let decoded =
+        String::from_utf8(raw).map_err(|e| format!("目标路径 UTF-8 解码失败: {}", e))?;
+    let trimmed = decoded.trim();
+    if trimmed.is_empty() {
+        return Err("目标路径不能为空".to_string());
+    }
+    Ok(trimmed.to_string())
+}
+
+/// Raw binary read for QI/QC workbench tools (works in both read-only and admin modes once unlocked).
+#[tauri::command]
+pub fn read_workbench_file_raw(
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<tauri::ipc::Response, String> {
+    check_unlocked(&state)?;
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err("文件路径不能为空".to_string());
+    }
+    let bytes = fs::read(Path::new(trimmed)).map_err(|e| format!("读取文件失败: {}", e))?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// Raw binary write for QI/QC workbench exports (avoids Base64 overhead for large PDF/image/ZIP files).
+#[tauri::command]
+pub fn write_workbench_file_raw(
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<(), String> {
+    check_unlocked(&state)?;
+    let encoded_path = request
+        .headers()
+        .get("x-dest-path-b64")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "缺少导出目标路径".to_string())?;
+    let dest_str = decode_base64_utf8_path(encoded_path)?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(data) => data,
+        _ => return Err("导出数据格式无效".to_string()),
+    };
+    let dest = Path::new(&dest_str);
+    if let Some(parent) = dest.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("创建目标目录失败: {}", e))?;
+    }
+    fs::write(dest, bytes).map_err(|e| format!("保存导出文件失败: {}", e))
+}
+
+// ---------------- QI/QC Workbench Native Disk Draft Store (Content-Addressed + LRU) ----------------
+
+#[tauri::command]
+pub fn workbench_pdf_read_workspace(
+    state: State<'_, AppState>,
+) -> Result<WorkbenchPdfWorkspaceState, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    read_pdf_workspace_state(&conn)
+}
+
+#[tauri::command]
+pub fn workbench_pdf_write_workspace(
+    state: State<'_, AppState>,
+    active_id: Option<String>,
+    screen: String,
+) -> Result<(), String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    write_pdf_workspace_state(&conn, &WorkbenchPdfWorkspaceState { active_id, screen })
+}
+
+#[tauri::command]
+pub fn workbench_pdf_read_draft_meta(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<Option<WorkbenchPdfDraftMeta>, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    read_pdf_draft_meta(&conn, &state.data_dir, &id)
+}
+
+#[tauri::command]
+pub fn workbench_pdf_read_source_raw(
+    state: State<'_, AppState>,
+    id: String,
+) -> Result<tauri::ipc::Response, String> {
+    check_unlocked(&state)?;
+    let bytes = read_pdf_source_bytes(&state.data_dir, &id)?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+#[tauri::command]
+pub fn workbench_pdf_list_drafts(
+    state: State<'_, AppState>,
+    cursor_updated_at: Option<i64>,
+    cursor_id: Option<String>,
+    limit: Option<usize>,
+    query: Option<String>,
+) -> Result<WorkbenchPdfPage, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    list_pdf_drafts(
+        &conn,
+        cursor_updated_at,
+        cursor_id.as_deref(),
+        limit.unwrap_or(12),
+        query.as_deref().unwrap_or(""),
+    )
+}
+
+#[tauri::command]
+pub fn workbench_pdf_save_source_raw(
+    state: State<'_, AppState>,
+    request: tauri::ipc::Request<'_>,
+) -> Result<WorkbenchPdfSaveResult, String> {
+    check_unlocked(&state)?;
+    let encoded_meta = request
+        .headers()
+        .get("x-draft-meta-b64")
+        .and_then(|v| v.to_str().ok())
+        .ok_or_else(|| "缺少图纸草稿元数据".to_string())?;
+    let meta_json = decode_base64_utf8_path(encoded_meta)?;
+    let meta: SavePdfSourceMeta =
+        serde_json::from_str(&meta_json).map_err(|e| format!("草稿元数据解析失败: {}", e))?;
+    let bytes = match request.body() {
+        tauri::ipc::InvokeBody::Raw(data) => {
+            if data.is_empty() {
+                None
+            } else {
+                Some(data.as_slice())
+            }
+        }
+        _ => return Err("草稿二进制负载格式无效".to_string()),
+    };
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    save_pdf_source(&conn, &state.data_dir, &meta, bytes)
+}
+
+#[tauri::command]
+pub fn workbench_pdf_save_markers(
+    state: State<'_, AppState>,
+    input: SavePdfMarkersInput,
+) -> Result<i64, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    save_pdf_markers(&conn, &input)
+}
+
+#[tauri::command]
+pub fn workbench_pdf_delete_draft(state: State<'_, AppState>, id: String) -> Result<(), String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    delete_pdf_draft(&conn, &state.data_dir, &id)
+}
+
+#[tauri::command]
+pub fn workbench_pdf_clear_all(
+    state: State<'_, AppState>,
+) -> Result<WorkbenchCachePruneResult, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    clear_all_pdf_drafts(&conn, &state.data_dir)
+}
+
+#[tauri::command]
+pub fn workbench_pdf_cache_stats(
+    state: State<'_, AppState>,
+) -> Result<WorkbenchCacheStats, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    Ok(get_workbench_cache_stats(&conn, &state.data_dir))
+}
+
+#[tauri::command]
+pub fn workbench_pdf_prune_cache(
+    state: State<'_, AppState>,
+    limit_mb: Option<i64>,
+    protected_id: Option<String>,
+) -> Result<WorkbenchCachePruneResult, String> {
+    check_unlocked(&state)?;
+    let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
+    if let Some(mb) = limit_mb {
+        set_workbench_cache_limit_and_prune(&conn, &state.data_dir, mb, protected_id.as_deref())
+    } else {
+        let current_mb = get_workbench_cache_limit_mb(&conn);
+        enforce_pdf_cache_limit(
+            &conn,
+            &state.data_dir,
+            (current_mb as u64) * 1024 * 1024,
+            protected_id.as_deref(),
+        )
+    }
+}
+
 // ---------------- Settings, Logo, Data Dir, Backup & Restore ----------------
 
 #[tauri::command]
@@ -1465,6 +1670,16 @@ pub fn update_settings(
     if let Some(v) = input.update_proxy_url {
         set_setting(&conn, "update_proxy_url", v.trim())?;
     }
+    if let Some(limit_mb) = input.workbench_cache_limit_mb {
+        let _ = set_workbench_cache_limit_and_prune(&conn, &state.data_dir, limit_mb, None)?;
+    }
+    if let Some(include_wb) = input.backup_include_workbench {
+        set_setting(
+            &conn,
+            "backup_include_workbench",
+            if include_wb { "1" } else { "0" },
+        )?;
+    }
     load_app_settings(&conn)
 }
 
@@ -1525,22 +1740,35 @@ pub fn get_data_dir_info(state: State<'_, AppState>) -> Result<DataDirInfo, Stri
     let db_size = fs::metadata(&state.db_path).map(|m| m.len()).unwrap_or(0);
     let img_size = dir_total_size(&state.data_dir.join("images"));
     let rep_size = dir_total_size(&state.data_dir.join("reports"));
-    let (instrument_count, report_count) = if let Ok(conn) = state.db.lock() {
+    let (instrument_count, report_count, wb_stats) = if let Ok(conn) = state.db.lock() {
         let ic: usize = conn
             .query_row("SELECT COUNT(*) FROM instruments", [], |r| r.get(0))
             .unwrap_or(0);
         let rc: usize = conn
             .query_row("SELECT COUNT(*) FROM calibration_reports", [], |r| r.get(0))
             .unwrap_or(0);
-        (ic, rc)
+        let wb = get_workbench_cache_stats(&conn, &state.data_dir);
+        (ic, rc, wb)
     } else {
-        (0, 0)
+        (
+            0,
+            0,
+            WorkbenchCacheStats {
+                total_bytes: 0,
+                draft_count: 0,
+                limit_bytes: 1024 * 1024 * 1024,
+                limit_mb: 1024,
+            },
+        )
     };
 
     Ok(DataDirInfo {
         data_dir: state.data_dir.to_string_lossy().to_string(),
         db_size_bytes: db_size,
         attachments_size_bytes: img_size + rep_size,
+        workbench_cache_bytes: wb_stats.total_bytes,
+        workbench_draft_count: wb_stats.draft_count,
+        workbench_cache_limit_mb: wb_stats.limit_mb,
         instrument_count,
         report_count,
         app_version: env!("CARGO_PKG_VERSION").to_string(),
@@ -1559,10 +1787,12 @@ pub fn open_data_dir(app: AppHandle, state: State<'_, AppState>) -> Result<(), S
 pub fn create_local_backup(
     state: State<'_, AppState>,
     dest_zip_path: String,
+    include_workbench: Option<bool>,
 ) -> Result<BackupResult, String> {
     check_admin(&state)?;
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-    create_backup(&conn, &state.data_dir, Path::new(dest_zip_path.trim()))
+    let include_wb = include_workbench.unwrap_or_else(|| get_backup_include_workbench(&conn));
+    create_backup_with_options(&conn, &state.data_dir, Path::new(dest_zip_path.trim()), include_wb)
 }
 
 #[tauri::command]
@@ -1736,4 +1966,22 @@ pub async fn download_and_launch_update(
         state.allow_exit.store(false, Ordering::SeqCst);
     }
     res
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decode_base64_utf8_path_handles_unicode_and_spaces() {
+        let sample = "/Users/demo/工程图纸/10008420-AD-气泡图 (已标记).pdf";
+        let encoded = base64::engine::general_purpose::STANDARD.encode(sample.as_bytes());
+        assert_eq!(decode_base64_utf8_path(&encoded).unwrap(), sample);
+    }
+
+    #[test]
+    fn decode_base64_utf8_path_rejects_empty() {
+        let encoded = base64::engine::general_purpose::STANDARD.encode("   ".as_bytes());
+        assert!(decode_base64_utf8_path(&encoded).is_err());
+    }
 }
