@@ -16,7 +16,7 @@ use crate::models::{
     SyncTestResult, TestSyncConfigInput,
 };
 use crate::s3_client::{normalize_prefix, S3Client, S3Credentials, S3PutError};
-use crate::storage::{ensure_storage_dirs, resolve_stored_path};
+use crate::storage::{ensure_storage_dirs, resolve_sync_blob_path};
 use crate::sync_crypto::{
     create_key_verifier, decode_b64, decrypt_bytes, derive_e2ee_key, encode_b64, encrypt_bytes,
     generate_random_salt, gzip_compress, gzip_decompress, salt_id_from_bytes, sha256_hex,
@@ -45,8 +45,66 @@ pub const LOCAL_ONLY_SETTING_KEYS: &[&str] = &[
     "github_repo",
     "update_proxy_url",
     "workbench_cache_limit_mb",
+    "backup_include_photos",
+    "backup_include_reports",
+    "backup_include_settings",
     "backup_include_workbench",
 ];
+
+/// Header, document metadata, and expiry alert preference keys controlled by the
+/// "表头与预警配置" content toggle in both Cloud Sync and Local Backup.
+pub const CONFIG_SYNC_SETTING_KEYS: &[&str] = &[
+    "doc_code",
+    "doc_version",
+    "doc_title",
+    "doc_subtitle",
+    "weekly_notice",
+    "warning_days",
+    "warning_thresholds",
+    "alert_popup_enabled",
+    "alert_popup_frequency",
+    "alert_popup_interval_hours",
+];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SyncScope {
+    pub include_photos: bool,
+    pub include_reports: bool,
+    pub include_settings: bool,
+    pub include_workbench: bool,
+}
+
+impl Default for SyncScope {
+    fn default() -> Self {
+        Self {
+            include_photos: true,
+            include_reports: true,
+            include_settings: true,
+            include_workbench: false,
+        }
+    }
+}
+
+impl SyncScope {
+    pub fn intersect(self, other: Self) -> Self {
+        Self {
+            include_photos: self.include_photos && other.include_photos,
+            include_reports: self.include_reports && other.include_reports,
+            include_settings: self.include_settings && other.include_settings,
+            include_workbench: self.include_workbench && other.include_workbench,
+        }
+    }
+
+    pub fn allows_blob_rel_path(self, rel_path: &str) -> bool {
+        let first = rel_path.trim().split('/').next().unwrap_or("");
+        match first {
+            "images" => self.include_photos,
+            "reports" => self.include_reports,
+            "workbench" => self.include_workbench,
+            _ => false,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +133,14 @@ pub struct SyncConfigStored {
     pub e2ee_passphrase: String,
     #[serde(default = "default_true")]
     pub check_on_startup: bool,
+    #[serde(default = "default_true")]
+    pub sync_include_photos: bool,
+    #[serde(default = "default_true")]
+    pub sync_include_reports: bool,
+    #[serde(default = "default_true")]
+    pub sync_include_settings: bool,
+    #[serde(default)]
+    pub sync_include_workbench: bool,
     #[serde(default = "generate_device_id")]
     pub device_id: String,
     #[serde(default = "detect_default_device_name")]
@@ -145,6 +211,10 @@ impl Default for SyncConfigStored {
             e2ee_enabled: false,
             e2ee_passphrase: String::new(),
             check_on_startup: true,
+            sync_include_photos: true,
+            sync_include_reports: true,
+            sync_include_settings: true,
+            sync_include_workbench: false,
             device_id: generate_device_id(),
             device_name: detect_default_device_name(),
             last_synced_rev: 0,
@@ -160,6 +230,15 @@ impl SyncConfigStored {
             && !self.bucket.trim().is_empty()
             && !self.access_key_id.trim().is_empty()
             && !self.secret_access_key.trim().is_empty()
+    }
+
+    pub fn sync_scope(&self) -> SyncScope {
+        SyncScope {
+            include_photos: self.sync_include_photos,
+            include_reports: self.sync_include_reports,
+            include_settings: self.sync_include_settings,
+            include_workbench: self.sync_include_workbench,
+        }
     }
 
     pub fn to_credentials(&self) -> S3Credentials {
@@ -183,6 +262,7 @@ impl SyncConfigStored {
 
     pub fn to_view(&self) -> SyncConfigView {
         let masked = mask_secret(&self.secret_access_key);
+        let effective_e2ee = !self.e2ee_passphrase.is_empty();
         SyncConfigView {
             enabled: self.enabled,
             configured: self.is_configured(),
@@ -195,9 +275,13 @@ impl SyncConfigStored {
             has_secret_access_key: !self.secret_access_key.trim().is_empty(),
             secret_access_key_hint: masked,
             force_path_style: self.force_path_style,
-            e2ee_enabled: self.e2ee_enabled,
-            has_e2ee_passphrase: !self.e2ee_passphrase.is_empty(),
+            e2ee_enabled: effective_e2ee,
+            has_e2ee_passphrase: effective_e2ee,
             check_on_startup: self.check_on_startup,
+            sync_include_photos: self.sync_include_photos,
+            sync_include_reports: self.sync_include_reports,
+            sync_include_settings: self.sync_include_settings,
+            sync_include_workbench: self.sync_include_workbench,
             device_id: self.device_id.clone(),
             device_name: self.device_name.clone(),
             last_synced_rev: self.last_synced_rev,
@@ -306,6 +390,19 @@ pub fn apply_sync_config_update(
     next.force_path_style = input.force_path_style;
     next.check_on_startup = input.check_on_startup;
 
+    if let Some(v) = input.sync_include_photos {
+        next.sync_include_photos = v;
+    }
+    if let Some(v) = input.sync_include_reports {
+        next.sync_include_reports = v;
+    }
+    if let Some(v) = input.sync_include_settings {
+        next.sync_include_settings = v;
+    }
+    if let Some(v) = input.sync_include_workbench {
+        next.sync_include_workbench = v;
+    }
+
     if let Some(dev_name) = input.device_name {
         let trimmed = dev_name.trim();
         if !trimmed.is_empty() {
@@ -322,18 +419,17 @@ pub fn apply_sync_config_update(
         }
     }
 
-    next.e2ee_enabled = input.e2ee_enabled;
-    if input.clear_e2ee_passphrase.unwrap_or(false) {
+    // Toggle-free E2EE: a non-empty passphrase enables encryption; empty/cleared disables it.
+    let incoming_pass = input.e2ee_passphrase.unwrap_or_default();
+    if input.clear_e2ee_passphrase.unwrap_or(false)
+        || (!input.e2ee_enabled && incoming_pass.is_empty())
+    {
         next.e2ee_passphrase.clear();
-    } else if let Some(pass) = input.e2ee_passphrase {
-        if !pass.is_empty() {
-            next.e2ee_passphrase = pass;
-        }
+    } else if !incoming_pass.is_empty() {
+        next.e2ee_passphrase = incoming_pass;
     }
+    next.e2ee_enabled = !next.e2ee_passphrase.is_empty();
 
-    if next.e2ee_enabled && next.e2ee_passphrase.is_empty() {
-        return Err("已开启端到端加密，请设置加密口令（至少 4 位）".to_string());
-    }
     if next.e2ee_enabled && next.e2ee_passphrase.chars().count() < 4 {
         return Err("端到端加密口令长度不能少于 4 位".to_string());
     }
@@ -381,12 +477,17 @@ pub fn resolve_test_config(
         force_path_style: input.force_path_style,
     };
 
-    let passphrase = input
-        .e2ee_passphrase
-        .filter(|p| !p.is_empty())
-        .unwrap_or_else(|| stored.e2ee_passphrase.clone());
+    let incoming_pass = input.e2ee_passphrase.unwrap_or_default();
+    let passphrase = if !incoming_pass.is_empty() {
+        incoming_pass
+    } else if input.e2ee_enabled {
+        stored.e2ee_passphrase.clone()
+    } else {
+        String::new()
+    };
+    let e2ee_enabled = !passphrase.is_empty();
 
-    Ok((creds, input.e2ee_enabled, passphrase))
+    Ok((creds, e2ee_enabled, passphrase))
 }
 
 // ---------------- Remote Manifest Schema ----------------
@@ -433,6 +534,25 @@ pub struct SyncManifest {
     pub blobs: Vec<ManifestBlob>,
     #[serde(default)]
     pub recent_db_keys: Vec<String>,
+    #[serde(default = "default_true")]
+    pub include_photos: bool,
+    #[serde(default = "default_true")]
+    pub include_reports: bool,
+    #[serde(default = "default_true")]
+    pub include_settings: bool,
+    #[serde(default)]
+    pub include_workbench: bool,
+}
+
+impl SyncManifest {
+    pub fn sync_scope(&self) -> SyncScope {
+        SyncScope {
+            include_photos: self.include_photos,
+            include_reports: self.include_reports,
+            include_settings: self.include_settings,
+            include_workbench: self.include_workbench,
+        }
+    }
 }
 
 // ---------------- Local Ledger Fingerprinting & State Preservation ----------------
@@ -461,15 +581,35 @@ struct WorkbenchDraftRow {
     updated_at: i64,
 }
 
+#[derive(Debug, Clone)]
+struct PreservedReportRow {
+    id: i64,
+    instrument_id: i64,
+    file_name: String,
+    stored_path: String,
+    file_ext: String,
+    file_size: i64,
+    cal_date: String,
+    cal_agency: String,
+    remark: String,
+    uploaded_at: String,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct LocalPreservedState {
     settings: Vec<(String, String)>,
+    instrument_photos: Vec<(i64, String)>,
+    calibration_reports: Vec<PreservedReportRow>,
     workbench_drafts: Vec<WorkbenchDraftRow>,
     workbench_state: Vec<(String, String)>,
 }
 
 fn is_local_only_setting(key: &str) -> bool {
     LOCAL_ONLY_SETTING_KEYS.contains(&key)
+}
+
+fn is_config_sync_setting(key: &str) -> bool {
+    CONFIG_SYNC_SETTING_KEYS.contains(&key)
 }
 
 #[derive(Serialize)]
@@ -479,14 +619,21 @@ struct InstrumentHashRow(
     String, String, String,
 );
 
-/// Computes a deterministic SHA-256 fingerprint of all syncable ledger data
-/// (`instruments`, `calibration_reports`, and non-local `app_settings`),
-/// plus the sorted list of managed attachment files referenced by the DB.
+#[cfg(test)]
 pub fn compute_local_ledger_summary(conn: &Connection) -> Result<LocalLedgerSummary, String> {
+    compute_local_ledger_summary_with_scope(conn, SyncScope::default())
+}
+
+/// Computes a deterministic SHA-256 fingerprint of all syncable ledger data according to `scope`,
+/// plus the sorted list of managed files referenced by the DB within that scope.
+pub fn compute_local_ledger_summary_with_scope(
+    conn: &Connection,
+    scope: SyncScope,
+) -> Result<LocalLedgerSummary, String> {
     let mut hasher_input = String::with_capacity(8192);
     let mut referenced: HashSet<String> = HashSet::new();
 
-    // 1. Instruments
+    // 1. Instruments (core — always synced; photo_path included only when scope.include_photos)
     let mut instrument_count = 0usize;
     {
         let mut stmt = conn
@@ -512,10 +659,14 @@ pub fn compute_local_ledger_summary(conn: &Connection) -> Result<LocalLedgerSumm
 
         hasher_input.push_str("INSTRUMENTS\n");
         for row in rows {
-            let f = row.map_err(|e| format!("解析仪器摘要失败: {}", e))?;
+            let mut f = row.map_err(|e| format!("解析仪器摘要失败: {}", e))?;
             instrument_count += 1;
-            if !f.20.trim().is_empty() {
-                referenced.insert(f.20.trim().to_string());
+            if scope.include_photos {
+                if !f.20.trim().is_empty() {
+                    referenced.insert(f.20.trim().to_string());
+                }
+            } else {
+                f.20.clear();
             }
             let line = serde_json::to_string(&f).unwrap_or_default();
             hasher_input.push_str(&line);
@@ -523,9 +674,9 @@ pub fn compute_local_ledger_summary(conn: &Connection) -> Result<LocalLedgerSumm
         }
     }
 
-    // 2. Calibration reports
+    // 2. Calibration reports (when scope.include_reports)
     let mut report_count = 0usize;
-    {
+    if scope.include_reports {
         let mut stmt = conn
             .prepare(
                 "SELECT id, instrument_id, file_name, stored_path, file_ext, file_size,
@@ -559,7 +710,7 @@ pub fn compute_local_ledger_summary(conn: &Connection) -> Result<LocalLedgerSumm
         }
     }
 
-    // 3. Synced app_settings (excluding local-only device keys)
+    // 3. Synced app_settings (excluding local-only device keys and optional excluded scopes)
     {
         let mut stmt = conn
             .prepare("SELECT key, value FROM app_settings ORDER BY key ASC")
@@ -574,12 +725,58 @@ pub fn compute_local_ledger_summary(conn: &Connection) -> Result<LocalLedgerSumm
             if is_local_only_setting(&k) {
                 continue;
             }
-            if (k == "company_logo_path" || k == "admin_avatar_path") && !v.trim().is_empty() {
-                referenced.insert(v.trim().to_string());
+            if !scope.include_settings && is_config_sync_setting(&k) {
+                continue;
+            }
+            if k == "company_logo_path" || k == "admin_avatar_path" {
+                if !scope.include_photos {
+                    continue;
+                }
+                if !v.trim().is_empty() {
+                    referenced.insert(v.trim().to_string());
+                }
             }
             let line = serde_json::to_string(&(&k, &v)).unwrap_or_default();
             hasher_input.push_str(&line);
             hasher_input.push('\n');
+        }
+    }
+
+    // 4. Optional QI/QC Workbench drafts (when scope.include_workbench)
+    if scope.include_workbench {
+        hasher_input.push_str("WORKBENCH\n");
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, name, source_rel_path, byte_length, page_count, marker_count,
+                    markers_json, view_json, next_number, compatibility, revision, updated_at
+             FROM workbench_pdf_drafts ORDER BY id ASC",
+        ) {
+            if let Ok(rows) = stmt.query_map([], |r| {
+                let fields: (
+                    String, String, String, i64, i64, i64, String, String, i64, i64, i64, i64,
+                ) = (
+                    r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?,
+                    r.get(6)?, r.get(7)?, r.get(8)?, r.get(9)?, r.get(10)?, r.get(11)?,
+                );
+                Ok(fields)
+            }) {
+                for row in rows.flatten() {
+                    if !row.2.trim().is_empty() {
+                        referenced.insert(row.2.trim().to_string());
+                    }
+                    let line = serde_json::to_string(&row).unwrap_or_default();
+                    hasher_input.push_str(&line);
+                    hasher_input.push('\n');
+                }
+            }
+        }
+        if let Ok(mut stmt) = conn.prepare("SELECT key, value FROM workbench_pdf_state ORDER BY key ASC") {
+            if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) {
+                for (k, v) in rows.flatten() {
+                    let line = serde_json::to_string(&(&k, &v)).unwrap_or_default();
+                    hasher_input.push_str(&line);
+                    hasher_input.push('\n');
+                }
+            }
         }
     }
 
@@ -594,9 +791,17 @@ pub fn compute_local_ledger_summary(conn: &Connection) -> Result<LocalLedgerSumm
     })
 }
 
-/// Exports a clean, standalone SQLite snapshot stripping workbench cache tables & device-local settings.
+#[cfg(test)]
 pub fn build_clean_sync_db_snapshot(conn: &Connection) -> Result<(Vec<u8>, LocalLedgerSummary), String> {
-    let summary = compute_local_ledger_summary(conn)?;
+    build_clean_sync_db_snapshot_with_scope(conn, SyncScope::default())
+}
+
+/// Exports a clean, standalone SQLite snapshot stripping excluded scopes & device-local settings.
+pub fn build_clean_sync_db_snapshot_with_scope(
+    conn: &Connection,
+    scope: SyncScope,
+) -> Result<(Vec<u8>, LocalLedgerSummary), String> {
+    let summary = compute_local_ledger_summary_with_scope(conn, scope)?;
     let temp_snap = std::env::temp_dir().join(format!("ledger_sync_snap_{}.db", Uuid::new_v4()));
     if temp_snap.exists() {
         let _ = fs::remove_file(&temp_snap);
@@ -608,13 +813,29 @@ pub fn build_clean_sync_db_snapshot(conn: &Connection) -> Result<(Vec<u8>, Local
     conn.execute("VACUUM INTO ?1", params![snap_str])
         .map_err(|e| format!("导出同步数据库快照失败: {}", e))?;
 
-    // Strip workbench drafts and pure device-local settings from the exported snapshot
+    // Strip pure device-local settings and any disabled sync scopes from the exported snapshot
     {
         let snap_conn = Connection::open(&temp_snap)
             .map_err(|e| format!("打开临时快照数据库失败: {}", e))?;
-        snap_conn
-            .execute_batch("DELETE FROM workbench_pdf_drafts; DELETE FROM workbench_pdf_state;")
-            .map_err(|e| format!("清理快照工作台缓存表失败: {}", e))?;
+        if !scope.include_workbench {
+            snap_conn
+                .execute_batch("DELETE FROM workbench_pdf_drafts; DELETE FROM workbench_pdf_state;")
+                .map_err(|e| format!("清理快照工作台缓存表失败: {}", e))?;
+        }
+        if !scope.include_reports {
+            let _ = snap_conn.execute_batch("DELETE FROM calibration_reports;");
+        }
+        if !scope.include_photos {
+            let _ = snap_conn.execute_batch(
+                "UPDATE instruments SET photo_path = '';
+                 DELETE FROM app_settings WHERE key IN ('company_logo_path', 'admin_avatar_path');",
+            );
+        }
+        if !scope.include_settings {
+            for key in CONFIG_SYNC_SETTING_KEYS {
+                let _ = snap_conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key]);
+            }
+        }
         for key in LOCAL_ONLY_SETTING_KEYS {
             let _ = snap_conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key]);
         }
@@ -626,7 +847,10 @@ pub fn build_clean_sync_db_snapshot(conn: &Connection) -> Result<(Vec<u8>, Local
     Ok((bytes, summary))
 }
 
-pub fn capture_local_device_state(conn: &Connection) -> Result<LocalPreservedState, String> {
+pub fn capture_local_device_state_for_scope(
+    conn: &Connection,
+    effective_scope: SyncScope,
+) -> Result<LocalPreservedState, String> {
     let mut state = LocalPreservedState::default();
 
     for key in LOCAL_ONLY_SETTING_KEYS {
@@ -635,38 +859,90 @@ pub fn capture_local_device_state(conn: &Connection) -> Result<LocalPreservedSta
         }
     }
 
-    if let Ok(mut stmt) = conn.prepare(
-        "SELECT id, name, source_rel_path, byte_length, page_count, marker_count,
-                markers_json, view_json, next_number, compatibility, revision, updated_at
-         FROM workbench_pdf_drafts",
-    ) {
-        if let Ok(rows) = stmt.query_map([], |r| {
-            Ok(WorkbenchDraftRow {
-                id: r.get(0)?,
-                name: r.get(1)?,
-                source_rel_path: r.get(2)?,
-                byte_length: r.get(3)?,
-                page_count: r.get(4)?,
-                marker_count: r.get(5)?,
-                markers_json: r.get(6)?,
-                view_json: r.get(7)?,
-                next_number: r.get(8)?,
-                compatibility: r.get(9)?,
-                revision: r.get(10)?,
-                updated_at: r.get(11)?,
-            })
-        }) {
-            for r in rows.flatten() {
-                state.workbench_drafts.push(r);
+    if !effective_scope.include_settings {
+        for key in CONFIG_SYNC_SETTING_KEYS {
+            if let Ok(Some(val)) = crate::db::get_setting(conn, key) {
+                state.settings.push(((*key).to_string(), val));
             }
         }
     }
 
-    if let Ok(mut stmt) = conn.prepare("SELECT key, value FROM workbench_pdf_state") {
-        if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
-        {
-            for r in rows.flatten() {
-                state.workbench_state.push(r);
+    if !effective_scope.include_photos {
+        for key in ["company_logo_path", "admin_avatar_path"] {
+            if let Ok(Some(val)) = crate::db::get_setting(conn, key) {
+                state.settings.push((key.to_string(), val));
+            }
+        }
+        if let Ok(mut stmt) = conn.prepare("SELECT id, photo_path FROM instruments WHERE photo_path != ''") {
+            if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
+                for r in rows.flatten() {
+                    state.instrument_photos.push(r);
+                }
+            }
+        }
+    }
+
+    if !effective_scope.include_reports {
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, instrument_id, file_name, stored_path, file_ext, file_size,
+                    cal_date, cal_agency, remark, uploaded_at
+             FROM calibration_reports",
+        ) {
+            if let Ok(rows) = stmt.query_map([], |r| {
+                Ok(PreservedReportRow {
+                    id: r.get(0)?,
+                    instrument_id: r.get(1)?,
+                    file_name: r.get(2)?,
+                    stored_path: r.get(3)?,
+                    file_ext: r.get(4)?,
+                    file_size: r.get(5)?,
+                    cal_date: r.get(6)?,
+                    cal_agency: r.get(7)?,
+                    remark: r.get(8)?,
+                    uploaded_at: r.get(9)?,
+                })
+            }) {
+                for r in rows.flatten() {
+                    state.calibration_reports.push(r);
+                }
+            }
+        }
+    }
+
+    if !effective_scope.include_workbench {
+        if let Ok(mut stmt) = conn.prepare(
+            "SELECT id, name, source_rel_path, byte_length, page_count, marker_count,
+                    markers_json, view_json, next_number, compatibility, revision, updated_at
+             FROM workbench_pdf_drafts",
+        ) {
+            if let Ok(rows) = stmt.query_map([], |r| {
+                Ok(WorkbenchDraftRow {
+                    id: r.get(0)?,
+                    name: r.get(1)?,
+                    source_rel_path: r.get(2)?,
+                    byte_length: r.get(3)?,
+                    page_count: r.get(4)?,
+                    marker_count: r.get(5)?,
+                    markers_json: r.get(6)?,
+                    view_json: r.get(7)?,
+                    next_number: r.get(8)?,
+                    compatibility: r.get(9)?,
+                    revision: r.get(10)?,
+                    updated_at: r.get(11)?,
+                })
+            }) {
+                for r in rows.flatten() {
+                    state.workbench_drafts.push(r);
+                }
+            }
+        }
+
+        if let Ok(mut stmt) = conn.prepare("SELECT key, value FROM workbench_pdf_state") {
+            if let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+            {
+                for r in rows.flatten() {
+                    state.workbench_state.push(r);
+                }
             }
         }
     }
@@ -677,48 +953,93 @@ pub fn capture_local_device_state(conn: &Connection) -> Result<LocalPreservedSta
 pub fn restore_local_device_state(
     conn: &Connection,
     preserved: &LocalPreservedState,
+    effective_scope: SyncScope,
 ) -> Result<(), String> {
     for (k, v) in &preserved.settings {
         set_setting(conn, k, v)?;
     }
 
-    for d in &preserved.workbench_drafts {
-        conn.execute(
-            "INSERT OR REPLACE INTO workbench_pdf_drafts (
-                id, name, source_rel_path, byte_length, page_count, marker_count,
-                markers_json, view_json, next_number, compatibility, revision, updated_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![
-                d.id,
-                d.name,
-                d.source_rel_path,
-                d.byte_length,
-                d.page_count,
-                d.marker_count,
-                d.markers_json,
-                d.view_json,
-                d.next_number,
-                d.compatibility,
-                d.revision,
-                d.updated_at,
-            ],
-        )
-        .map_err(|e| format!("还原本地工作台草稿索引失败: {}", e))?;
+    if !effective_scope.include_photos {
+        for (inst_id, photo_path) in &preserved.instrument_photos {
+            let _ = conn.execute(
+                "UPDATE instruments SET photo_path = ?1 WHERE id = ?2",
+                params![photo_path, inst_id],
+            );
+        }
     }
 
-    for (k, v) in &preserved.workbench_state {
-        conn.execute(
-            "INSERT OR REPLACE INTO workbench_pdf_state (key, value) VALUES (?1, ?2)",
-            params![k, v],
-        )
-        .map_err(|e| format!("还原本地工作台状态失败: {}", e))?;
+    if !effective_scope.include_reports {
+        let _ = conn.execute("DELETE FROM calibration_reports", []);
+        for r in &preserved.calibration_reports {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM instruments WHERE id = ?1",
+                    params![r.instrument_id],
+                    |row| row.get(0),
+                )
+                .unwrap_or(0);
+            if exists > 0 {
+                let _ = conn.execute(
+                    "INSERT OR REPLACE INTO calibration_reports (
+                        id, instrument_id, file_name, stored_path, file_ext, file_size,
+                        cal_date, cal_agency, remark, uploaded_at
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    params![
+                        r.id,
+                        r.instrument_id,
+                        r.file_name,
+                        r.stored_path,
+                        r.file_ext,
+                        r.file_size,
+                        r.cal_date,
+                        r.cal_agency,
+                        r.remark,
+                        r.uploaded_at,
+                    ],
+                );
+            }
+        }
+    }
+
+    if !effective_scope.include_workbench {
+        let _ = conn.execute_batch("DELETE FROM workbench_pdf_drafts; DELETE FROM workbench_pdf_state;");
+        for d in &preserved.workbench_drafts {
+            conn.execute(
+                "INSERT OR REPLACE INTO workbench_pdf_drafts (
+                    id, name, source_rel_path, byte_length, page_count, marker_count,
+                    markers_json, view_json, next_number, compatibility, revision, updated_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    d.id,
+                    d.name,
+                    d.source_rel_path,
+                    d.byte_length,
+                    d.page_count,
+                    d.marker_count,
+                    d.markers_json,
+                    d.view_json,
+                    d.next_number,
+                    d.compatibility,
+                    d.revision,
+                    d.updated_at,
+                ],
+            )
+            .map_err(|e| format!("还原本地工作台草稿索引失败: {}", e))?;
+        }
+
+        for (k, v) in &preserved.workbench_state {
+            conn.execute(
+                "INSERT OR REPLACE INTO workbench_pdf_state (key, value) VALUES (?1, ?2)",
+                params![k, v],
+            )
+            .map_err(|e| format!("还原本地工作台状态失败: {}", e))?;
+        }
     }
 
     Ok(())
 }
 
-/// Applies a verified pulled SQLite snapshot and staged blobs locally while preserving
-/// device-local settings and local QI/QC Workbench drafts & files.
+#[cfg(test)]
 pub fn apply_pulled_snapshot_locally(
     conn_guard: &mut Connection,
     db_path: &Path,
@@ -727,6 +1048,30 @@ pub fn apply_pulled_snapshot_locally(
     staged_blobs_dir: &Path,
     manifest_blobs: &[ManifestBlob],
     create_safety_backup: bool,
+) -> Result<Option<String>, String> {
+    apply_pulled_snapshot_locally_with_scope(
+        conn_guard,
+        db_path,
+        data_dir,
+        staged_db_path,
+        staged_blobs_dir,
+        manifest_blobs,
+        create_safety_backup,
+        SyncScope::default(),
+    )
+}
+
+/// Applies a verified pulled SQLite snapshot and staged blobs locally while preserving
+/// device-local settings and any data scopes not included in `effective_scope`.
+pub fn apply_pulled_snapshot_locally_with_scope(
+    conn_guard: &mut Connection,
+    db_path: &Path,
+    data_dir: &Path,
+    staged_db_path: &Path,
+    staged_blobs_dir: &Path,
+    manifest_blobs: &[ManifestBlob],
+    create_safety_backup: bool,
+    effective_scope: SyncScope,
 ) -> Result<Option<String>, String> {
     // 1. Optional safety backup of current local ledger before overwriting
     let safety_backup_path = if create_safety_backup {
@@ -742,7 +1087,7 @@ pub fn apply_pulled_snapshot_locally(
                 .map_err(|e| format!("创建同步安全备份目录失败: {}", e))?;
             let ts = Local::now().format("%Y%m%d_%H%M%S");
             let dest = bak_dir.join(format!("同步拉取前自动备份_{}.zip", ts));
-            create_backup_with_options(conn_guard, data_dir, &dest, false)?;
+            create_backup_with_options(conn_guard, data_dir, &dest, effective_scope.include_workbench)?;
             prune_old_safety_backups(&bak_dir, MAX_SAFETY_BACKUPS);
             Some(dest.to_string_lossy().to_string())
         } else {
@@ -752,8 +1097,8 @@ pub fn apply_pulled_snapshot_locally(
         None
     };
 
-    // 2. Preserve local-only device settings and local workbench draft metadata
-    let preserved = capture_local_device_state(conn_guard)?;
+    // 2. Preserve local-only device settings and excluded local data scopes
+    let preserved = capture_local_device_state_for_scope(conn_guard, effective_scope)?;
 
     // 3. Release active SQLite file lock cleanly (essential on Windows)
     let mem_conn =
@@ -772,11 +1117,14 @@ pub fn apply_pulled_snapshot_locally(
         return Err(format!("替换本地数据库失败: {}", e));
     }
 
-    // 4. Copy newly downloaded blobs into images/ and reports/
+    // 4. Copy newly downloaded blobs for enabled folders
     ensure_storage_dirs(data_dir)?;
     let mut keep_paths: HashSet<PathBuf> = HashSet::new();
     for blob in manifest_blobs {
-        let target = resolve_stored_path(data_dir, &blob.rel_path)?;
+        if !effective_scope.allows_blob_rel_path(&blob.rel_path) {
+            continue;
+        }
+        let target = resolve_sync_blob_path(data_dir, &blob.rel_path)?;
         keep_paths.insert(target.clone());
 
         let staged_file = staged_blobs_dir.join(&blob.rel_path);
@@ -789,8 +1137,19 @@ pub fn apply_pulled_snapshot_locally(
         }
     }
 
-    // 5. Remove stale unreferenced local files in images/ and reports/ (never touch workbench/)
-    for folder in ["images", "reports"] {
+    // 5. Remove stale unreferenced local files ONLY in folders that were actually synced
+    let mut synced_folders: Vec<&str> = Vec::with_capacity(3);
+    if effective_scope.include_photos {
+        synced_folders.push("images");
+    }
+    if effective_scope.include_reports {
+        synced_folders.push("reports");
+    }
+    if effective_scope.include_workbench {
+        synced_folders.push("workbench");
+    }
+
+    for folder in synced_folders {
         let root = data_dir.join(folder);
         if !root.exists() {
             continue;
@@ -820,9 +1179,9 @@ pub fn apply_pulled_snapshot_locally(
         }
     }
 
-    // 6. Reopen SQLite DB and restore preserved local device settings & workbench index
+    // 6. Reopen SQLite DB and restore preserved local device settings & excluded scopes
     let new_conn = init_db(db_path)?;
-    restore_local_device_state(&new_conn, &preserved)?;
+    restore_local_device_state(&new_conn, &preserved, effective_scope)?;
     *conn_guard = new_conn;
 
     Ok(safety_backup_path)
@@ -951,7 +1310,7 @@ pub fn evaluate_sync_status(
     // Validate passphrase upfront if remote is encrypted
     let passphrase_error = if let Some(ref enc) = rm.encryption {
         if !cfg.e2ee_enabled || cfg.e2ee_passphrase.is_empty() {
-            Some("云端数据已启用端到端加密，请开启加密并填写口令".to_string())
+            Some("云端数据已启用端到端加密，请在对象存储配置中填写加密口令".to_string())
         } else {
             match decode_b64(&enc.salt_b64)
                 .and_then(|salt| derive_e2ee_key(&cfg.e2ee_passphrase, &salt))
@@ -1206,7 +1565,7 @@ pub async fn execute_push(
     }
     if !force && status.remote_encrypted && !cfg.e2ee_enabled {
         return Err(
-            "云端当前已启用端到端加密，请开启加密并填写原口令，或在确认后使用「推送覆盖云端」切换为明文".to_string(),
+            "云端当前已启用端到端加密，请填写原加密口令，或在确认后使用「推送覆盖云端」切换为明文".to_string(),
         );
     }
 
@@ -1268,7 +1627,7 @@ pub async fn execute_push(
     let mut new_manifest_blobs: Vec<ManifestBlob> = Vec::with_capacity(total_blobs);
 
     for (idx, rel_path) in local.referenced_blobs.iter().enumerate() {
-        let abs_path = resolve_stored_path(data_dir, rel_path)?;
+        let abs_path = resolve_sync_blob_path(data_dir, rel_path)?;
         if !abs_path.exists() {
             continue;
         }
@@ -1399,6 +1758,10 @@ pub async fn execute_push(
         encryption: manifest_encryption,
         blobs: new_manifest_blobs,
         recent_db_keys,
+        include_photos: cfg.sync_include_photos,
+        include_reports: cfg.sync_include_reports,
+        include_settings: cfg.sync_include_settings,
+        include_workbench: cfg.sync_include_workbench,
     };
 
     emit_sync_progress(app, "uploading", "正在提交云端版本清单...", 1, 1, 94.0);
@@ -1489,7 +1852,7 @@ pub async fn download_pull_payload(
     // Verify decryption key BEFORE downloading DB or blobs
     let decrypt_key: Option<[u8; 32]> = if let Some(ref enc) = rm.encryption {
         if !cfg.e2ee_enabled || cfg.e2ee_passphrase.is_empty() {
-            return Err("云端数据已启用端到端加密，请先开启端到端加密并输入口令".to_string());
+            return Err("云端数据已启用端到端加密，请先填写端到端加密口令".to_string());
         }
         let salt = decode_b64(&enc.salt_b64)?;
         let key = derive_e2ee_key(&cfg.e2ee_passphrase, &salt)?;
@@ -1500,6 +1863,8 @@ pub async fn download_pull_payload(
     } else {
         None
     };
+
+    let effective_scope = cfg.sync_scope().intersect(rm.sync_scope());
 
     let staging_root = std::env::temp_dir().join(format!("ledger_sync_pull_{}", Uuid::new_v4()));
     let staged_blobs_dir = staging_root.join("blobs");
@@ -1538,14 +1903,19 @@ pub async fn download_pull_payload(
                 .map_err(|e| format!("云端数据库结构不兼容: {}", e))?;
         }
 
-        // 2. Incrementally download missing or hash-mismatched attachments
-        let total_blobs = rm.blobs.len();
+        // 2. Incrementally download missing or hash-mismatched attachments within effective_scope
+        let scoped_blobs: Vec<&ManifestBlob> = rm
+            .blobs
+            .iter()
+            .filter(|b| effective_scope.allows_blob_rel_path(&b.rel_path))
+            .collect();
+        let total_blobs = scoped_blobs.len();
         let mut downloaded_blobs = 0usize;
         let mut skipped_blobs = 0usize;
 
-        for (idx, blob) in rm.blobs.iter().enumerate() {
-            // Security: ensure rel_path stays strictly inside images/ or reports/
-            let local_target = resolve_stored_path(data_dir, &blob.rel_path)?;
+        for (idx, blob) in scoped_blobs.iter().enumerate() {
+            // Security: ensure rel_path stays strictly inside images/, reports/, or workbench/
+            let local_target = resolve_sync_blob_path(data_dir, &blob.rel_path)?;
             let pct = 25.0 + ((idx + 1) as f64 / total_blobs.max(1) as f64) * 65.0;
 
             let already_valid = if local_target.exists() {
@@ -1822,6 +2192,10 @@ mod tests {
             encryption: None,
             blobs: vec![],
             recent_db_keys: vec![],
+            include_photos: true,
+            include_reports: true,
+            include_settings: true,
+            include_workbench: false,
         };
 
         // 1. Up to date
@@ -1849,5 +2223,72 @@ mod tests {
         // 6. Fresh non-empty machine with different remote data -> conflict
         let st6 = evaluate_sync_status(&cfg, &make_local("other_hash", 3), Some(&make_remote(6, "hash_v6_remote")));
         assert_eq!(st6.state, "conflict");
+    }
+
+    #[test]
+    fn test_toggle_free_e2ee_passphrase_and_sync_scopes() {
+        let base = SyncConfigStored::default();
+
+        // Filling passphrase auto-enables E2EE even if e2ee_enabled flag is false
+        let updated = apply_sync_config_update(
+            &base,
+            SaveSyncConfigInput {
+                enabled: false,
+                provider_preset: "r2".to_string(),
+                endpoint: "https://abc.r2.cloudflarestorage.com".to_string(),
+                region: "auto".to_string(),
+                bucket: "bucket".to_string(),
+                prefix: "ledger".to_string(),
+                access_key_id: "ak".to_string(),
+                secret_access_key: Some("sk".to_string()),
+                clear_secret_access_key: None,
+                force_path_style: true,
+                e2ee_enabled: false,
+                e2ee_passphrase: Some("my-secret-pass".to_string()),
+                clear_e2ee_passphrase: None,
+                check_on_startup: true,
+                sync_include_photos: Some(false),
+                sync_include_reports: Some(true),
+                sync_include_settings: Some(false),
+                sync_include_workbench: Some(true),
+                device_name: None,
+            },
+        )
+        .unwrap();
+        assert!(updated.e2ee_enabled);
+        assert_eq!(updated.e2ee_passphrase, "my-secret-pass");
+        assert!(!updated.sync_include_photos);
+        assert!(updated.sync_include_reports);
+        assert!(!updated.sync_include_settings);
+        assert!(updated.sync_include_workbench);
+
+        // Clearing passphrase disables E2EE automatically
+        let cleared = apply_sync_config_update(
+            &updated,
+            SaveSyncConfigInput {
+                enabled: false,
+                provider_preset: "r2".to_string(),
+                endpoint: "https://abc.r2.cloudflarestorage.com".to_string(),
+                region: "auto".to_string(),
+                bucket: "bucket".to_string(),
+                prefix: "ledger".to_string(),
+                access_key_id: "ak".to_string(),
+                secret_access_key: None,
+                clear_secret_access_key: None,
+                force_path_style: true,
+                e2ee_enabled: false,
+                e2ee_passphrase: None,
+                clear_e2ee_passphrase: Some(true),
+                check_on_startup: true,
+                sync_include_photos: None,
+                sync_include_reports: None,
+                sync_include_settings: None,
+                sync_include_workbench: None,
+                device_name: None,
+            },
+        )
+        .unwrap();
+        assert!(!cleared.e2ee_enabled);
+        assert!(cleared.e2ee_passphrase.is_empty());
     }
 }

@@ -148,6 +148,9 @@ export interface AppSettings {
   updateProxyUrl: string;
   companyLogoPath: string;
   workbenchCacheLimitMb: number;
+  backupIncludePhotos: boolean;
+  backupIncludeReports: boolean;
+  backupIncludeSettings: boolean;
   backupIncludeWorkbench: boolean;
 }
 
@@ -173,6 +176,9 @@ export interface SettingsUpdateInput {
   githubRepo?: string;
   updateProxyUrl?: string;
   workbenchCacheLimitMb?: number;
+  backupIncludePhotos?: boolean;
+  backupIncludeReports?: boolean;
+  backupIncludeSettings?: boolean;
   backupIncludeWorkbench?: boolean;
 }
 
@@ -285,6 +291,10 @@ export interface SyncConfigView {
   e2eeEnabled: boolean;
   hasE2eePassphrase: boolean;
   checkOnStartup: boolean;
+  syncIncludePhotos: boolean;
+  syncIncludeReports: boolean;
+  syncIncludeSettings: boolean;
+  syncIncludeWorkbench: boolean;
   deviceId: string;
   deviceName: string;
   lastSyncedRev: number;
@@ -306,6 +316,10 @@ export interface SaveSyncConfigInput {
   e2eePassphrase?: string | null;
   clearE2eePassphrase?: boolean | null;
   checkOnStartup: boolean;
+  syncIncludePhotos?: boolean;
+  syncIncludeReports?: boolean;
+  syncIncludeSettings?: boolean;
+  syncIncludeWorkbench?: boolean;
   deviceName?: string | null;
 }
 

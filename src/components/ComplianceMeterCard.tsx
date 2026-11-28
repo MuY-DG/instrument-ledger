@@ -96,27 +96,105 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
 
   const activeHoverSeg = segments.find((s) => s.key === hoveredKey) || null;
 
-  // Compact circular compliance indicator when sidebar is collapsed to rail
+  // Compact segmented circular compliance indicator when sidebar is collapsed to rail
   if (collapsed) {
-    const r = 13;
+    const r = 13.5;
+    const strokeWidth = 3;
     const circ = 2 * Math.PI * r;
-    const dashOffset = circ * (1 - Math.max(0, Math.min(100, compliancePct)) / 100);
-    const strokeColor =
-      expired > 0 ? "#f43f5e" : compliancePct < 100 ? "#f59e0b" : "#10b981";
+    const segCount = segments.length;
+
+    const ringArcs: Array<{
+      key: string;
+      color: string;
+      arcLen: number;
+      offset: number;
+    }> = [];
+
+    if (segCount === 1) {
+      ringArcs.push({
+        key: segments[0].key,
+        color: segments[0].color,
+        arcLen: circ,
+        offset: 0,
+      });
+    } else if (segCount >= 2 && controlled > 0) {
+      const visualGap =
+        segCount === 2 ? 4.8 : segCount === 3 ? 4.0 : segCount === 4 ? 3.2 : 2.6;
+      const gapLen = strokeWidth + visualGap;
+      const available = Math.max(segCount * 1.0, circ - segCount * gapLen);
+      const minArc = 1.0;
+
+      const lens = segments.map((s) => (s.count / controlled) * available);
+      let deficit = 0;
+      for (let i = 0; i < lens.length; i++) {
+        if (lens[i] < minArc) {
+          deficit += minArc - lens[i];
+          lens[i] = minArc;
+        }
+      }
+      if (deficit > 0) {
+        const surplusTotal = lens.reduce(
+          (acc, len) => acc + Math.max(0, len - minArc),
+          0
+        );
+        if (surplusTotal > 0) {
+          for (let i = 0; i < lens.length; i++) {
+            const surplus = Math.max(0, lens[i] - minArc);
+            if (surplus > 0) {
+              lens[i] -= (surplus / surplusTotal) * deficit;
+            }
+          }
+        }
+      }
+
+      let cursor = 0;
+      for (let i = 0; i < segCount; i++) {
+        const arcLen = Math.max(0.5, lens[i]);
+        ringArcs.push({
+          key: segments[i].key,
+          color: segments[i].color,
+          arcLen,
+          offset: -cursor,
+        });
+        cursor += arcLen + gapLen;
+      }
+    }
 
     return (
       <div className="px-2 pb-2.5 flex justify-center">
         <MorphTooltip
           placement="right"
           content={
-            <div className="space-y-1 min-w-[138px]">
+            <div className="space-y-1.5 min-w-[148px]">
               <div className="flex items-center justify-between gap-3 font-medium">
                 <span>在控合规率</span>
                 <span className="font-mono">{compliancePct}%</span>
               </div>
-              <div className="text-[10.5px] text-zinc-400 font-mono">
-                受控 {controlled} · {expired > 0 ? `${expired} 台待复校` : "效期良好"}
-              </div>
+              {segments.length > 0 ? (
+                <div className="space-y-0.5 pt-0.5 border-t border-white/10">
+                  {segments.map((seg) => (
+                    <div
+                      key={seg.key}
+                      className="flex items-center justify-between gap-3 text-[10.5px]"
+                    >
+                      <span className="inline-flex items-center gap-1.5 text-zinc-300">
+                        <span
+                          className="h-1.5 w-1.5 rounded-full shrink-0"
+                          style={{ backgroundColor: seg.color }}
+                        />
+                        <span>{seg.label}</span>
+                      </span>
+                      <span className="font-mono text-zinc-400">
+                        {seg.count} · {seg.pct}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[10.5px] text-zinc-400 font-mono">
+                  受控 {controlled} · {expired > 0 ? `${expired} 台待复校` : "效期良好"}
+                </div>
+              )}
             </div>
           }
         >
@@ -127,32 +205,56 @@ export const ComplianceMeterCard: React.FC<ComplianceMeterCardProps> = ({
             onClick={() =>
               expired > 0 ? onFilterStatus("expired") : onFilterStatus("all")
             }
-            className="relative h-10 w-10 rounded-xl bg-white/95 dark:bg-white/[0.04] border border-zinc-200/85 dark:border-white/[0.08] shadow-tactile flex items-center justify-center hover:border-zinc-300 dark:hover:border-white/20 transition-colors"
+            className="relative h-9 w-9 rounded-full bg-transparent hover:bg-zinc-200/55 dark:hover:bg-white/[0.06] flex items-center justify-center transition-colors focus:outline-none"
             aria-label={`在控设备合规率 ${compliancePct}%`}
           >
-            <svg viewBox="0 0 34 34" className="h-8 w-8 -rotate-90" fill="none">
-              <circle
-                cx="17"
-                cy="17"
-                r={r}
-                stroke="currentColor"
-                strokeWidth="2.5"
-                className="text-zinc-200/90 dark:text-white/[0.08]"
-              />
-              <motion.circle
-                cx="17"
-                cy="17"
-                r={r}
-                stroke={strokeColor}
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeDasharray={circ}
-                initial={false}
-                animate={{ strokeDashoffset: dashOffset }}
-                transition={{ duration: 0.5, ease: EASE_PRECISION }}
-              />
+            <svg viewBox="0 0 36 36" className="h-8 w-8 -rotate-90" fill="none">
+              {ringArcs.length > 0 ? (
+                ringArcs.map((arc) => (
+                  <motion.circle
+                    key={arc.key}
+                    cx="18"
+                    cy="18"
+                    r={r}
+                    stroke={arc.color}
+                    strokeWidth={strokeWidth}
+                    strokeLinecap={segCount === 1 ? "butt" : "round"}
+                    initial={false}
+                    animate={{
+                      strokeDasharray: `${arc.arcLen} ${Math.max(0, circ - arc.arcLen)}`,
+                      strokeDashoffset: arc.offset,
+                    }}
+                    transition={{ duration: 0.45, ease: EASE_PRECISION }}
+                  />
+                ))
+              ) : (
+                <>
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r={r}
+                    stroke="currentColor"
+                    strokeWidth={strokeWidth}
+                    strokeLinecap="round"
+                    strokeDasharray={`${circ * 0.28} ${circ * 0.72}`}
+                    strokeDashoffset={0}
+                    className="text-zinc-300 dark:text-zinc-700"
+                  />
+                  <circle
+                    cx="18"
+                    cy="18"
+                    r={r}
+                    stroke="currentColor"
+                    strokeWidth={strokeWidth}
+                    strokeLinecap="round"
+                    strokeDasharray={`${circ * 0.52} ${circ * 0.48}`}
+                    strokeDashoffset={-(circ * 0.38)}
+                    className="text-zinc-300 dark:text-zinc-700"
+                  />
+                </>
+              )}
             </svg>
-            <span className="absolute inset-0 flex items-center justify-center text-[9.5px] font-mono font-semibold tabular-nums text-zinc-800 dark:text-zinc-100">
+            <span className="absolute inset-0 flex items-center justify-center text-[9.5px] font-mono font-semibold tabular-nums leading-none text-zinc-700 dark:text-zinc-200">
               {compliancePct}
             </span>
           </motion.button>

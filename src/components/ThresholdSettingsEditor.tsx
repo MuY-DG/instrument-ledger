@@ -238,7 +238,8 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
   };
 
   return (
-    <div className="space-y-5">
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="flex-1 overflow-y-auto p-6 space-y-5">
       {!isAdmin && (
         <div className="px-4 py-3 rounded-xl bg-amber-500/[0.08] border border-amber-500/25 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-amber-800 dark:text-amber-300">
@@ -612,11 +613,12 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
           </div>
         </Collapsible>
       </section>
+      </div>
 
-      {/* Footer Save Bar */}
+      {/* Fixed Footer Save Bar */}
       {isAdmin && (
-        <div className="flex items-center justify-between gap-3 pt-1">
-          <div className="text-[11px] text-zinc-400 dark:text-zinc-500">
+        <div className="shrink-0 px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/85 dark:bg-[#16161b]/95 backdrop-blur-md flex items-center justify-between gap-3">
+          <div className="text-[11px]">
             {isDirty && (
               <span className="text-amber-600 dark:text-amber-400 font-medium">
                 有未保存的更改
@@ -628,7 +630,7 @@ export const ThresholdSettingsEditor: React.FC<ThresholdSettingsEditorProps> = (
               <button
                 type="button"
                 onClick={handleDiscardChanges}
-                className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/[0.06] transition"
+                className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition"
               >
                 撤销
               </button>

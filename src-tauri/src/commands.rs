@@ -11,7 +11,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::auth::{hash_password, validate_pin, verify_password, SessionState};
-use crate::backup::{create_backup_with_options, reset_app_data_with_backup, restore_backup};
+use crate::backup::{
+    create_backup_with_scope, get_backup_scope_options, reset_app_data_with_backup, restore_backup,
+};
 use crate::db::{
     calc_next_cal_date, get_setting, is_account_initialized, is_app_lock_configured,
     load_app_settings, now_iso, query_instrument_by_id, query_instruments,
@@ -31,13 +33,14 @@ use crate::storage::{
     save_image_from_path, save_report_from_base64, save_report_from_path,
 };
 use crate::sync_engine::{
-    apply_pulled_snapshot_locally, apply_sync_config_update, build_clean_sync_db_snapshot,
-    check_remote_sync_status, compute_local_ledger_summary, download_pull_payload, execute_push,
-    load_sync_config, resolve_test_config, save_sync_config_file, test_s3_sync_connection,
+    apply_pulled_snapshot_locally_with_scope, apply_sync_config_update,
+    build_clean_sync_db_snapshot_with_scope, check_remote_sync_status,
+    compute_local_ledger_summary_with_scope, download_pull_payload, execute_push, load_sync_config,
+    resolve_test_config, save_sync_config_file, test_s3_sync_connection,
 };
 use crate::updater::{check_github_release, download_and_install_update, PendingUpdate};
 use crate::workbench_store::{
-    clear_all_pdf_drafts, delete_pdf_draft, enforce_pdf_cache_limit, get_backup_include_workbench,
+    clear_all_pdf_drafts, delete_pdf_draft, enforce_pdf_cache_limit,
     get_workbench_cache_limit_mb, get_workbench_cache_stats, list_pdf_drafts, read_pdf_draft_meta,
     read_pdf_source_bytes, read_pdf_workspace_state, save_pdf_markers, save_pdf_source,
     set_workbench_cache_limit_and_prune, write_pdf_workspace_state, SavePdfMarkersInput,
@@ -1681,6 +1684,27 @@ pub fn update_settings(
     if let Some(limit_mb) = input.workbench_cache_limit_mb {
         let _ = set_workbench_cache_limit_and_prune(&conn, &state.data_dir, limit_mb, None)?;
     }
+    if let Some(include_photos) = input.backup_include_photos {
+        set_setting(
+            &conn,
+            "backup_include_photos",
+            if include_photos { "1" } else { "0" },
+        )?;
+    }
+    if let Some(include_reports) = input.backup_include_reports {
+        set_setting(
+            &conn,
+            "backup_include_reports",
+            if include_reports { "1" } else { "0" },
+        )?;
+    }
+    if let Some(include_settings) = input.backup_include_settings {
+        set_setting(
+            &conn,
+            "backup_include_settings",
+            if include_settings { "1" } else { "0" },
+        )?;
+    }
     if let Some(include_wb) = input.backup_include_workbench {
         set_setting(
             &conn,
@@ -1799,8 +1823,11 @@ pub fn create_local_backup(
 ) -> Result<BackupResult, String> {
     check_admin(&state)?;
     let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-    let include_wb = include_workbench.unwrap_or_else(|| get_backup_include_workbench(&conn));
-    create_backup_with_options(&conn, &state.data_dir, Path::new(dest_zip_path.trim()), include_wb)
+    let mut scope = get_backup_scope_options(&conn);
+    if let Some(wb) = include_workbench {
+        scope.include_workbench = wb;
+    }
+    create_backup_with_scope(&conn, &state.data_dir, Path::new(dest_zip_path.trim()), scope)
 }
 
 #[tauri::command]
@@ -2032,9 +2059,10 @@ pub async fn test_sync_connection(
 pub async fn check_sync_status(state: State<'_, AppState>) -> Result<SyncStatusResult, String> {
     check_unlocked(&state)?;
     let cfg = load_sync_config(&state.data_dir);
+    let scope = cfg.sync_scope();
     let local = {
         let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-        compute_local_ledger_summary(&conn)?
+        compute_local_ledger_summary_with_scope(&conn, scope)?
     };
     check_remote_sync_status(&cfg, &local).await
 }
@@ -2045,9 +2073,10 @@ async fn run_push_internal(
     force: bool,
 ) -> Result<SyncActionResult, String> {
     let mut cfg = load_sync_config(&state.data_dir);
+    let scope = cfg.sync_scope();
     let (db_bytes, local) = {
         let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-        build_clean_sync_db_snapshot(&conn)?
+        build_clean_sync_db_snapshot_with_scope(&conn, scope)?
     };
     execute_push(app, &mut cfg, &state.data_dir, db_bytes, local, force).await
 }
@@ -2058,12 +2087,14 @@ async fn run_pull_internal(
     force: bool,
 ) -> Result<SyncActionResult, String> {
     let mut cfg = load_sync_config(&state.data_dir);
+    let local_scope = cfg.sync_scope();
     let local = {
         let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-        compute_local_ledger_summary(&conn)?
+        compute_local_ledger_summary_with_scope(&conn, local_scope)?
     };
 
     let prepared = download_pull_payload(app, &cfg, &state.data_dir, &local, force).await?;
+    let effective_scope = local_scope.intersect(prepared.manifest.sync_scope());
 
     let _ = app.emit(
         "sync-progress",
@@ -2079,7 +2110,7 @@ async fn run_pull_internal(
     let create_safety_backup = local.instrument_count > 0 || local.report_count > 0;
     let apply_res = {
         let mut conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-        apply_pulled_snapshot_locally(
+        apply_pulled_snapshot_locally_with_scope(
             &mut conn,
             &state.db_path,
             &state.data_dir,
@@ -2087,6 +2118,7 @@ async fn run_pull_internal(
             &prepared.staged_blobs_dir,
             &prepared.manifest.blobs,
             create_safety_backup,
+            effective_scope,
         )
     };
     let _ = fs::remove_dir_all(&prepared.staging_root);
@@ -2095,7 +2127,7 @@ async fn run_pull_internal(
     // Compute exact post-apply canonical hash and update local sync cursor
     let (final_hash, final_ic, final_rc) = {
         let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-        let s = compute_local_ledger_summary(&conn)?;
+        let s = compute_local_ledger_summary_with_scope(&conn, local_scope)?;
         (s.canonical_hash, s.instrument_count, s.report_count)
     };
 
@@ -2169,9 +2201,10 @@ pub async fn sync_now(
         return Err("请先配置并启用 S3 云端同步".to_string());
     }
 
+    let local_scope = cfg.sync_scope();
     let local = {
         let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;
-        compute_local_ledger_summary(&conn)?
+        compute_local_ledger_summary_with_scope(&conn, local_scope)?
     };
     let status = check_remote_sync_status(&cfg, &local).await?;
 

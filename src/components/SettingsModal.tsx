@@ -15,6 +15,7 @@ import {
   ChevronDown,
   Cloud,
   CloudDownload,
+  Database,
   Edit3,
   ExternalLink,
   Eye,
@@ -24,6 +25,7 @@ import {
   HardDrive,
   Image as ImageIcon,
   KeyRound,
+  Layers,
   Loader2,
   Lock,
   MonitorDown,
@@ -36,6 +38,7 @@ import {
   Settings,
   ShieldCheck,
   Shuffle,
+  SlidersHorizontal,
   Sparkles,
   Trash2,
   User,
@@ -126,7 +129,6 @@ interface SettingsModalProps {
   onOpenAppLockSetup?: (mode: "enable" | "change") => void;
   onLockNow?: () => void;
   onDisableAppLock?: () => Promise<void>;
-  onWorkbenchCacheCleared?: () => void;
 }
 
 const INPUT_CLS =
@@ -185,7 +187,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   onOpenAppLockSetup,
   onLockNow,
   onDisableAppLock,
-  onWorkbenchCacheCleared,
 }) => {
   const mac = isMacPlatform();
   const [tab, setTab] = useState<SettingsTab>(initialTab);
@@ -242,8 +243,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const [dirInfo, setDirInfo] = useState<DataDirInfo | null>(null);
   const [backingUp, setBackingUp] = useState(false);
   const [restoring, setRestoring] = useState(false);
-  const [clearingWbCache, setClearingWbCache] = useState(false);
-  const [savingWbLimit, setSavingWbLimit] = useState(false);
+  const [savingBackupScopeKey, setSavingBackupScopeKey] = useState<string | null>(null);
   const [defaultDownloadsDir, setDefaultDownloadsDir] = useState("");
   const [resetBackupDir, setResetBackupDir] = useState("");
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
@@ -254,9 +254,16 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
   const resetPwdRef = useRef<HTMLInputElement | null>(null);
   const hasData = dirInfo
     ? dirInfo.instrumentCount > 0 ||
-      dirInfo.reportCount > 0 ||
+      (settings.backupIncludeReports && dirInfo.reportCount > 0) ||
       (settings.backupIncludeWorkbench && dirInfo.workbenchDraftCount > 0)
     : instrumentCount > 0;
+
+  const generalIsDirty =
+    docCode !== settings.docCode ||
+    docVersion !== settings.docVersion ||
+    docTitle !== settings.docTitle ||
+    docSubtitle !== settings.docSubtitle ||
+    weeklyNotice !== settings.weeklyNotice;
 
   // Updater state
   const [checkingUpdate, setCheckingUpdate] = useState(false);
@@ -521,8 +528,14 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     try {
       const res = await api.createLocalBackup(dest, settings.backupIncludeWorkbench);
       setBackupSuccess();
+      const extras: string[] = [];
+      if (settings.backupIncludeReports) extras.push(`${res.reportCount} 份报告`);
+      if (settings.backupIncludePhotos) extras.push("位置照片");
+      if (settings.backupIncludeSettings) extras.push("表头预警配置");
+      if (settings.backupIncludeWorkbench) extras.push("工具台草稿");
+      const extraText = extras.length > 0 ? `、${extras.join("、")}` : "";
       onNotify(
-        `备份成功！共打包 ${res.instrumentCount} 台设备、${res.reportCount} 份报告${settings.backupIncludeWorkbench ? "及工具台草稿" : ""}（${formatFileSize(res.sizeBytes)}）`,
+        `备份成功！共打包 ${res.instrumentCount} 台设备${extraText}（${formatFileSize(res.sizeBytes)}）`,
         "success"
       );
     } catch (err) {
@@ -533,67 +546,37 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
     }
   };
 
-  const handleChangeWorkbenchCacheLimit = async (nextLimitMb: number) => {
-    if (savingWbLimit) return;
-    setSavingWbLimit(true);
+  const handleToggleBackupScope = async (
+    key:
+      | "backupIncludePhotos"
+      | "backupIncludeReports"
+      | "backupIncludeSettings"
+      | "backupIncludeWorkbench",
+    enabled: boolean,
+    label: string
+  ) => {
+    if (savingBackupScopeKey) return;
+    setSavingBackupScopeKey(key);
     try {
-      const updated = await api.updateSettings({ workbenchCacheLimitMb: nextLimitMb });
-      onSettingsChanged(updated);
-      const refreshed = await api.getDataDirInfo();
-      setDirInfo(refreshed);
-      const label =
-        nextLimitMb >= 1024 ? `${(nextLimitMb / 1024).toFixed(nextLimitMb % 1024 === 0 ? 0 : 1)} GB` : `${nextLimitMb} MB`;
-      onNotify(`工具台缓存上限已更新为 ${label}（超出部分已自动按 LRU 清理）`, "success");
-    } catch (err) {
-      onNotify(`更新缓存上限失败：${String(err)}`, "error");
-    } finally {
-      setSavingWbLimit(false);
-    }
-  };
-
-  const handleToggleBackupWorkbench = async (includeWorkbench: boolean) => {
-    try {
-      const updated = await api.updateSettings({ backupIncludeWorkbench: includeWorkbench });
+      const updated = await api.updateSettings({ [key]: enabled });
       onSettingsChanged(updated);
       onNotify(
-        includeWorkbench
-          ? "导出备份时将一并打包工具台图纸草稿"
-          : "导出备份时仅打包仪器台账与附件（不含工具台缓存）",
+        enabled ? `导出备份已开启「${label}」` : `导出备份已关闭「${label}」`,
         "success"
       );
     } catch (err) {
       onNotify(`更新备份选项失败：${String(err)}`, "error");
+    } finally {
+      setSavingBackupScopeKey(null);
     }
   };
 
-  const handleClearWorkbenchCache = async () => {
-    if (clearingWbCache) return;
-    const ok = await confirmDialog({
-      title: "清空 QI / QC 工具台缓存",
-      description:
-        "确定清空本地保存的全部 PDF 图纸草稿与临时标注缓存？磁盘上的原始图纸不受影响，如需保留未导出的标注请先在工具台中保存 PDF。",
-      confirmText: "确认清空",
-      cancelText: "取消",
-      destructive: true,
-    });
-    if (!ok) return;
-    setClearingWbCache(true);
-    try {
-      const res = await api.workbenchPdfClearAll();
-      const refreshed = await api.getDataDirInfo();
-      setDirInfo(refreshed);
-      onWorkbenchCacheCleared?.();
-      onNotify(
-        res.evictedCount > 0
-          ? `已清空 ${res.evictedCount} 份图纸草稿，释放 ${formatFileSize(res.freedBytes)}`
-          : "工具台缓存已为空",
-        "success"
-      );
-    } catch (err) {
-      onNotify(`清空工具台缓存失败：${String(err)}`, "error");
-    } finally {
-      setClearingWbCache(false);
-    }
+  const handleDiscardGeneral = () => {
+    setDocCode(settings.docCode);
+    setDocVersion(settings.docVersion);
+    setDocTitle(settings.docTitle);
+    setDocSubtitle(settings.docSubtitle);
+    setWeeklyNotice(settings.weeklyNotice);
   };
 
   const handleChooseResetBackupDir = async () => {
@@ -878,7 +861,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
               </div>
 
               {/* Content */}
-              <div className="flex-1 overflow-y-auto p-6 bg-white dark:bg-[#121216]">
+              <div className="flex-1 flex flex-col min-w-0 min-h-0 bg-white dark:bg-[#121216] overflow-hidden">
                 <AnimatePresence mode="wait">
                   <motion.div
                     key={tab}
@@ -886,9 +869,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -4 }}
                     transition={{ duration: 0.16, ease: EASE_PRECISION }}
+                    className="flex-1 flex flex-col min-h-0"
                   >
                 {tab === "account" && isAdmin && (
-                  <div className="space-y-4">
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
                     {/* Profile Showcase Hero Card with Switchable Grainy Mesh Cover Background */}
                     <div className="rounded-2xl border border-zinc-200/90 dark:border-white/[0.09] bg-white dark:bg-[#141418] shadow-surface overflow-hidden">
                       {/* Switchable Cover Banner */}
@@ -1372,7 +1356,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
 
                 {tab === "general" && isAdmin && (
-                  <form onSubmit={handleSaveGeneral} className="space-y-4">
+                  <form
+                    onSubmit={handleSaveGeneral}
+                    className="flex-1 flex flex-col min-h-0"
+                  >
+                    <div className="flex-1 overflow-y-auto p-6 space-y-4">
                     <div>
                       <label className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1.5">
                         <span>表单编号 / 版本</span>
@@ -1472,24 +1460,44 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                         )}
                       </div>
                     </div>
+                    </div>
 
-                    <div className="flex justify-end">
-                      <ActionStatusButton
-                        type="submit"
-                        size="sm"
-                        status={generalSaveStatus}
-                        disabled={savingGeneral}
-                        idleLabel="保存"
-                        loadingLabel="保存中..."
-                        successLabel="已保存"
-                        idleIcon={<Save className="h-3.5 w-3.5" />}
-                      />
+                    {/* Fixed Footer Bar */}
+                    <div className="shrink-0 px-6 py-3.5 border-t border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/85 dark:bg-[#16161b]/95 backdrop-blur-md flex items-center justify-between gap-3">
+                      <div className="text-[11px]">
+                        {generalIsDirty && (
+                          <span className="text-amber-600 dark:text-amber-400 font-medium">
+                            有未保存的更改
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {generalIsDirty && (
+                          <button
+                            type="button"
+                            onClick={handleDiscardGeneral}
+                            className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-white/[0.1] bg-white dark:bg-white/[0.04] text-xs text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-white/[0.08] transition"
+                          >
+                            撤销
+                          </button>
+                        )}
+                        <ActionStatusButton
+                          type="submit"
+                          size="sm"
+                          status={generalSaveStatus}
+                          disabled={savingGeneral}
+                          idleLabel="保存"
+                          loadingLabel="保存中..."
+                          successLabel="已保存"
+                          idleIcon={<Save className="h-3.5 w-3.5" />}
+                        />
+                      </div>
                     </div>
                   </form>
                 )}
 
                 {tab === "window" && (
-                  <div className="space-y-4">
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
                     <div className="flex items-center gap-1.5">
                       <span className="text-xs font-semibold text-zinc-900 dark:text-white">
                         关闭窗口时
@@ -1597,7 +1605,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 )}
 
                 {tab === "applock" && isAdmin && (
-                  <div className="space-y-4">
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
                     {/* Independent App Lock (4-6 Digit PIN) */}
                     <div className="p-4 rounded-xl border border-zinc-200/85 dark:border-white/[0.09] bg-white dark:bg-white/[0.02] space-y-4">
                       <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1762,6 +1770,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                     syncStatus={syncStatus}
                     syncing={syncing}
                     syncProgress={syncProgress}
+                    dirInfo={dirInfo}
                     onConfigSaved={(next) => onSyncConfigSaved?.(next)}
                     onStatusUpdated={(next) => onSyncStatusUpdated?.(next)}
                     onSyncNow={async () => {
@@ -1778,8 +1787,84 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                   />
                 )}
 
-                {tab === "backup" && isAdmin && (
-                  <div className="space-y-4">
+                {tab === "backup" && isAdmin && (() => {
+                  const enabledBackupCount =
+                    1 +
+                    (settings.backupIncludePhotos ? 1 : 0) +
+                    (settings.backupIncludeReports ? 1 : 0) +
+                    (settings.backupIncludeSettings ? 1 : 0) +
+                    (settings.backupIncludeWorkbench ? 1 : 0);
+
+                  const backupScopeItems: Array<{
+                    key:
+                      | "core"
+                      | "backupIncludePhotos"
+                      | "backupIncludeReports"
+                      | "backupIncludeSettings"
+                      | "backupIncludeWorkbench";
+                    title: string;
+                    description: string;
+                    meta?: string;
+                    checked: boolean;
+                    required?: boolean;
+                    icon: React.ReactNode;
+                    iconCls: string;
+                  }> = [
+                    {
+                      key: "core",
+                      title: "仪器台账记录",
+                      description: "量具与检具明细、校准周期、状态与备注",
+                      meta: dirInfo ? `${dirInfo.instrumentCount} 台设备` : undefined,
+                      checked: true,
+                      required: true,
+                      icon: <Database className="h-3.5 w-3.5" />,
+                      iconCls:
+                        "bg-indigo-500/10 border-indigo-500/20 text-indigo-600 dark:text-indigo-400",
+                    },
+                    {
+                      key: "backupIncludePhotos",
+                      title: "位置照片与图片",
+                      description: "设备位置照片、公司表头 Logo 与管理员头像",
+                      checked: settings.backupIncludePhotos,
+                      icon: <ImageIcon className="h-3.5 w-3.5" />,
+                      iconCls:
+                        "bg-sky-500/10 border-sky-500/20 text-sky-600 dark:text-sky-400",
+                    },
+                    {
+                      key: "backupIncludeReports",
+                      title: "校准报告附件",
+                      description: "设备关联的 PDF / 图片校验报告与证书",
+                      meta: dirInfo ? `${dirInfo.reportCount} 份报告` : undefined,
+                      checked: settings.backupIncludeReports,
+                      icon: <FileText className="h-3.5 w-3.5" />,
+                      iconCls:
+                        "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400",
+                    },
+                    {
+                      key: "backupIncludeSettings",
+                      title: "表头与预警配置",
+                      description: "表单编号、台账标题、多档到期预警阈值与弹窗规则",
+                      checked: settings.backupIncludeSettings,
+                      icon: <SlidersHorizontal className="h-3.5 w-3.5" />,
+                      iconCls:
+                        "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400",
+                    },
+                    {
+                      key: "backupIncludeWorkbench",
+                      title: "QI / QC 工具台草稿",
+                      description: "工程图纸 PDF 原件与气泡标注草稿（默认关闭以保持备份轻量）",
+                      meta: dirInfo
+                        ? `${dirInfo.workbenchDraftCount} 份草稿 · ${formatFileSize(dirInfo.workbenchCacheBytes)}`
+                        : undefined,
+                      checked: Boolean(settings.backupIncludeWorkbench),
+                      icon: <Layers className="h-3.5 w-3.5" />,
+                      iconCls:
+                        "bg-violet-500/10 border-violet-500/20 text-violet-600 dark:text-violet-400",
+                    },
+                  ];
+
+                  return (
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
                     <div className="rounded-xl border border-zinc-200/85 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] divide-y divide-zinc-200/75 dark:divide-white/[0.07]">
                       <div className="px-4 py-3.5 flex items-center justify-between gap-4">
                         <div className="flex items-center gap-3 min-w-0">
@@ -1852,97 +1937,94 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </div>
                     </div>
 
-                    {/* QI/QC Workbench Native Cache Governance Card */}
-                    <div className="rounded-xl border border-zinc-200/85 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] divide-y divide-zinc-200/75 dark:divide-white/[0.07]">
-                      <div className="px-4 py-3.5 space-y-2.5">
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-2.5 min-w-0">
-                            <div className="h-8 w-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
-                              <HardDrive className="h-4 w-4" />
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex items-center gap-1.5">
-                                <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                                  QI / QC 工具台缓存
-                                </span>
-                                <InfoTip content="PDF 图纸按 SHA-256 内容去重落盘保存于数据目录；超过上限自动按 LRU 淘汰最久未用草稿，永不淘汰当前打开的文档。" />
-                              </div>
-                              <div className="text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400 mt-0.5">
-                                {dirInfo
-                                  ? `已用 ${formatFileSize(dirInfo.workbenchCacheBytes)} / ${formatFileSize((settings.workbenchCacheLimitMb || 1024) * 1024 * 1024)} · ${dirInfo.workbenchDraftCount} 份图纸草稿`
-                                  : "读取中..."}
-                              </div>
-                            </div>
-                          </div>
-                          <button
-                            type="button"
-                            disabled={clearingWbCache || (dirInfo ? dirInfo.workbenchDraftCount === 0 && dirInfo.workbenchCacheBytes === 0 : false)}
-                            onClick={handleClearWorkbenchCache}
-                            className="btn-tactile inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-200 dark:hover:border-rose-500/30 disabled:opacity-45 shadow-tactile text-zinc-700 dark:text-zinc-200 text-xs font-medium shrink-0 transition-colors"
+                    {/* Backup Contents & Per-Item Status Card */}
+                    <div className="rounded-xl border border-zinc-200/85 dark:border-white/[0.08] bg-white dark:bg-white/[0.02] overflow-hidden">
+                      <div className="px-4 py-3 border-b border-zinc-200/75 dark:border-white/[0.07] bg-zinc-50/70 dark:bg-white/[0.015] flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                            备份内容
+                          </span>
+                          <InfoTip content="控制点击「导出备份」时打包进 ZIP 备份包的数据范围；各项修改即时生效。" />
+                        </div>
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-[10.5px] font-medium font-mono tabular-nums text-emerald-700 dark:text-emerald-300">
+                          已开启 {enabledBackupCount}/5 项
+                        </span>
+                      </div>
+
+                      <div className="divide-y divide-zinc-200/70 dark:divide-white/[0.06]">
+                        {backupScopeItems.map((item) => (
+                          <div
+                            key={item.key}
+                            className="px-4 py-3 flex items-center justify-between gap-3"
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
-                            <span>{clearingWbCache ? "清空中..." : "清空缓存"}</span>
-                          </button>
-                        </div>
+                            <div className="flex items-center gap-3 min-w-0">
+                              <div
+                                className={cn(
+                                  "h-7 w-7 rounded-lg border flex items-center justify-center shrink-0 transition-opacity",
+                                  item.iconCls,
+                                  !item.checked && "opacity-45"
+                                )}
+                              >
+                                {item.icon}
+                              </div>
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
+                                    {item.title}
+                                  </span>
+                                  {item.meta && (
+                                    <span className="text-[10.5px] font-mono tabular-nums text-zinc-400 dark:text-zinc-500">
+                                      · {item.meta}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5 truncate">
+                                  {item.description}
+                                </div>
+                              </div>
+                            </div>
 
-                        {dirInfo && (
-                          <div className="h-1.5 w-full rounded-full bg-zinc-200/80 dark:bg-white/[0.07] overflow-hidden">
-                            <div
-                              className="h-full rounded-full bg-indigo-500 transition-all duration-300"
-                              style={{
-                                width: `${Math.min(
-                                  100,
-                                  Math.round(
-                                    (dirInfo.workbenchCacheBytes /
-                                      Math.max(1, (settings.workbenchCacheLimitMb || 1024) * 1024 * 1024)) *
-                                      100
-                                  )
-                                )}%`,
-                              }}
-                            />
+                            <div className="flex items-center gap-2.5 shrink-0">
+                              <span
+                                className={cn(
+                                  "inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10.5px] font-medium",
+                                  item.checked
+                                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-300"
+                                    : "bg-zinc-100 dark:bg-white/[0.05] border-zinc-200/80 dark:border-white/[0.08] text-zinc-500 dark:text-zinc-400"
+                                )}
+                              >
+                                <span
+                                  className={cn(
+                                    "h-1.5 w-1.5 rounded-full",
+                                    item.checked ? "bg-emerald-500" : "bg-zinc-400"
+                                  )}
+                                />
+                                <span>
+                                  {item.required ? "必选" : item.checked ? "已开启" : "未开启"}
+                                </span>
+                              </span>
+
+                              <PrecisionSwitch
+                                checked={item.checked}
+                                disabled={
+                                  Boolean(item.required) ||
+                                  savingBackupScopeKey === item.key
+                                }
+                                size="sm"
+                                ariaLabel={`备份${item.title}`}
+                                onChange={(checked) => {
+                                  if (item.key !== "core") {
+                                    void handleToggleBackupScope(item.key, checked, item.title);
+                                  }
+                                }}
+                              />
+                            </div>
                           </div>
-                        )}
+                        ))}
                       </div>
 
-                      <div className="px-4 py-3 flex items-center justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
-                            缓存容量上限
-                          </div>
-                          <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                            默认 1 GB，调低后立即按 LRU 清理超出部分
-                          </div>
-                        </div>
-                        <PrecisionSelect
-                          value={String(settings.workbenchCacheLimitMb || 1024)}
-                          disabled={savingWbLimit}
-                          onChange={(val) => handleChangeWorkbenchCacheLimit(Number(val))}
-                          options={[
-                            { value: "256", label: "256 MB" },
-                            { value: "512", label: "512 MB" },
-                            { value: "1024", label: "1 GB（默认）" },
-                            { value: "2048", label: "2 GB" },
-                            { value: "4096", label: "4 GB" },
-                          ]}
-                          className="min-w-[130px]"
-                        />
-                      </div>
-
-                      <div className="px-4 py-3 flex items-center justify-between gap-4">
-                        <div className="min-w-0">
-                          <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
-                            导出备份时包含工具台草稿
-                          </div>
-                          <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
-                            默认关闭以保持台账备份轻量；开启后将打包全部 PDF 图纸草稿
-                          </div>
-                        </div>
-                        <PrecisionSwitch
-                          checked={Boolean(settings.backupIncludeWorkbench)}
-                          size="sm"
-                          ariaLabel="导出备份时包含工具台草稿"
-                          onChange={handleToggleBackupWorkbench}
-                        />
+                      <div className="px-4 py-2.5 border-t border-zinc-200/70 dark:border-white/[0.06] bg-zinc-50/50 dark:bg-white/[0.01] text-[10.5px] text-zinc-400 dark:text-zinc-500">
+                        S3 云端同步凭据仅存本机，不包含在本地备份包中；工具台缓存容量管理已移至「QI / QC 工具台」总览页。
                       </div>
                     </div>
 
@@ -1994,10 +2076,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                       </motion.button>
                     </div>
                   </div>
-                )}
+                  );
+                })()}
 
                 {tab === "update" && (
-                  <div className="space-y-4">
+                  <div className="flex-1 overflow-y-auto p-6 space-y-4">
                     {/* Installed Version Hero Bar */}
                     <div className="p-4 rounded-xl bg-zinc-50/80 dark:bg-white/[0.025] border border-zinc-200/80 dark:border-white/[0.08] flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3.5 min-w-0">

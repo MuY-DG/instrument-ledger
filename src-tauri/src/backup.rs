@@ -9,10 +9,46 @@ use walkdir::WalkDir;
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
-use crate::db::{init_db, now_iso};
+use crate::db::{get_setting, init_db, now_iso, set_setting};
 use crate::models::{BackupManifest, BackupResult, RestoreResult};
 use crate::storage::ensure_storage_dirs;
+use crate::sync_engine::CONFIG_SYNC_SETTING_KEYS;
 use crate::workbench_store::get_backup_include_workbench;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BackupScopeOptions {
+    pub include_photos: bool,
+    pub include_reports: bool,
+    pub include_settings: bool,
+    pub include_workbench: bool,
+}
+
+impl Default for BackupScopeOptions {
+    fn default() -> Self {
+        Self {
+            include_photos: true,
+            include_reports: true,
+            include_settings: true,
+            include_workbench: false,
+        }
+    }
+}
+
+pub fn get_backup_scope_options(conn: &Connection) -> BackupScopeOptions {
+    let flag = |key: &str, default_on: bool| -> bool {
+        match get_setting(conn, key).ok().flatten().as_deref() {
+            Some("1") => true,
+            Some("0") => false,
+            _ => default_on,
+        }
+    };
+    BackupScopeOptions {
+        include_photos: flag("backup_include_photos", true),
+        include_reports: flag("backup_include_reports", true),
+        include_settings: flag("backup_include_settings", true),
+        include_workbench: flag("backup_include_workbench", false),
+    }
+}
 
 #[cfg(test)]
 pub fn create_backup(
@@ -29,15 +65,37 @@ pub fn create_backup_with_options(
     dest_zip_path: &Path,
     include_workbench: bool,
 ) -> Result<BackupResult, String> {
+    create_backup_with_scope(
+        conn,
+        data_dir,
+        dest_zip_path,
+        BackupScopeOptions {
+            include_photos: true,
+            include_reports: true,
+            include_settings: true,
+            include_workbench,
+        },
+    )
+}
+
+pub fn create_backup_with_scope(
+    conn: &Connection,
+    data_dir: &Path,
+    dest_zip_path: &Path,
+    options: BackupScopeOptions,
+) -> Result<BackupResult, String> {
     ensure_storage_dirs(data_dir)?;
 
     let instrument_count: usize = conn
         .query_row("SELECT COUNT(*) FROM instruments", [], |r| r.get(0))
         .unwrap_or(0);
-    let report_count: usize = conn
-        .query_row("SELECT COUNT(*) FROM calibration_reports", [], |r| r.get(0))
-        .unwrap_or(0);
-    let wb_draft_count: usize = if include_workbench {
+    let report_count: usize = if options.include_reports {
+        conn.query_row("SELECT COUNT(*) FROM calibration_reports", [], |r| r.get(0))
+            .unwrap_or(0)
+    } else {
+        0
+    };
+    let wb_draft_count: usize = if options.include_workbench {
         conn.query_row("SELECT COUNT(*) FROM workbench_pdf_drafts", [], |r| r.get(0))
             .unwrap_or(0)
     } else {
@@ -59,13 +117,32 @@ pub fn create_backup_with_options(
     conn.execute("VACUUM INTO ?1", params![snap_str])
         .map_err(|e| format!("生成数据库快照失败: {}", e))?;
 
-    // When excluding workbench cache files, strip workbench draft rows from the snapshot DB
-    // so restoring the backup never produces dangling PDF file references.
-    if !include_workbench {
+    // Strip excluded scopes from the snapshot DB so restoring never produces dangling file references.
+    if !options.include_workbench
+        || !options.include_reports
+        || !options.include_photos
+        || !options.include_settings
+    {
         if let Ok(snap_conn) = Connection::open(&temp_snap) {
-            let _ = snap_conn.execute_batch(
-                "DELETE FROM workbench_pdf_drafts; DELETE FROM workbench_pdf_state;",
-            );
+            if !options.include_workbench {
+                let _ = snap_conn.execute_batch(
+                    "DELETE FROM workbench_pdf_drafts; DELETE FROM workbench_pdf_state;",
+                );
+            }
+            if !options.include_reports {
+                let _ = snap_conn.execute_batch("DELETE FROM calibration_reports;");
+            }
+            if !options.include_photos {
+                let _ = snap_conn.execute_batch(
+                    "UPDATE instruments SET photo_path = '';
+                     UPDATE app_settings SET value = '' WHERE key IN ('company_logo_path', 'admin_avatar_path');",
+                );
+            }
+            if !options.include_settings {
+                for key in CONFIG_SYNC_SETTING_KEYS {
+                    let _ = snap_conn.execute("DELETE FROM app_settings WHERE key = ?1", params![key]);
+                }
+            }
         }
     }
 
@@ -86,6 +163,10 @@ pub fn create_backup_with_options(
         created_at: created_at.clone(),
         instrument_count,
         report_count,
+        include_photos: options.include_photos,
+        include_reports: options.include_reports,
+        include_settings: options.include_settings,
+        include_workbench: options.include_workbench,
     };
 
     let manifest_json =
@@ -108,12 +189,17 @@ pub fn create_backup_with_options(
     }
     let _ = fs::remove_file(&temp_snap);
 
-    // Write images/, reports/, and optionally workbench/
-    let folders: &[&str] = if include_workbench {
-        &["images", "reports", "workbench"]
-    } else {
-        &["images", "reports"]
-    };
+    // Write included attachment/cache directories
+    let mut folders: Vec<&str> = Vec::with_capacity(3);
+    if options.include_photos {
+        folders.push("images");
+    }
+    if options.include_reports {
+        folders.push("reports");
+    }
+    if options.include_workbench {
+        folders.push("workbench");
+    }
     for folder in folders {
         let root = data_dir.join(folder);
         if !root.exists() {
@@ -200,6 +286,27 @@ pub fn restore_backup(
         return Err("备份包中缺少 ledger.db 数据库文件，无法还原".to_string());
     }
 
+    let manifest_opt: Option<BackupManifest> = fs::read(staging.join("manifest.json"))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<BackupManifest>(&b).ok());
+    let preserve_local_settings = manifest_opt
+        .as_ref()
+        .map(|m| !m.include_settings)
+        .unwrap_or(false);
+    let preserved_settings: Vec<(String, String)> = if preserve_local_settings {
+        CONFIG_SYNC_SETTING_KEYS
+            .iter()
+            .filter_map(|k| {
+                get_setting(conn_guard, k)
+                    .ok()
+                    .flatten()
+                    .map(|v| ((*k).to_string(), v))
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
+
     // Validate SQLite integrity and schema
     let (instrument_count, report_count) = {
         let test_conn = Connection::open(&extracted_db)
@@ -252,6 +359,9 @@ pub fn restore_backup(
 
     // Reopen restored database
     let new_conn = init_db(db_path)?;
+    for (k, v) in preserved_settings {
+        let _ = set_setting(&new_conn, &k, &v);
+    }
     *conn_guard = new_conn;
 
     Ok(RestoreResult {
@@ -564,6 +674,68 @@ mod tests {
         let restored = read_pdf_draft_meta(&conn, &data_dir, "deadbeef01").unwrap();
         assert!(restored.is_some());
         assert_eq!(restored.unwrap().name, "drawing-1");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_backup_scope_options_exclude_photos_reports_and_settings() {
+        use crate::db::{get_setting, set_setting};
+
+        let root = std::env::temp_dir().join(format!("inst_scope_bak_test_{}", Uuid::new_v4()));
+        let data_dir = root.join("data");
+        let db_path = data_dir.join("ledger.db");
+        let zip_lite = root.join("lite.zip");
+
+        ensure_storage_dirs(&data_dir).unwrap();
+        let mut conn = init_db(&db_path).unwrap();
+        set_setting(&conn, "doc_title", "原始标题").unwrap();
+        fs::write(data_dir.join("images").join("p1.png"), b"img").unwrap();
+        fs::create_dir_all(data_dir.join("reports").join("1")).unwrap();
+        fs::write(data_dir.join("reports").join("1").join("r1.pdf"), b"pdf").unwrap();
+        conn.execute(
+            "INSERT INTO instruments (category, seq_no, department, name, serial_no, photo_path, created_at, updated_at)
+             VALUES ('gauge', 1, '品质部', '卡尺', 'C-01', 'images/p1.png', '2026-11-28', '2026-11-28')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO calibration_reports (instrument_id, file_name, stored_path, file_ext, file_size, cal_date, cal_agency, remark, uploaded_at)
+             VALUES (1, 'r1.pdf', 'reports/1/r1.pdf', 'pdf', 3, '2026-11-28', '机构', '', '2026-11-28')",
+            [],
+        )
+        .unwrap();
+
+        let bak = create_backup_with_scope(
+            &conn,
+            &data_dir,
+            &zip_lite,
+            BackupScopeOptions {
+                include_photos: false,
+                include_reports: false,
+                include_settings: false,
+                include_workbench: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(bak.instrument_count, 1);
+        assert_eq!(bak.report_count, 0);
+
+        // Mutate local title before restoring the settings-excluded backup
+        set_setting(&conn, "doc_title", "保留本机标题").unwrap();
+        let res = restore_backup(&mut conn, &db_path, &data_dir, &zip_lite).unwrap();
+        assert_eq!(res.instrument_count, 1);
+        assert_eq!(res.report_count, 0);
+        assert_eq!(
+            get_setting(&conn, "doc_title").unwrap().as_deref(),
+            Some("保留本机标题")
+        );
+        let photo_path: String = conn
+            .query_row("SELECT photo_path FROM instruments WHERE id = 1", [], |r| r.get(0))
+            .unwrap();
+        assert!(photo_path.is_empty());
+        assert!(!data_dir.join("images").join("p1.png").exists());
+        assert!(!data_dir.join("reports").join("1").join("r1.pdf").exists());
 
         let _ = fs::remove_dir_all(&root);
     }

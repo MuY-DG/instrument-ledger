@@ -43,6 +43,30 @@ pub fn resolve_stored_path(data_dir: &Path, rel_path: &str) -> Result<PathBuf, S
     Ok(data_dir.join(rel))
 }
 
+/// Safely resolve a syncable blob path inside data_dir (images/, reports/, or workbench/)
+pub fn resolve_sync_blob_path(data_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
+    let trimmed = rel_path.trim();
+    if trimmed.is_empty() {
+        return Err("文件路径为空".to_string());
+    }
+    let rel = Path::new(trimmed);
+    for comp in rel.components() {
+        match comp {
+            Component::Normal(_) => {}
+            _ => return Err("非法文件路径".to_string()),
+        }
+    }
+    let first = rel
+        .components()
+        .next()
+        .and_then(|c| c.as_os_str().to_str())
+        .unwrap_or("");
+    if first != "images" && first != "reports" && first != "workbench" {
+        return Err("仅允许同步受管数据目录".to_string());
+    }
+    Ok(data_dir.join(rel))
+}
+
 fn clean_ext(filename: &str, fallback: &str) -> String {
     let ext = Path::new(filename)
         .extension()

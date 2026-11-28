@@ -95,6 +95,9 @@ interface WorkbenchShellProps {
   hostOverlayOpen: boolean;
   theme: ThemeMode;
   immersive: boolean;
+  cacheLimitMb: number;
+  onCacheLimitChanged: (nextLimitMb: number) => void;
+  onCacheCleared: () => void;
   onToggleImmersive: () => void;
   onLaunchTool: (toolId: string) => void;
   onBackToHub: () => void;
@@ -115,6 +118,9 @@ export const WorkbenchShell: React.FC<WorkbenchShellProps> = ({
   hostOverlayOpen,
   theme,
   immersive,
+  cacheLimitMb,
+  onCacheLimitChanged,
+  onCacheCleared,
   onToggleImmersive,
   onLaunchTool,
   onBackToHub,
@@ -184,6 +190,10 @@ export const WorkbenchShell: React.FC<WorkbenchShellProps> = ({
       {visible && !activeToolId && (
         <WorkbenchHub
           runningToolIds={mountedToolIds}
+          cacheLimitMb={cacheLimitMb}
+          onCacheLimitChanged={onCacheLimitChanged}
+          onCacheCleared={onCacheCleared}
+          onNotify={onNotify}
           onLaunchTool={onLaunchTool}
           onCloseRunningTool={onCloseTool}
         />

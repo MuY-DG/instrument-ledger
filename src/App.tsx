@@ -175,6 +175,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   updateProxyUrl: "",
   companyLogoPath: "",
   workbenchCacheLimitMb: 1024,
+  backupIncludePhotos: true,
+  backupIncludeReports: true,
+  backupIncludeSettings: true,
   backupIncludeWorkbench: false,
 };
 
@@ -2081,11 +2084,16 @@ export default function App() {
                     alt="Logo"
                     className={cn(
                       "object-contain rounded-lg border border-zinc-200 dark:border-white/10 bg-white shrink-0 shadow-hairline",
-                      sidebarCollapsed ? "h-8 w-8 p-0.5" : "h-8 max-w-[84px] px-1.5 py-0.5"
+                      sidebarCollapsed ? "h-9 w-9 p-0.5" : "h-8 max-w-[84px] px-1.5 py-0.5"
                     )}
                   />
                 ) : (
-                  <div className="h-8 w-8 rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shadow-tactile-primary shrink-0">
+                  <div
+                    className={cn(
+                      "rounded-lg bg-zinc-900 dark:bg-white text-white dark:text-zinc-950 flex items-center justify-center shadow-tactile-primary shrink-0",
+                      sidebarCollapsed ? "h-9 w-9" : "h-8 w-8"
+                    )}
+                  >
                     <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none">
                       <circle
                         cx="12"
@@ -2157,7 +2165,7 @@ export default function App() {
             <div
               className={cn(
                 "flex-1 overflow-y-auto overflow-x-hidden space-y-5",
-                sidebarCollapsed ? "px-2" : "px-3"
+                sidebarCollapsed ? "px-2 scrollbar-none" : "px-3"
               )}
             >
               {/* Group 1: Ledger Category */}
@@ -2335,7 +2343,7 @@ export default function App() {
                         className={cn(
                           "relative rounded-lg text-xs flex items-center transition-colors",
                           sidebarCollapsed
-                            ? "h-8 w-9 justify-center"
+                            ? "h-8 w-10 justify-center"
                             : "w-full px-2.5 py-1.5 justify-between",
                           active
                             ? "text-zinc-950 dark:text-white font-medium"
@@ -2578,7 +2586,7 @@ export default function App() {
                         transition={SPRING_SNAPPY}
                         onClick={() => openSettingsTab("account")}
                         className={cn(
-                          "relative h-9 w-9 rounded-xl border shadow-tactile flex items-center justify-center overflow-hidden",
+                          "relative h-9 w-9 rounded-full border shadow-tactile flex items-center justify-center overflow-hidden",
                           !avatarDataUrl && isGrainMeshId(accountBg)
                             ? "border-black/10 dark:border-white/15"
                             : "bg-white dark:bg-white/[0.05] border-zinc-200/85 dark:border-white/[0.08]"
@@ -2619,7 +2627,7 @@ export default function App() {
                         whileTap={TAP_SCALE_ICON}
                         transition={SPRING_SNAPPY}
                         onClick={() => setLoginModalOpen(true)}
-                        className="h-9 w-9 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 flex items-center justify-center shadow-tactile-primary transition-colors"
+                        className="h-9 w-9 rounded-full bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 text-white dark:text-zinc-950 flex items-center justify-center shadow-tactile-primary transition-colors"
                       >
                         <LogIn className="h-3.5 w-3.5" />
                       </motion.button>
@@ -3719,6 +3727,18 @@ export default function App() {
             hostOverlayOpen={hostOverlayOpen}
             theme={theme}
             immersive={workbenchImmersive}
+            cacheLimitMb={settings.workbenchCacheLimitMb || 1024}
+            onCacheLimitChanged={(nextMb) =>
+              setSettings((prev) => ({ ...prev, workbenchCacheLimitMb: nextMb }))
+            }
+            onCacheCleared={() => {
+              setMountedWorkbenchTools((prev) => prev.filter((id) => id !== "pdf-balloon"));
+              setActiveWorkbenchToolId((cur) => (cur === "pdf-balloon" ? null : cur));
+              setWorkbenchImmersive(false);
+              void import("@/workbench/tools/pdf-balloon/core/pdf")
+                .then((m) => m.clearPdfResourceCache())
+                .catch(() => {});
+            }}
             onToggleImmersive={() => setWorkbenchImmersive((v) => !v)}
             onLaunchTool={(toolId) => launchWorkbenchTool(toolId)}
             onBackToHub={openWorkbenchHub}
@@ -3911,14 +3931,6 @@ export default function App() {
         }
         onLockNow={handleLock}
         onDisableAppLock={handleDisableAppLock}
-        onWorkbenchCacheCleared={() => {
-          setMountedWorkbenchTools((prev) => prev.filter((id) => id !== "pdf-balloon"));
-          setActiveWorkbenchToolId((cur) => (cur === "pdf-balloon" ? null : cur));
-          setWorkbenchImmersive(false);
-          void import("@/workbench/tools/pdf-balloon/core/pdf")
-            .then((m) => m.clearPdfResourceCache())
-            .catch(() => {});
-        }}
       />
 
       <AppLockSetupModal

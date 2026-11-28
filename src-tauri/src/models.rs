@@ -157,6 +157,9 @@ pub struct AppSettings {
     pub update_proxy_url: String,
     pub company_logo_path: String,
     pub workbench_cache_limit_mb: i64,
+    pub backup_include_photos: bool,
+    pub backup_include_reports: bool,
+    pub backup_include_settings: bool,
     pub backup_include_workbench: bool,
 }
 
@@ -184,6 +187,9 @@ pub struct SettingsUpdateInput {
     pub github_repo: Option<String>,
     pub update_proxy_url: Option<String>,
     pub workbench_cache_limit_mb: Option<i64>,
+    pub backup_include_photos: Option<bool>,
+    pub backup_include_reports: Option<bool>,
+    pub backup_include_settings: Option<bool>,
     pub backup_include_workbench: Option<bool>,
 }
 
@@ -199,6 +205,10 @@ pub struct AuthStatus {
     pub admin_session_expires_at: Option<String>,
 }
 
+fn default_true_flag() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BackupManifest {
@@ -207,6 +217,14 @@ pub struct BackupManifest {
     pub created_at: String,
     pub instrument_count: usize,
     pub report_count: usize,
+    #[serde(default = "default_true_flag")]
+    pub include_photos: bool,
+    #[serde(default = "default_true_flag")]
+    pub include_reports: bool,
+    #[serde(default = "default_true_flag")]
+    pub include_settings: bool,
+    #[serde(default)]
+    pub include_workbench: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -290,6 +308,10 @@ pub struct SyncConfigView {
     pub e2ee_enabled: bool,
     pub has_e2ee_passphrase: bool,
     pub check_on_startup: bool,
+    pub sync_include_photos: bool,
+    pub sync_include_reports: bool,
+    pub sync_include_settings: bool,
+    pub sync_include_workbench: bool,
     pub device_id: String,
     pub device_name: String,
     pub last_synced_rev: u64,
@@ -313,6 +335,10 @@ pub struct SaveSyncConfigInput {
     pub e2ee_passphrase: Option<String>,
     pub clear_e2ee_passphrase: Option<bool>,
     pub check_on_startup: bool,
+    pub sync_include_photos: Option<bool>,
+    pub sync_include_reports: Option<bool>,
+    pub sync_include_settings: Option<bool>,
+    pub sync_include_workbench: Option<bool>,
     pub device_name: Option<String>,
 }
 

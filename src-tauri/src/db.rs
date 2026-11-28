@@ -314,6 +314,9 @@ fn seed_default_settings(conn: &Connection) -> Result<(), String> {
         ("admin_title", DEFAULT_ADMIN_TITLE),
         ("admin_avatar_path", ""),
         ("workbench_cache_limit_mb", "1024"),
+        ("backup_include_photos", "1"),
+        ("backup_include_reports", "1"),
+        ("backup_include_settings", "1"),
         ("backup_include_workbench", "0"),
     ];
 
@@ -482,6 +485,9 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
             .parse::<i64>()
             .unwrap_or(1024)
             .clamp(128, 10240),
+        backup_include_photos: get_or("backup_include_photos", "1") != "0",
+        backup_include_reports: get_or("backup_include_reports", "1") != "0",
+        backup_include_settings: get_or("backup_include_settings", "1") != "0",
         backup_include_workbench: get_or("backup_include_workbench", "0") == "1",
     })
 }

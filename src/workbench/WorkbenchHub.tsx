@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
   ArrowUpRight,
@@ -10,12 +10,15 @@ import {
   Play,
   Search,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { formatFileSize } from "@/lib/status";
 import { SPRING_SNAPPY, TAP_SCALE, TAP_SCALE_SUBTLE } from "@/lib/motion";
-import { SearchField } from "@/components/ui/FormControls";
+import { confirmDialog } from "@/components/ConfirmDialog";
+import { InfoTip } from "@/components/InfoTip";
+import { PrecisionSelect, SearchField } from "@/components/ui/FormControls";
 import type { WorkbenchCacheStats } from "@/types";
 import {
   WORKBENCH_CATEGORY_META,
@@ -23,13 +26,21 @@ import {
   type WorkbenchToolDefinition,
 } from "./types";
 import { WORKBENCH_TOOLS } from "./registry";
-import { getDraftCacheStats } from "./tools/pdf-balloon/core/drafts";
+import {
+  clearDrafts,
+  getDraftCacheStats,
+  pruneDraftCache,
+} from "./tools/pdf-balloon/core/drafts";
 import { loadInspectionHistory } from "./tools/aql-sampling/core/storage";
 import { loadSpcHistory } from "./tools/spc-cpk/core/storage";
 import { loadToleranceHistory } from "./tools/iso-tolerance/core/storage";
 
 interface WorkbenchHubProps {
   runningToolIds: string[];
+  cacheLimitMb: number;
+  onCacheLimitChanged: (nextLimitMb: number) => void;
+  onCacheCleared: () => void;
+  onNotify: (message: string, type?: "success" | "error") => void;
   onLaunchTool: (toolId: string) => void;
   onCloseRunningTool: (toolId: string) => void;
 }
@@ -44,15 +55,32 @@ const CATEGORIES: (WorkbenchToolCategory | "all")[] = [
 
 export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
   runningToolIds,
+  cacheLimitMb,
+  onCacheLimitChanged,
+  onCacheCleared,
+  onNotify,
   onLaunchTool,
   onCloseRunningTool,
 }) => {
   const [category, setCategory] = useState<WorkbenchToolCategory | "all">("all");
   const [query, setQuery] = useState("");
   const [cacheStats, setCacheStats] = useState<WorkbenchCacheStats | null>(null);
+  const [clearingCache, setClearingCache] = useState(false);
+  const [savingCacheLimit, setSavingCacheLimit] = useState(false);
+  const [cacheHighlighted, setCacheHighlighted] = useState(false);
+  const cacheSectionRef = useRef<HTMLElement | null>(null);
   const [aqlHistoryCount, setAqlHistoryCount] = useState<number>(0);
   const [spcHistoryCount, setSpcHistoryCount] = useState<number>(0);
   const [tolHistoryCount, setTolHistoryCount] = useState<number>(0);
+
+  const refreshCacheStats = useCallback(async () => {
+    try {
+      const stats = await getDraftCacheStats();
+      setCacheStats(stats);
+    } catch {
+      setCacheStats(null);
+    }
+  }, []);
 
   useEffect(() => {
     setAqlHistoryCount(loadInspectionHistory().length);
@@ -72,7 +100,74 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
     return () => {
       cancelled = true;
     };
-  }, [runningToolIds.length]);
+  }, [runningToolIds.length, cacheLimitMb]);
+
+  const effectiveLimitMb = cacheStats?.limitMb || cacheLimitMb || 1024;
+  const effectiveLimitBytes =
+    cacheStats?.limitBytes || effectiveLimitMb * 1024 * 1024;
+  const cacheUsagePct = cacheStats
+    ? Math.min(
+        100,
+        Math.round((cacheStats.totalBytes / Math.max(1, effectiveLimitBytes)) * 100)
+      )
+    : 0;
+
+  const handleScrollToCache = () => {
+    cacheSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setCacheHighlighted(true);
+    window.setTimeout(() => setCacheHighlighted(false), 1200);
+  };
+
+  const handleChangeCacheLimit = async (nextLimitMb: number) => {
+    if (savingCacheLimit) return;
+    setSavingCacheLimit(true);
+    try {
+      await pruneDraftCache(nextLimitMb);
+      onCacheLimitChanged(nextLimitMb);
+      await refreshCacheStats();
+      const label =
+        nextLimitMb >= 1024
+          ? `${(nextLimitMb / 1024).toFixed(nextLimitMb % 1024 === 0 ? 0 : 1)} GB`
+          : `${nextLimitMb} MB`;
+      onNotify(
+        `工具台缓存上限已更新为 ${label}（超出部分已自动按 LRU 清理）`,
+        "success"
+      );
+    } catch (err) {
+      onNotify(`更新缓存上限失败：${String(err)}`, "error");
+    } finally {
+      setSavingCacheLimit(false);
+    }
+  };
+
+  const handleClearCache = async () => {
+    if (clearingCache) return;
+    const ok = await confirmDialog({
+      title: "清空 QI / QC 工具台缓存",
+      description:
+        "确定清空本地保存的全部 PDF 图纸草稿与临时标注缓存？磁盘上的原始图纸不受影响，如需保留未导出的标注请先在工具台中保存 PDF。",
+      confirmText: "确认清空",
+      cancelText: "取消",
+      destructive: true,
+    });
+    if (!ok) return;
+    setClearingCache(true);
+    try {
+      const res = await clearDrafts();
+      onCacheCleared();
+      await refreshCacheStats();
+      onNotify(
+        res.evictedCount > 0
+          ? `已清空 ${res.evictedCount} 份图纸草稿，释放 ${formatFileSize(res.freedBytes)}`
+          : "工具台缓存已为空",
+        "success"
+      );
+    } catch (err) {
+      onNotify(`清空工具台缓存失败：${String(err)}`, "error");
+    } finally {
+      setClearingCache(false);
+    }
+  };
 
   const filteredTools = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -124,11 +219,17 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
 
         <div className="flex items-center gap-2.5 shrink-0">
           {cacheStats && (
-            <span className="hidden lg:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.03] text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400">
+            <button
+              type="button"
+              onClick={handleScrollToCache}
+              title="查看并管理 QI / QC 工具台缓存与容量上限"
+              className="hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-zinc-200/85 dark:border-white/[0.09] bg-zinc-50/75 dark:bg-white/[0.03] hover:bg-zinc-100 dark:hover:bg-white/[0.07] text-[11px] font-mono tabular-nums text-zinc-600 dark:text-zinc-300 transition-colors"
+            >
+              <HardDrive className="h-3 w-3 text-indigo-500" />
               <span>
-                缓存 {formatFileSize(cacheStats.totalBytes)} / {formatFileSize(cacheStats.limitBytes)}
+                缓存 {formatFileSize(cacheStats.totalBytes)} / {formatFileSize(effectiveLimitBytes)}
               </span>
-            </span>
+            </button>
           )}
           <span className="hidden md:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/70 dark:bg-white/[0.03] text-[11px] text-zinc-500 dark:text-zinc-400">
             <HardDrive className="h-3 w-3 text-emerald-500" />
@@ -382,6 +483,96 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
               </div>
             </section>
           )}
+
+          {/* QI / QC Workbench Local Cache Governance Section */}
+          <section ref={cacheSectionRef} className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
+                <HardDrive className="h-3.5 w-3.5 text-indigo-500" />
+                <span>本地缓存与存储管理</span>
+              </h2>
+            </div>
+
+            <div
+              className={cn(
+                "rounded-xl border bg-white dark:bg-[#111115] divide-y divide-zinc-200/75 dark:divide-white/[0.07] transition-all duration-300",
+                cacheHighlighted
+                  ? "border-indigo-400 dark:border-indigo-400/60 ring-2 ring-indigo-500/20"
+                  : "border-zinc-200/85 dark:border-white/[0.08]"
+              )}
+            >
+              <div className="px-4 py-3.5 space-y-2.5">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div className="h-8 w-8 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center shrink-0">
+                      <HardDrive className="h-4 w-4" />
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-xs font-semibold text-zinc-900 dark:text-white">
+                          QI / QC 工具台缓存
+                        </span>
+                        <InfoTip content="PDF 图纸按 SHA-256 内容去重落盘保存于本地数据目录；超过上限自动按 LRU 淘汰最久未用草稿，永不淘汰当前打开的文档。" />
+                      </div>
+                      <div className="text-[11px] font-mono tabular-nums text-zinc-500 dark:text-zinc-400 mt-0.5">
+                        {cacheStats
+                          ? `已用 ${formatFileSize(cacheStats.totalBytes)} / ${formatFileSize(effectiveLimitBytes)} · ${cacheStats.draftCount} 份图纸草稿`
+                          : "读取中..."}
+                      </div>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={
+                      clearingCache ||
+                      (cacheStats
+                        ? cacheStats.draftCount === 0 && cacheStats.totalBytes === 0
+                        : false)
+                    }
+                    onClick={handleClearCache}
+                    className="btn-tactile inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-zinc-200/95 dark:border-white/[0.12] bg-white dark:bg-white/[0.04] hover:bg-rose-50 dark:hover:bg-rose-500/10 hover:text-rose-600 dark:hover:text-rose-400 hover:border-rose-200 dark:hover:border-rose-500/30 disabled:opacity-45 shadow-tactile text-zinc-700 dark:text-zinc-200 text-xs font-medium shrink-0 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    <span>{clearingCache ? "清空中..." : "清空缓存"}</span>
+                  </button>
+                </div>
+
+                {cacheStats && (
+                  <div className="h-1.5 w-full rounded-full bg-zinc-200/80 dark:bg-white/[0.07] overflow-hidden">
+                    <div
+                      className="h-full rounded-full bg-indigo-500 transition-all duration-300"
+                      style={{ width: `${cacheUsagePct}%` }}
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="px-4 py-3 flex items-center justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                    缓存容量上限
+                  </div>
+                  <div className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+                    默认 1 GB，调低后立即按 LRU 清理超出部分
+                  </div>
+                </div>
+                <PrecisionSelect
+                  value={String(effectiveLimitMb)}
+                  disabled={savingCacheLimit}
+                  align="right"
+                  onChange={(val) => handleChangeCacheLimit(Number(val))}
+                  options={[
+                    { value: "256", label: "256 MB" },
+                    { value: "512", label: "512 MB" },
+                    { value: "1024", label: "1 GB（默认）" },
+                    { value: "2048", label: "2 GB" },
+                    { value: "4096", label: "4 GB" },
+                  ]}
+                  className="min-w-[130px]"
+                />
+              </div>
+            </div>
+          </section>
 
           {/* Extensible Roadmap / Planned QI/QC Modules */}
           {plannedTools.length > 0 && (
