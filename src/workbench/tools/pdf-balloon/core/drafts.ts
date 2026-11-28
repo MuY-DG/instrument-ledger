@@ -863,7 +863,7 @@ export async function wipeAllWorkbenchBrowserState(): Promise<void> {
     const lsKeys: string[] = [];
     for (let i = 0; i < window.localStorage.length; i++) {
       const k = window.localStorage.key(i);
-      if (k && k.startsWith('folio:')) lsKeys.push(k);
+      if (k && (k.startsWith('folio:') || k.startsWith('workbench:'))) lsKeys.push(k);
     }
     lsKeys.forEach((k) => window.localStorage.removeItem(k));
   } catch {

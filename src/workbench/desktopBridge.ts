@@ -21,6 +21,10 @@ function getFiltersForFileName(name: string): { name: string; extensions: string
       return [{ name: "WebP 图片", extensions: ["webp"] }];
     case "zip":
       return [{ name: "ZIP 压缩包", extensions: ["zip"] }];
+    case "xlsx":
+      return [{ name: "Excel 工作簿", extensions: ["xlsx"] }];
+    case "csv":
+      return [{ name: "CSV 表格", extensions: ["csv"] }];
     default:
       return [{ name: "所有文件", extensions: ["*"] }];
   }

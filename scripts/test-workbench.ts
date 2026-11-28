@@ -19,6 +19,30 @@ import { imageDpiLimit, imagePlan } from "../src/workbench/tools/pdf-balloon/cor
 import { PNGStreamEncoder } from "../src/workbench/tools/pdf-balloon/core/codecs/png-stream";
 import { DEFAULT_CACHE_LIMIT_MB } from "../src/workbench/tools/pdf-balloon/core/drafts";
 import { DEFAULT_STYLE } from "../src/workbench/tools/pdf-balloon/types";
+import {
+  PRIMARY_CODE_LETTERS,
+  STANDARD_AQL_VALUES,
+} from "../src/workbench/tools/aql-sampling/core/tables";
+import {
+  compareAllSeverities,
+  evaluateDefectCount,
+  evaluateMultiClassLot,
+  resolveSamplingPlan,
+} from "../src/workbench/tools/aql-sampling/core/engine";
+import {
+  binomialCdf,
+  computeAcceptanceProbability,
+  computeOcAnalytics,
+} from "../src/workbench/tools/aql-sampling/core/statistics";
+import {
+  createInitialSwitchingTracker,
+  recordSwitchingLot,
+} from "../src/workbench/tools/aql-sampling/core/switching";
+import {
+  buildAqlExcelBlob,
+  buildInspectionSummaryText,
+} from "../src/workbench/tools/aql-sampling/core/export";
+import { createDefaultDefectClasses } from "../src/workbench/tools/aql-sampling/core/presets";
 
 async function main() {
   // 1. Registry checks
@@ -156,6 +180,180 @@ async function main() {
     `Found unscoped global CSS selectors in folio.css: ${badGlobalRules.join("; ")}`
   );
   console.log("✅ Strict CSS isolation audit passed (0 leaked global selectors)");
+
+  // 7. AQL Sampling Calculator registry & exhaustive 2,496-cell master table audit
+  const aqlTool = getWorkbenchToolById("aql-sampling");
+  assert.ok(
+    aqlTool && aqlTool.status === "ready" && aqlTool.keepAlive && typeof aqlTool.load === "function",
+    "aql-sampling tool should be registered as ready with lazy loader"
+  );
+
+  let verifiedCells = 0;
+  for (const standard of ["gbt2828", "ansi_z14"] as const) {
+    for (const severity of ["normal", "tightened", "reduced"] as const) {
+      for (const code of PRIMARY_CODE_LETTERS) {
+        for (const aql of STANDARD_AQL_VALUES) {
+          const res = resolveSamplingPlan({
+            standard,
+            lotSize: null,
+            level: "II",
+            severity,
+            aql,
+            directCodeLetter: code,
+          });
+          assert.ok(res.sampleSize >= 2, `Invalid sample size for ${standard}/${severity}/${code}/${aql}`);
+          assert.ok(res.ac >= 0 && res.re > res.ac, `Invalid Ac/Re for ${standard}/${severity}/${code}/${aql}`);
+          if (standard === "gbt2828" || severity !== "reduced") {
+            assert.equal(
+              res.re,
+              res.ac + 1,
+              `Expected Re = Ac + 1 for ${standard}/${severity}/${code}/${aql}`
+            );
+          }
+          verifiedCells += 1;
+        }
+      }
+    }
+  }
+  assert.equal(verifiedCells, 2 * 3 * 16 * 26, "All 2,496 master table lookups must succeed");
+
+  // 8. Golden textbook spot checks (GB/T 2828.1-2012 & ANSI/ASQ Z1.4)
+  // Lot 2000, Level II -> Code K
+  const kNorm10 = resolveSamplingPlan({ standard: "gbt2828", lotSize: 2000, level: "II", severity: "normal", aql: 1.0 });
+  assert.equal(kNorm10.originalCode, "K");
+  assert.equal(kNorm10.effectiveCode, "K");
+  assert.equal(kNorm10.sampleSize, 125);
+  assert.equal(kNorm10.ac, 3);
+  assert.equal(kNorm10.re, 4);
+
+  // Arrow up (K, AQL 0.15 -> J, n=80, 0/1) & Arrow down (K, AQL 0.25 -> L, n=200, 1/2)
+  const kNorm015 = resolveSamplingPlan({ standard: "gbt2828", lotSize: 2000, level: "II", severity: "normal", aql: 0.15 });
+  assert.equal(kNorm015.effectiveCode, "J");
+  assert.equal(kNorm015.arrowFollowed, "up");
+  assert.equal(kNorm015.sampleSize, 80);
+  assert.equal(kNorm015.ac, 0);
+  assert.equal(kNorm015.re, 1);
+
+  const kNorm025 = resolveSamplingPlan({ standard: "gbt2828", lotSize: 2000, level: "II", severity: "normal", aql: 0.25 });
+  assert.equal(kNorm025.effectiveCode, "L");
+  assert.equal(kNorm025.arrowFollowed, "down");
+  assert.equal(kNorm025.sampleSize, 200);
+  assert.equal(kNorm025.ac, 1);
+  assert.equal(kNorm025.re, 2);
+
+  // Tightened Code K, AQL 4.0 -> 8/9; Code R, AQL 0.025 -> S (n=3150, 1/2)
+  const kTight40 = resolveSamplingPlan({ standard: "gbt2828", lotSize: 2000, level: "II", severity: "tightened", aql: 4.0 });
+  assert.equal(kTight40.sampleSize, 125);
+  assert.equal(kTight40.ac, 8);
+  assert.equal(kTight40.re, 9);
+
+  const rTight0025 = resolveSamplingPlan({ standard: "gbt2828", lotSize: 600000, level: "III", severity: "tightened", aql: 0.025 });
+  assert.equal(rTight0025.originalCode, "R");
+  assert.equal(rTight0025.effectiveCode, "S");
+  assert.equal(rTight0025.sampleSize, 3150);
+  assert.equal(rTight0025.ac, 1);
+  assert.equal(rTight0025.re, 2);
+
+  // Reduced comparison: GB/T 2828.1-2012 (gap-free) vs ANSI Z1.4 (gap 1/4) at K, AQL 1.0
+  const kRedGbt = resolveSamplingPlan({ standard: "gbt2828", lotSize: 2000, level: "II", severity: "reduced", aql: 1.0 });
+  assert.equal(kRedGbt.sampleSize, 50);
+  assert.equal(kRedGbt.ac, 2);
+  assert.equal(kRedGbt.re, 3);
+  assert.equal(kRedGbt.hasReducedGap, false);
+
+  const kRedAnsi = resolveSamplingPlan({ standard: "ansi_z14", lotSize: 2000, level: "II", severity: "reduced", aql: 1.0 });
+  assert.equal(kRedAnsi.sampleSize, 50);
+  assert.equal(kRedAnsi.ac, 1);
+  assert.equal(kRedAnsi.re, 4);
+  assert.equal(kRedAnsi.hasReducedGap, true);
+  assert.equal(evaluateDefectCount(kRedAnsi, 1), "accept");
+  assert.equal(evaluateDefectCount(kRedAnsi, 2), "accept_revert_normal");
+  assert.equal(evaluateDefectCount(kRedAnsi, 3), "accept_revert_normal");
+  assert.equal(evaluateDefectCount(kRedAnsi, 4), "reject");
+
+  // 100% full inspection cap when tableSampleSize >= lotSize
+  const capped = resolveSamplingPlan({ standard: "gbt2828", lotSize: 10, level: "II", severity: "normal", aql: 0.65 });
+  assert.equal(capped.tableSampleSize, 20);
+  assert.equal(capped.sampleSize, 10);
+  assert.equal(capped.isFullInspection, true);
+  assert.equal(capped.ac, 0);
+  assert.equal(capped.re, 1);
+
+  // Multi-class lot evaluation with mixed sample sizes (Lot=500, Level II -> H=50, MAJ=0.65 -> J=80)
+  const defaultClasses = createDefaultDefectClasses();
+  const multi = evaluateMultiClassLot({
+    standard: "gbt2828",
+    lotSize: 500,
+    level: "II",
+    severity: "normal",
+    classes: defaultClasses,
+  });
+  assert.equal(multi.recommendedTotalSample, 80);
+  assert.equal(multi.hasMixedSampleSizes, true);
+  assert.equal(multi.overallVerdict, "accept");
+
+  // 9. OC Curve statistics & Switching Rules state machine
+  assert.equal(binomialCdf(125, 3, 0), 1);
+  assert.equal(binomialCdf(125, 3, 1), 0);
+  const sevSet = compareAllSeverities({ standard: "gbt2828", lotSize: 2000, level: "II", aql: 1.0 });
+  const paRed = computeAcceptanceProbability(sevSet.reduced, 1.0);
+  const paNorm = computeAcceptanceProbability(sevSet.normal, 1.0);
+  const paTight = computeAcceptanceProbability(sevSet.tightened, 1.0);
+  assert.ok(paRed > paNorm && paNorm > paTight, "Reduced Pa > Normal Pa > Tightened Pa at AQL");
+
+  const oc = computeOcAnalytics(sevSet.normal);
+  assert.ok(oc.paAtAql > 0.95 && oc.paAtAql < 0.98, `Unexpected Pa at AQL: ${oc.paAtAql}`);
+  assert.ok(oc.lq10Percent > oc.iqlPercent && oc.iqlPercent > 1.0);
+  assert.ok(oc.aoqlPercent > 0);
+
+  // Switching tracker: Normal -> Tightened (2/5 rejects) -> Normal (5 accepts) -> Reduced (30 pts)
+  let sw = createInitialSwitchingTracker("gbt2828", "normal");
+  sw = recordSwitchingLot(sw, "reject", 3);
+  sw = recordSwitchingLot(sw, "accept", 3);
+  sw = recordSwitchingLot(sw, "reject", 3);
+  assert.equal(sw.currentState, "tightened");
+  for (let i = 0; i < 5; i++) sw = recordSwitchingLot(sw, "accept", 2);
+  assert.equal(sw.currentState, "normal");
+  for (let i = 0; i < 10; i++) sw = recordSwitchingLot(sw, "accept_strict", 3);
+  assert.equal(sw.currentState, "reduced");
+
+  // 10. Summary text & ExcelJS export
+  const summaryText = buildInspectionSummaryText({
+    standard: "gbt2828",
+    lotSize: 500,
+    level: "II",
+    severity: "normal",
+    meta: { partName: "壳体", lotNo: "LOT-01", supplier: "A厂", stage: "IQC", inspector: "张工", notes: "" },
+    summary: multi,
+  });
+  assert.ok(summaryText.includes("综合判定结论：允收 (ACCEPT)"));
+
+  const xlsxBlob = await buildAqlExcelBlob([
+    {
+      id: "test-1",
+      createdAt: "2026-11-28 14:20",
+      standard: "gbt2828",
+      lotSize: 500,
+      level: "II",
+      severity: "normal",
+      meta: { partName: "壳体", lotNo: "LOT-01", supplier: "A厂", stage: "IQC", inspector: "张工", notes: "" },
+      classes: multi.evaluations.map((e) => ({
+        id: e.config.id,
+        label: e.config.label,
+        aql: e.config.aql,
+        effectiveCode: e.plan.effectiveCode,
+        sampleSize: e.plan.sampleSize,
+        ac: e.plan.ac,
+        re: e.plan.re,
+        defectsFound: e.config.defectsFound,
+        verdict: e.verdict,
+      })),
+      recommendedTotalSample: multi.recommendedTotalSample,
+      overallVerdict: multi.overallVerdict,
+    },
+  ]);
+  assert.ok(xlsxBlob.size > 2000, "Generated AQL Excel workbook should be non-empty");
+  console.log("✅ AQL Sampling Calculator (2,496-cell matrix, OC stats, switching rules & Excel export) passed");
 }
 
 main().catch((err) => {

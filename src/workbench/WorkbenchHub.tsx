@@ -24,6 +24,7 @@ import {
 } from "./types";
 import { WORKBENCH_TOOLS } from "./registry";
 import { getDraftCacheStats } from "./tools/pdf-balloon/core/drafts";
+import { loadInspectionHistory } from "./tools/aql-sampling/core/storage";
 
 interface WorkbenchHubProps {
   runningToolIds: string[];
@@ -47,6 +48,11 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
   const [category, setCategory] = useState<WorkbenchToolCategory | "all">("all");
   const [query, setQuery] = useState("");
   const [cacheStats, setCacheStats] = useState<WorkbenchCacheStats | null>(null);
+  const [aqlHistoryCount, setAqlHistoryCount] = useState<number>(0);
+
+  useEffect(() => {
+    setAqlHistoryCount(loadInspectionHistory().length);
+  }, [runningToolIds.length]);
 
   useEffect(() => {
     let cancelled = false;
@@ -329,6 +335,14 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
                               {cacheStats.draftCount > 0
                                 ? `${cacheStats.draftCount} 份草稿 · ${formatFileSize(cacheStats.totalBytes)} / ${formatFileSize(cacheStats.limitBytes)}`
                                 : `暂无本地草稿 · 上限 ${formatFileSize(cacheStats.limitBytes)}`}
+                            </span>
+                          )}
+                          {tool.id === "aql-sampling" && (
+                            <span className="inline-flex items-center gap-1 font-mono tabular-nums">
+                              <FileText className="h-3 w-3 text-zinc-400" />
+                              {aqlHistoryCount > 0
+                                ? `${aqlHistoryCount} 条本地抽检记录 · GB/T 2828.1 & ANSI Z1.4`
+                                : "GB/T 2828.1-2012 & ANSI/ASQ Z1.4 离线主表"}
                             </span>
                           )}
                         </div>
