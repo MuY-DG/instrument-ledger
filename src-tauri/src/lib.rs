@@ -18,7 +18,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 #[cfg(not(target_os = "macos"))]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Manager, WebviewWindowBuilder};
 
 use crate::app_icon::{apply_app_icon_by_id, DEFAULT_APP_ICON_ID};
 use crate::auth::SessionState;
@@ -29,7 +29,9 @@ use crate::db::{
     get_setting, init_db, is_account_initialized, is_app_lock_configured, load_custom_app_icons,
     resolve_startup_admin_session, sanitize_close_behavior, set_setting, DEFAULT_CLOSE_BEHAVIOR,
 };
-use crate::storage::ensure_storage_dirs;
+use crate::storage::{
+    ensure_storage_dirs, migrate_legacy_data_dir_if_needed, resolve_app_paths,
+};
 
 fn build_tray_menu(app: &AppHandle, is_en: bool) -> Result<Menu<tauri::Wry>, tauri::Error> {
     let show_label = if is_en { "Show Window" } else { "显示主窗口" };
@@ -135,7 +137,14 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|e| format!("获取应用数据目录失败: {}", e))?;
-            let data_dir = app_data_dir.join("data");
+            let resolved_paths = resolve_app_paths(&app_data_dir);
+            let data_dir = resolved_paths.data_dir;
+            if resolved_paths.using_install_dir {
+                let legacy_data_dir = app_data_dir.join("data");
+                if let Err(err) = migrate_legacy_data_dir_if_needed(&legacy_data_dir, &data_dir) {
+                    eprintln!("迁移旧版数据目录失败（将继续使用安装目录）: {}", err);
+                }
+            }
             ensure_storage_dirs(&data_dir)?;
             let db_path = data_dir.join("ledger.db");
             let conn = init_db(&db_path)?;
@@ -175,6 +184,16 @@ pub fn run() {
                 data_dir,
                 db_path,
             });
+
+            if let Some(win_cfg) = app.config().app.windows.first() {
+                if app.get_webview_window(&win_cfg.label).is_none() {
+                    let mut builder = WebviewWindowBuilder::from_config(app.handle(), win_cfg)?;
+                    if let Some(webview_dir) = resolved_paths.webview_data_dir {
+                        builder = builder.data_directory(webview_dir);
+                    }
+                    builder.build()?;
+                }
+            }
 
             setup_tray(app, show_tray_icon, is_en_tray)?;
             if startup_icon_id != DEFAULT_APP_ICON_ID {

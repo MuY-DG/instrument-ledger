@@ -1,8 +1,155 @@
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::{Component, Path, PathBuf};
 
 use base64::Engine;
+use rusqlite::Connection;
 use uuid::Uuid;
+use walkdir::WalkDir;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedAppPaths {
+    pub data_dir: PathBuf,
+    pub webview_data_dir: Option<PathBuf>,
+    pub using_install_dir: bool,
+}
+
+fn is_dir_writable(dir: &Path) -> bool {
+    if fs::create_dir_all(dir).is_err() {
+        return false;
+    }
+    let probe = dir.join(format!(".write_probe_{}", Uuid::new_v4()));
+    match OpenOptions::new().write(true).create_new(true).open(&probe) {
+        Ok(file) => {
+            drop(file);
+            let _ = fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Resolves the active application data directory (and Windows WebView2 directory).
+///
+/// - On Windows: prefers `<install_dir>/data` and `<install_dir>/webview` next to the
+///   executable so all application data lives at the installation location by default.
+///   Falls back to `app_data_dir/data` if the installation directory is not writable.
+/// - On macOS/Linux: uses the standard `app_data_dir/data`.
+pub fn resolve_app_paths_with_platform(
+    is_windows: bool,
+    exe_path: Option<&Path>,
+    app_data_dir: &Path,
+) -> ResolvedAppPaths {
+    if is_windows {
+        if let Some(exe_dir) = exe_path.and_then(|p| p.parent()) {
+            let install_data_dir = exe_dir.join("data");
+            if is_dir_writable(&install_data_dir) {
+                let install_webview_dir = exe_dir.join("webview");
+                let webview_data_dir = if is_dir_writable(&install_webview_dir) {
+                    Some(install_webview_dir)
+                } else {
+                    None
+                };
+                return ResolvedAppPaths {
+                    data_dir: install_data_dir,
+                    webview_data_dir,
+                    using_install_dir: true,
+                };
+            }
+        }
+    }
+
+    ResolvedAppPaths {
+        data_dir: app_data_dir.join("data"),
+        webview_data_dir: None,
+        using_install_dir: false,
+    }
+}
+
+pub fn resolve_app_paths(app_data_dir: &Path) -> ResolvedAppPaths {
+    let exe_path = std::env::current_exe().ok();
+    resolve_app_paths_with_platform(
+        cfg!(target_os = "windows"),
+        exe_path.as_deref(),
+        app_data_dir,
+    )
+}
+
+fn copy_tree_recursive(src: &Path, dst: &Path) -> Result<(), String> {
+    for entry in WalkDir::new(src).into_iter().filter_map(|e| e.ok()) {
+        let rel = entry
+            .path()
+            .strip_prefix(src)
+            .map_err(|e| format!("迁移路径处理失败: {}", e))?;
+        if rel.as_os_str().is_empty() {
+            continue;
+        }
+        let target = dst.join(rel);
+        if entry.file_type().is_dir() {
+            fs::create_dir_all(&target).map_err(|e| format!("创建迁移目录失败: {}", e))?;
+        } else if entry.file_type().is_file() {
+            if let Some(parent) = target.parent() {
+                fs::create_dir_all(parent).map_err(|e| format!("创建迁移父目录失败: {}", e))?;
+            }
+            fs::copy(entry.path(), &target).map_err(|e| format!("迁移文件失败: {}", e))?;
+        }
+    }
+    Ok(())
+}
+
+/// One-time automatic migration from legacy `%APPDATA%/<bundle-id>/data` into
+/// `<install_dir>/data` on Windows when upgrading from an earlier release.
+pub fn migrate_legacy_data_dir_if_needed(
+    legacy_data_dir: &Path,
+    target_data_dir: &Path,
+) -> Result<bool, String> {
+    if legacy_data_dir == target_data_dir {
+        return Ok(false);
+    }
+    let legacy_db = legacy_data_dir.join("ledger.db");
+    let target_db = target_data_dir.join("ledger.db");
+    let marker = legacy_data_dir.join(".migrated_to_install_dir");
+
+    if target_db.exists() || !legacy_db.exists() || marker.exists() {
+        return Ok(false);
+    }
+
+    fs::create_dir_all(target_data_dir)
+        .map_err(|e| format!("创建安装位置数据目录失败: {}", e))?;
+
+    // Flush any SQLite WAL pages into ledger.db before copying
+    if let Ok(conn) = Connection::open(&legacy_db) {
+        let _ = conn.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+    }
+
+    for folder in ["images", "reports", "app_icons", "workbench", "sync_backups"] {
+        let src_dir = legacy_data_dir.join(folder);
+        if src_dir.is_dir() {
+            copy_tree_recursive(&src_dir, &target_data_dir.join(folder))?;
+        }
+    }
+
+    let legacy_sync_cfg = legacy_data_dir.join("sync_config.json");
+    if legacy_sync_cfg.is_file() {
+        let target_sync_cfg = target_data_dir.join("sync_config.json");
+        if !target_sync_cfg.exists() {
+            fs::copy(&legacy_sync_cfg, &target_sync_cfg)
+                .map_err(|e| format!("迁移同步配置失败: {}", e))?;
+        }
+    }
+
+    let tmp_db = target_data_dir.join(format!(".ledger.db.migrating.{}", Uuid::new_v4()));
+    if let Err(e) = fs::copy(&legacy_db, &tmp_db) {
+        let _ = fs::remove_file(&tmp_db);
+        return Err(format!("迁移数据库失败: {}", e));
+    }
+    if let Err(e) = fs::rename(&tmp_db, &target_db) {
+        let _ = fs::remove_file(&tmp_db);
+        return Err(format!("提交迁移数据库失败: {}", e));
+    }
+
+    let _ = fs::write(&marker, format!("{}\n", target_data_dir.display()));
+    Ok(true)
+}
 
 pub fn ensure_storage_dirs(data_dir: &Path) -> Result<(), String> {
     fs::create_dir_all(data_dir.join("images"))
@@ -218,4 +365,93 @@ pub fn dir_total_size(path: &Path) -> u64 {
         .filter_map(|e| e.metadata().ok())
         .map(|m| m.len())
         .sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_app_paths_platform_defaults() {
+        let root = std::env::temp_dir().join(format!("inst_paths_test_{}", Uuid::new_v4()));
+        let install_dir = root.join("install");
+        let exe_path = install_dir.join("InstrumentLedger.exe");
+        let app_data_dir = root.join("roaming_app_data");
+        fs::create_dir_all(&install_dir).unwrap();
+
+        // Non-Windows always uses app_data_dir/data and system default WebView dir
+        let mac_paths = resolve_app_paths_with_platform(false, Some(&exe_path), &app_data_dir);
+        assert!(!mac_paths.using_install_dir);
+        assert_eq!(mac_paths.data_dir, app_data_dir.join("data"));
+        assert_eq!(mac_paths.webview_data_dir, None);
+
+        // Windows prefers <install_dir>/data and <install_dir>/webview when writable
+        let win_paths = resolve_app_paths_with_platform(true, Some(&exe_path), &app_data_dir);
+        assert!(win_paths.using_install_dir);
+        assert_eq!(win_paths.data_dir, install_dir.join("data"));
+        assert_eq!(win_paths.webview_data_dir, Some(install_dir.join("webview")));
+
+        // Windows falls back to app_data_dir/data if exe_path is missing
+        let win_fallback = resolve_app_paths_with_platform(true, None, &app_data_dir);
+        assert!(!win_fallback.using_install_dir);
+        assert_eq!(win_fallback.data_dir, app_data_dir.join("data"));
+        assert_eq!(win_fallback.webview_data_dir, None);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn test_migrate_legacy_data_dir_once() {
+        let root = std::env::temp_dir().join(format!("inst_migrate_test_{}", Uuid::new_v4()));
+        let legacy_dir = root.join("roaming").join("data");
+        let target_dir = root.join("install").join("data");
+
+        ensure_storage_dirs(&legacy_dir).unwrap();
+        let conn = crate::db::init_db(&legacy_dir.join("ledger.db")).unwrap();
+        conn.execute(
+            "INSERT INTO instruments (category, seq_no, department, name, serial_no, created_at, updated_at)
+             VALUES ('gauge', 1, '品质部', '千分尺', 'M-001', '2026-11-28', '2026-11-28')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+
+        fs::write(legacy_dir.join("images").join("loc.png"), b"png-bytes").unwrap();
+        fs::create_dir_all(legacy_dir.join("reports").join("1")).unwrap();
+        fs::write(legacy_dir.join("reports").join("1").join("r.pdf"), b"%PDF-1.4").unwrap();
+        fs::write(legacy_dir.join("sync_config.json"), b"{\"enabled\":true}").unwrap();
+
+        let migrated = migrate_legacy_data_dir_if_needed(&legacy_dir, &target_dir).unwrap();
+        assert!(migrated);
+        assert!(target_dir.join("ledger.db").exists());
+        assert!(legacy_dir.join(".migrated_to_install_dir").exists());
+        assert_eq!(
+            fs::read(target_dir.join("images").join("loc.png")).unwrap(),
+            b"png-bytes"
+        );
+        assert_eq!(
+            fs::read(target_dir.join("reports").join("1").join("r.pdf")).unwrap(),
+            b"%PDF-1.4"
+        );
+        assert_eq!(
+            fs::read(target_dir.join("sync_config.json")).unwrap(),
+            b"{\"enabled\":true}"
+        );
+
+        let migrated_conn = Connection::open(target_dir.join("ledger.db")).unwrap();
+        let name: String = migrated_conn
+            .query_row("SELECT name FROM instruments WHERE serial_no = 'M-001'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(name, "千分尺");
+        drop(migrated_conn);
+
+        // Even if target ledger.db is later wiped (e.g. factory reset), marker prevents re-migration
+        fs::remove_file(target_dir.join("ledger.db")).unwrap();
+        let migrated_again = migrate_legacy_data_dir_if_needed(&legacy_dir, &target_dir).unwrap();
+        assert!(!migrated_again);
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }

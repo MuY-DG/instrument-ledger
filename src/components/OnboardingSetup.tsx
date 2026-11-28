@@ -13,9 +13,12 @@ import {
   Shuffle,
   Sparkles,
   User,
+  Volume2,
+  VolumeX,
   X,
 } from "lucide-react";
 import { api } from "@/lib/api";
+import netflixTudumUrl from "@/assets/audio/netflix-tudum.mp3";
 import {
   ACCOUNT_BG_PRESETS,
   LIGHT_TONE_MESH_IDS,
@@ -295,6 +298,8 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
   const [titleReady, setTitleReady] = useState(false);
   const [actionReady, setActionReady] = useState(false);
   const [showSkip, setShowSkip] = useState(false);
+  const [soundMuted, setSoundMuted] = useState(false);
+  const soundMutedRef = useRef(false);
 
   // Active fluid mesh background — defaults to "1" (霓虹粉紫) as requested!
   const [bgId, setBgId] = useState<GrainMeshId>("1");
@@ -323,6 +328,9 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
   const pickerWrapRef = useRef<HTMLDivElement | null>(null);
   const timersRef = useRef<number[]>([]);
   const completeTimerRef = useRef<number | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioGenRef = useRef(0);
+  const audioUnlockCleanupRef = useRef<(() => void) | null>(null);
 
   const isLightMesh = LIGHT_TONE_MESH_IDS.has(bgId);
   const activeAccent = PALETTE_ACCENTS[bgId] || PALETTE_ACCENTS["1"];
@@ -390,13 +398,105 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
     timersRef.current = [tSkip, tEmblem, tTitle, tAction];
   }, [clearIntroTimers]);
 
+  const clearAudioUnlock = useCallback(() => {
+    if (audioUnlockCleanupRef.current) {
+      audioUnlockCleanupRef.current();
+      audioUnlockCleanupRef.current = null;
+    }
+  }, []);
+
+  const stopIntroAudio = useCallback(
+    (fadeMs = 150) => {
+      audioGenRef.current += 1;
+      clearAudioUnlock();
+      const audio = audioRef.current;
+      if (!audio) return;
+      audioRef.current = null;
+
+      if (fadeMs <= 0 || audio.paused || audio.ended || audio.muted) {
+        audio.pause();
+        return;
+      }
+      const startVol = audio.volume;
+      const startMs = performance.now();
+      const step = (now: number) => {
+        const p = Math.min(1, (now - startMs) / fadeMs);
+        audio.volume = Math.max(0, startVol * (1 - p));
+        if (p < 1 && !audio.paused && !audio.ended) {
+          window.requestAnimationFrame(step);
+        } else {
+          audio.pause();
+        }
+      };
+      window.requestAnimationFrame(step);
+    },
+    [clearAudioUnlock]
+  );
+
+  const playIntroAudio = useCallback(() => {
+    stopIntroAudio(60);
+    const gen = audioGenRef.current;
+    const audio = new Audio(netflixTudumUrl);
+    audio.preload = "auto";
+    audio.muted = soundMutedRef.current;
+    audio.volume = 0.9;
+    audioRef.current = audio;
+
+    audio.addEventListener(
+      "ended",
+      () => {
+        if (audioRef.current === audio) {
+          audioRef.current = null;
+        }
+      },
+      { once: true }
+    );
+
+    void audio.play().catch(() => {
+      if (gen !== audioGenRef.current || audioRef.current !== audio) return;
+      const expireTimer = window.setTimeout(() => {
+        clearAudioUnlock();
+      }, 2400);
+      const onGesture = () => {
+        clearAudioUnlock();
+        if (gen !== audioGenRef.current || audioRef.current !== audio) return;
+        audio.muted = soundMutedRef.current;
+        audio.volume = 0.9;
+        void audio.play().catch(() => {});
+      };
+      window.addEventListener("pointerdown", onGesture, { once: true, capture: true });
+      window.addEventListener("keydown", onGesture, { once: true, capture: true });
+      audioUnlockCleanupRef.current = () => {
+        window.clearTimeout(expireTimer);
+        window.removeEventListener("pointerdown", onGesture, true);
+        window.removeEventListener("keydown", onGesture, true);
+      };
+    });
+  }, [stopIntroAudio, clearAudioUnlock]);
+
   useEffect(() => {
     scheduleIntroTimeline();
-    return clearIntroTimers;
-  }, [scheduleIntroTimeline, clearIntroTimers]);
+    playIntroAudio();
+    return () => {
+      clearIntroTimers();
+      stopIntroAudio(0);
+    };
+  }, [scheduleIntroTimeline, clearIntroTimers, playIntroAudio, stopIntroAudio]);
+
+  const handleToggleSound = useCallback(() => {
+    setSoundMuted((prev) => {
+      const next = !prev;
+      soundMutedRef.current = next;
+      if (audioRef.current) {
+        audioRef.current.muted = next;
+      }
+      return next;
+    });
+  }, []);
 
   const handleSkipIntro = () => {
     clearIntroTimers();
+    stopIntroAudio(180);
     if (revealStageRef.current) {
       revealStageRef.current.style.maskImage = "";
       revealStageRef.current.style.webkitMaskImage = "";
@@ -422,6 +522,7 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
     setStage("intro");
     canvasRef.current?.replay();
     scheduleIntroTimeline();
+    playIntroAudio();
   };
 
   // Esc shortcut to exit preview mode at any stage
@@ -431,12 +532,13 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
       if (e.key === "Escape") {
         e.preventDefault();
         e.stopPropagation();
+        stopIntroAudio(100);
         onExitPreview();
       }
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);
-  }, [previewMode, onExitPreview]);
+  }, [previewMode, onExitPreview, stopIntroAudio]);
 
   // Enter shortcut once welcome CTA is ready
   useEffect(() => {
@@ -561,8 +663,35 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
         )}
       </AnimatePresence>
 
-      {/* Top-Right Skip / Replay & Preview Exit Pills (clear of macOS top drag strip) */}
+      {/* Top-Right Sound / Skip / Replay & Preview Exit Pills (clear of macOS top drag strip) */}
       <div className="fixed top-[max(1.5rem,calc(var(--titlebar-safe-top,0px)+0.75rem))] right-7 z-30 flex items-center gap-2">
+        {(stage === "intro" && showSkip) ||
+        ((stage === "welcome" || stage === "setup") && actionReady) ? (
+          <motion.button
+            type="button"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 0.9 }}
+            whileHover={{ opacity: 1 }}
+            whileTap={TAP_SCALE_SUBTLE}
+            transition={{ duration: 0.25 }}
+            onClick={handleToggleSound}
+            title={soundMuted ? "开启开场音效" : "静音开场音效"}
+            aria-label={soundMuted ? "开启开场音效" : "静音开场音效"}
+            className={cn(
+              "inline-flex items-center justify-center h-7 w-7 rounded-full backdrop-blur-md transition-colors cursor-pointer",
+              stage === "intro"
+                ? "bg-black/65 border border-white/20 text-white hover:bg-black/85"
+                : "bg-white/85 border border-white/70 shadow-tactile text-zinc-800 hover:bg-white hover:text-zinc-950"
+            )}
+          >
+            {soundMuted ? (
+              <VolumeX className="h-3.5 w-3.5" />
+            ) : (
+              <Volume2 className="h-3.5 w-3.5" />
+            )}
+          </motion.button>
+        ) : null}
+
         <AnimatePresence mode="wait">
           {stage === "intro" && showSkip ? (
             <motion.button
@@ -605,7 +734,10 @@ export const OnboardingSetup: React.FC<OnboardingSetupProps> = ({
             whileHover={{ opacity: 1 }}
             whileTap={TAP_SCALE_SUBTLE}
             transition={{ duration: 0.25 }}
-            onClick={onExitPreview}
+            onClick={() => {
+              stopIntroAudio(100);
+              onExitPreview();
+            }}
             title="退出预览 (Esc)"
             className={cn(
               "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full backdrop-blur-md text-[11.5px] font-medium transition-colors cursor-pointer",
