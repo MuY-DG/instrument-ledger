@@ -80,7 +80,7 @@ fn save_icon(app_data: &Path, png_bytes: &[u8]) -> Result<PathBuf, Box<dyn std::
         .collect::<image::ImageResult<Vec<_>>>()?;
     let mut ico = Vec::new();
     IcoEncoder::new(&mut ico).encode_images(&frames)?;
-    fs::create_dir_all(directory)?;
+    fs::create_dir_all(&directory)?;
     let tmp = directory.join(format!("{}.tmp", uuid::Uuid::new_v4()));
     if let Err(err) = fs::write(&tmp, ico).and_then(|_| fs::rename(&tmp, &path)) {
         let _ = fs::remove_file(tmp);
