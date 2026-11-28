@@ -43,6 +43,27 @@ import {
   buildInspectionSummaryText,
 } from "../src/workbench/tools/aql-sampling/core/export";
 import { createDefaultDefectClasses } from "../src/workbench/tools/aql-sampling/core/presets";
+import {
+  IMR_CONSTANTS,
+  computeC4,
+  getSubgroupConstants,
+} from "../src/workbench/tools/spc-cpk/core/constants";
+import {
+  computeNormalityTest,
+  inverseNormalCdf,
+  normalCdf,
+} from "../src/workbench/tools/spc-cpk/core/statistics";
+import { detectNelsonViolations } from "../src/workbench/tools/spc-cpk/core/nelson";
+import { runSpcAnalysis } from "../src/workbench/tools/spc-cpk/core/engine";
+import {
+  parseExcelArrayBuffer,
+  parseRawMeasurements,
+} from "../src/workbench/tools/spc-cpk/core/parser";
+import { SPC_SCENE_PRESETS } from "../src/workbench/tools/spc-cpk/core/presets";
+import {
+  buildSpcExcelBlob,
+  buildSpcSummaryText,
+} from "../src/workbench/tools/spc-cpk/core/export";
 
 async function main() {
   // 1. Registry checks
@@ -354,6 +375,202 @@ async function main() {
   ]);
   assert.ok(xlsxBlob.size > 2000, "Generated AQL Excel workbook should be non-empty");
   console.log("✅ AQL Sampling Calculator (2,496-cell matrix, OC stats, switching rules & Excel export) passed");
+
+  // 11. CPK / SPC Process Capability Analysis registry & AIAG constants audit
+  const spcTool = getWorkbenchToolById("spc-cpk");
+  assert.ok(
+    spcTool && spcTool.status === "ready" && spcTool.keepAlive && typeof spcTool.load === "function",
+    "spc-cpk tool should be registered as ready with lazy loader"
+  );
+
+  // AIAG SPC textbook constant spot checks (n=2, 5, 10, 25)
+  const c5 = getSubgroupConstants(5);
+  assert.ok(Math.abs(c5.d2 - 2.3259) < 0.0005, `Expected d2(5)≈2.3259, got ${c5.d2}`);
+  assert.ok(Math.abs(c5.A2 - 0.5768) < 0.0005, `Expected A2(5)≈0.5768, got ${c5.A2}`);
+  assert.equal(c5.D3, 0, "Expected D3(5)=0");
+  assert.ok(Math.abs(c5.D4 - 2.1145) < 0.001, `Expected D4(5)≈2.1145, got ${c5.D4}`);
+  assert.ok(Math.abs(c5.c4 - 0.9400) < 0.0005, `Expected c4(5)≈0.9400, got ${c5.c4}`);
+  assert.ok(Math.abs(c5.A3 - 1.4273) < 0.001, `Expected A3(5)≈1.4273, got ${c5.A3}`);
+  assert.ok(Math.abs(c5.B4 - 2.089) < 0.002, `Expected B4(5)≈2.089, got ${c5.B4}`);
+
+  const c10 = getSubgroupConstants(10);
+  assert.ok(c10.D3 > 0.22 && c10.D3 < 0.23, `Expected D3(10)≈0.223, got ${c10.D3}`);
+  assert.ok(Math.abs(IMR_CONSTANTS.E2 - 2.6587) < 0.002);
+  assert.ok(Math.abs(computeC4(2) - 0.79788) < 0.0002);
+
+  // Normal CDF & Acklam Inverse CDF accuracy roundtrip
+  assert.ok(Math.abs(normalCdf(0) - 0.5) < 1e-7);
+  assert.ok(Math.abs(normalCdf(1.959964) - 0.975) < 1e-5);
+  for (const p of [0.001, 0.025, 0.1, 0.5, 0.9, 0.975, 0.999]) {
+    const z = inverseNormalCdf(p);
+    assert.ok(Math.abs(normalCdf(z) - p) < 1e-5, `Inverse CDF roundtrip failed for p=${p}`);
+  }
+
+  // 12. All 6 SPC engineering presets verification
+  const presetResults = new Map(
+    SPC_SCENE_PRESETS.map((preset) => [
+      preset.id,
+      runSpcAnalysis(preset.values, {
+        spec: preset.spec,
+        subgroupSize: preset.subgroupSize,
+        chartMode: preset.chartMode,
+        enabledRules: [1, 2, 3, 4, 5, 6, 7, 8],
+      }),
+    ])
+  );
+
+  // CNC shaft stable A+
+  const cncRes = presetResults.get("cnc-shaft-stable")!;
+  assert.equal(cncRes.valid, true);
+  assert.equal(cncRes.effectiveChartType, "xbar_r");
+  assert.equal(cncRes.subgroups.length, 25);
+  assert.ok((cncRes.capability.cpk ?? 0) >= 1.5, `Expected CNC Cpk >= 1.5, got ${cncRes.capability.cpk}`);
+  assert.equal(cncRes.normality.isNormal, true, "CNC shaft data should pass normality test");
+
+  // Mold wall shifted: Cp high, Cpk pulled down by positive Ca shift
+  const moldRes = presetResults.get("mold-wall-shifted")!;
+  assert.equal(moldRes.valid, true);
+  assert.ok((moldRes.capability.cp ?? 0) > 1.4, "Mold Cp should be high");
+  assert.ok((moldRes.capability.cpk ?? 99) < 1.15, "Mold Cpk should be reduced by centering shift");
+  assert.ok((moldRes.capability.ca ?? 0) > 0.3, "Mold Ca should show positive upper shift");
+  assert.ok(
+    moldRes.diagnostics.some((d) => d.id === "centering-shift"),
+    "Diagnostics should flag centering shift opportunity"
+  );
+
+  // Tool wear drift: I-MR out of control (triggers Nelson rules)
+  const wearRes = presetResults.get("tool-wear-drift")!;
+  assert.equal(wearRes.valid, true);
+  assert.equal(wearRes.effectiveChartType, "imr");
+  assert.equal(wearRes.isInControl, false, "Tool wear drift should trigger SPC violations");
+  assert.ok(
+    wearRes.violations.some((v) => v.ruleId === 1 || v.ruleId === 2 || v.ruleId === 3),
+    "Tool wear should trigger R1/R2/R3"
+  );
+
+  // Dual cavity bimodal: fails Anderson-Darling normality test
+  const bimodalRes = presetResults.get("dual-cavity-bimodal")!;
+  assert.equal(bimodalRes.valid, true);
+  assert.equal(bimodalRes.normality.isNormal, false, "Bimodal data must fail Anderson-Darling normality");
+  assert.ok(bimodalRes.normality.pValue < 0.01, `Expected bimodal p < 0.01, got ${bimodalRes.normality.pValue}`);
+
+  // Unilateral upper-only & lower-only specs
+  const flatRes = presetResults.get("flatness-upper-only")!;
+  assert.equal(flatRes.valid, true);
+  assert.equal(flatRes.capability.cp, null);
+  assert.equal(flatRes.capability.cpl, null);
+  assert.equal(flatRes.capability.cpk, flatRes.capability.cpu);
+
+  const pullRes = presetResults.get("pull-force-lower-only")!;
+  assert.equal(pullRes.valid, true);
+  assert.equal(pullRes.capability.cp, null);
+  assert.equal(pullRes.capability.cpu, null);
+  assert.equal(pullRes.capability.cpk, pullRes.capability.cpl);
+
+  // 13. Nelson 8 Rules deterministic unit verification
+  const stdLim = { cl: 0, ucl: 3, lcl: -3, sigma: 1 };
+  const dummySec = { cl: 1, ucl: 3, lcl: 0, sigma: 0.6 };
+  const r1Hits = detectNelsonViolations({
+    primarySeries: [0, 0.2, -0.1, 3.4, 0.1],
+    primaryLimits: stdLim,
+    secondarySeries: [null, 0.5, 0.5, 0.5, 0.5],
+    secondaryLimits: dummySec,
+    enabledRules: [1],
+  });
+  assert.equal(r1Hits.length, 1);
+  assert.equal(r1Hits[0].ruleId, 1);
+  assert.equal(r1Hits[0].triggerIndex, 3);
+
+  const r2Hits = detectNelsonViolations({
+    primarySeries: [-0.2, 0.3, 0.4, 0.5, 0.2, 0.6, 0.3, 0.7, 0.5, 0.4],
+    primaryLimits: stdLim,
+    secondarySeries: new Array(10).fill(0.5),
+    secondaryLimits: dummySec,
+    enabledRules: [2],
+  });
+  assert.equal(r2Hits.length, 1);
+  assert.equal(r2Hits[0].ruleId, 2);
+
+  const r3Hits = detectNelsonViolations({
+    primarySeries: [0, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5, 0.2],
+    primaryLimits: stdLim,
+    secondarySeries: new Array(8).fill(0.5),
+    secondaryLimits: dummySec,
+    enabledRules: [3],
+  });
+  assert.equal(r3Hits.length, 1);
+  assert.equal(r3Hits[0].ruleId, 3);
+
+  const r4Series = Array.from({ length: 14 }, (_, i) => (i % 2 === 0 ? -0.5 : 0.5));
+  const r4Hits = detectNelsonViolations({
+    primarySeries: r4Series,
+    primaryLimits: stdLim,
+    secondarySeries: new Array(14).fill(0.5),
+    secondaryLimits: dummySec,
+    enabledRules: [4],
+  });
+  assert.equal(r4Hits.length, 1);
+  assert.equal(r4Hits[0].ruleId, 4);
+
+  const r5Hits = detectNelsonViolations({
+    primarySeries: [0, 2.2, 0.4, 2.3, 0],
+    primaryLimits: stdLim,
+    secondarySeries: new Array(5).fill(0.5),
+    secondaryLimits: dummySec,
+    enabledRules: [5],
+  });
+  assert.equal(r5Hits.length, 1);
+  assert.equal(r5Hits[0].ruleId, 5);
+
+  const r7Hits = detectNelsonViolations({
+    primarySeries: new Array(15).fill(0.2),
+    primaryLimits: stdLim,
+    secondarySeries: new Array(15).fill(0.5),
+    secondaryLimits: dummySec,
+    enabledRules: [7],
+  });
+  assert.equal(r7Hits.length, 1);
+  assert.equal(r7Hits[0].ruleId, 7);
+
+  const r8Hits = detectNelsonViolations({
+    primarySeries: [1.5, -1.5, 1.4, -1.6, 1.3, -1.4, 1.6, -1.3],
+    primaryLimits: stdLim,
+    secondarySeries: new Array(8).fill(0.5),
+    secondaryLimits: dummySec,
+    enabledRules: [8],
+  });
+  assert.equal(r8Hits.length, 1);
+  assert.equal(r8Hits[0].ruleId, 8);
+
+  // Anderson-Darling normality check on clean quantiles vs extreme bimodal
+  const normalSample = Array.from({ length: 40 }, (_, i) =>
+    inverseNormalCdf((i + 0.5) / 40)
+  );
+  const adNormal = computeNormalityTest(normalSample, 0, 1);
+  assert.equal(adNormal.isNormal, true);
+  assert.ok(adNormal.pValue > 0.5);
+
+  // 14. Smart text parser, Excel 3-sheet export & Excel re-import roundtrip
+  const pasted = `X1\tX2\tX3\tX4\tX5\n20.01\t20.02\t19.99\t20.00\t20.01\n19.98\t20.01\t20.02\t20.00\t19.99`;
+  const parsed = parseRawMeasurements(pasted);
+  assert.equal(parsed.values.length, 10);
+  assert.equal(parsed.detectedSubgroupSize, 5);
+  assert.equal(parsed.skippedTokens, 5);
+
+  const spcSummary = buildSpcSummaryText(cncRes, SPC_SCENE_PRESETS[0].meta);
+  assert.ok(spcSummary.includes("CPK / SPC 过程能力分析报告"));
+  assert.ok(spcSummary.includes("Cpk ="));
+
+  const spcXlsxBlob = await buildSpcExcelBlob(cncRes, SPC_SCENE_PRESETS[0].meta);
+  assert.ok(spcXlsxBlob.size > 4000, "Generated 3-sheet SPC Excel workbook should be non-empty");
+
+  const spcXlsxBuf = new Uint8Array(await spcXlsxBlob.arrayBuffer());
+  const reimported = await parseExcelArrayBuffer("roundtrip.xlsx", spcXlsxBuf);
+  assert.ok(
+    reimported.columns.some((c) => c.values.length === cncRes.count),
+    "Re-importing exported SPC Excel workbook should recover raw measurements column"
+  );
+  console.log("✅ CPK / SPC Process Capability (AIAG constants, 6 presets, Nelson 8 rules, AD normality & 3-sheet Excel roundtrip) passed");
 }
 
 main().catch((err) => {

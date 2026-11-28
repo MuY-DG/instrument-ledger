@@ -25,6 +25,7 @@ import {
 import { WORKBENCH_TOOLS } from "./registry";
 import { getDraftCacheStats } from "./tools/pdf-balloon/core/drafts";
 import { loadInspectionHistory } from "./tools/aql-sampling/core/storage";
+import { loadSpcHistory } from "./tools/spc-cpk/core/storage";
 
 interface WorkbenchHubProps {
   runningToolIds: string[];
@@ -49,9 +50,11 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
   const [query, setQuery] = useState("");
   const [cacheStats, setCacheStats] = useState<WorkbenchCacheStats | null>(null);
   const [aqlHistoryCount, setAqlHistoryCount] = useState<number>(0);
+  const [spcHistoryCount, setSpcHistoryCount] = useState<number>(0);
 
   useEffect(() => {
     setAqlHistoryCount(loadInspectionHistory().length);
+    setSpcHistoryCount(loadSpcHistory().length);
   }, [runningToolIds.length]);
 
   useEffect(() => {
@@ -343,6 +346,14 @@ export const WorkbenchHub: React.FC<WorkbenchHubProps> = ({
                               {aqlHistoryCount > 0
                                 ? `${aqlHistoryCount} 条本地抽检记录 · GB/T 2828.1 & ANSI Z1.4`
                                 : "GB/T 2828.1-2012 & ANSI/ASQ Z1.4 离线主表"}
+                            </span>
+                          )}
+                          {tool.id === "spc-cpk" && (
+                            <span className="inline-flex items-center gap-1 font-mono tabular-nums">
+                              <FileText className="h-3 w-3 text-zinc-400" />
+                              {spcHistoryCount > 0
+                                ? `${spcHistoryCount} 条本地 CPK 分析记录 · AIAG SPC & GB/T 4091`
+                                : "AIAG SPC / GB/T 4091 离线统计与控制图引擎"}
                             </span>
                           )}
                         </div>

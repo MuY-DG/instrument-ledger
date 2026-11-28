@@ -132,7 +132,13 @@ export async function readLocalFileAsWebFile(
         ? "image/png"
         : ext === "jpg" || ext === "jpeg"
           ? "image/jpeg"
-          : fallbackMime;
+          : ext === "xlsx"
+            ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            : ext === "csv"
+              ? "text/csv"
+              : ext === "txt" || ext === "tsv"
+                ? "text/plain"
+                : fallbackMime;
   return new File([normalized], fileName, { type: mime });
 }
 
@@ -151,4 +157,22 @@ export async function pickPdfFileInTauri(): Promise<File | null> {
     return null;
   }
   return readLocalFileAsWebFile(selected, "application/pdf");
+}
+
+/**
+ * Opens a native OS file picker for Excel / CSV / TXT measurement data files in Tauri mode.
+ */
+export async function pickSpreadsheetFileInTauri(): Promise<File | null> {
+  if (!isTauriEnvironment()) return null;
+  const selected = await openDialog({
+    multiple: false,
+    title: "导入实测数据表格 (Excel / CSV / TXT)",
+    filters: [
+      { name: "表格与文本数据", extensions: ["xlsx", "csv", "tsv", "txt"] },
+    ],
+  });
+  if (typeof selected !== "string" || !selected) {
+    return null;
+  }
+  return readLocalFileAsWebFile(selected, "application/octet-stream");
 }
