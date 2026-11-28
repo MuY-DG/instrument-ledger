@@ -127,6 +127,9 @@ fn emit_auth_status(app: &AppHandle, status: &AuthStatus) {
 }
 
 pub fn show_main_window(app: &AppHandle) {
+    let Some(window) = app.get_webview_window("main") else {
+        return;
+    };
     let state = app.state::<AppState>();
     let expired_status = (|| -> Option<AuthStatus> {
         let mut session = state.session.lock().ok()?;
@@ -142,17 +145,23 @@ pub fn show_main_window(app: &AppHandle) {
         emit_auth_status(app, &status);
     }
 
-    if let Some(window) = app.get_webview_window("main") {
+    if window.is_minimized().unwrap_or(false) {
         let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-        let _ = window.emit("window-shown", ());
     }
+    let _ = window.show();
+    let _ = window.set_focus();
+    let _ = window.emit("window-shown", ());
+
+    let show_tray_icon = state.db.lock().ok().is_none_or(|conn| {
+        get_setting(&conn, "show_tray_icon").ok().flatten().as_deref() != Some("0")
+    });
+    apply_tray_visibility(app, show_tray_icon);
 }
 
 pub fn hide_main_window_and_maybe_lock(app: &AppHandle) {
     let state = app.state::<AppState>();
     let maybe_locked_status = (|| -> Option<AuthStatus> {
+        let mut session = state.session.lock().ok()?;
         let conn = state.db.lock().ok()?;
         let initialized = is_account_initialized(&conn).ok()?;
         if !initialized {
@@ -161,7 +170,6 @@ pub fn hide_main_window_and_maybe_lock(app: &AppHandle) {
         let (app_lock_enabled, _) = is_app_lock_configured(&conn).ok()?;
         let lock_on_hide = get_setting(&conn, "lock_on_hide").ok()?.as_deref() == Some("1");
         if app_lock_enabled && lock_on_hide {
-            let mut session = state.session.lock().ok()?;
             session.is_locked = true;
             let _ = set_setting(&conn, "app_lock_active", "1");
             return build_auth_status(&conn, &session).ok();
@@ -174,6 +182,7 @@ pub fn hide_main_window_and_maybe_lock(app: &AppHandle) {
     }
 
     if let Some(window) = app.get_webview_window("main") {
+        apply_tray_visibility(app, true);
         let _ = window.hide();
     }
 }
@@ -493,9 +502,9 @@ pub fn perform_close_action(
     action: String,
     remember: bool,
 ) -> Result<(), String> {
-    let normalized = match action.trim() {
-        "exit" => "exit",
-        _ => "minimize_to_tray",
+    let normalized = match action.as_str() {
+        "exit" | "minimize_to_tray" => action.as_str(),
+        _ => return Err("无效的窗口关闭操作".to_string()),
     };
     if remember {
         let conn = state.db.lock().map_err(|_| "数据库锁异常".to_string())?;

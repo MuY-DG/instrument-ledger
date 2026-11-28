@@ -1581,7 +1581,7 @@ export const AppLockOverlay: React.FC<AppLockOverlayProps> = ({
 interface CloseActionPromptModalProps {
   open: boolean;
   onCancel: () => void;
-  onConfirm: (action: "minimize_to_tray" | "exit", remember: boolean) => void;
+  onConfirm: (action: "minimize_to_tray" | "exit", remember: boolean) => Promise<void>;
 }
 
 export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
@@ -1589,22 +1589,22 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
   onCancel,
   onConfirm,
 }) => {
-  const mac = useMemo(() => isMacPlatform(), []);
+  const { t } = useI18n();
+  const mac = isMacPlatform();
   const [selected, setSelected] = useState<"minimize_to_tray" | "exit">("minimize_to_tray");
   const [remember, setRemember] = useState(true);
   const [submitting, setSubmitting] = useState(false);
+
+  const handleCancel = () => {
+    if (!submitting) onCancel();
+  };
 
   useEffect(() => {
     if (!open) return;
     setSelected("minimize_to_tray");
     setRemember(true);
     setSubmitting(false);
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
+  }, [open]);
 
   const handleConfirm = async () => {
     if (submitting) return;
@@ -1619,17 +1619,21 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
   return (
     <ModalShell
       open={open}
-      onClose={onCancel}
+      onClose={handleCancel}
       zIndexClass="z-[130]"
       panelClassName="w-full max-w-[420px]"
+      ariaLabelledBy="close-window-title"
+      closeOnEsc
     >
             <div className="px-6 py-4 border-b border-zinc-200/80 dark:border-white/[0.08] bg-zinc-50/55 dark:bg-white/[0.015] flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
-                关闭窗口
+              <h2 id="close-window-title" className="text-sm font-semibold text-zinc-950 dark:text-white tracking-tight">
+                {t("关闭窗口", "Close Window")}
               </h2>
               <button
                 type="button"
-                onClick={onCancel}
+                onClick={handleCancel}
+                aria-label={t("取消", "Cancel")}
+                disabled={submitting}
                 className="btn-tactile p-1.5 rounded-lg text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-white/[0.07]"
               >
                 <X className="h-4 w-4" />
@@ -1640,6 +1644,9 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
               {/* Option 1: Minimize to Tray / Menu Bar */}
               <motion.button
                 type="button"
+                aria-pressed={selected === "minimize_to_tray"}
+                autoFocus
+                disabled={submitting}
                 whileTap={TAP_SCALE_SUBTLE}
                 transition={SPRING_SNAPPY}
                 onClick={() => setSelected("minimize_to_tray")}
@@ -1660,23 +1667,23 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                 >
                   <MonitorDown className="h-4 w-4" />
                 </div>
-                <div className="min-w-0 flex-1 flex items-center gap-1.5">
+                <div className="min-w-0 flex-1 space-y-0.5">
                   <span className="text-xs font-semibold text-zinc-900 dark:text-white">
-                    {mac ? "最小化到菜单栏" : "最小化到托盘"}
+                    {mac ? t("隐藏到菜单栏", "Hide to Menu Bar") : t("隐藏到托盘", "Hide to System Tray")}
                   </span>
-                  <InfoTip
-                    content={
-                      mac
-                        ? "隐藏主窗口并在顶部菜单栏常驻，保持登录与定时提醒；点击菜单栏或 Dock 图标可随时打开。"
-                        : "隐藏主窗口并在任务栏右下角常驻，保持登录与定时提醒；点击托盘图标可随时打开。"
-                    }
-                  />
+                  <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                    {mac
+                        ? t("应用在后台继续运行，可从菜单栏或 Dock 重新打开。", "The app keeps running. Reopen it from the menu bar or Dock.")
+                        : t("应用在后台继续运行，可从系统托盘重新打开。", "The app keeps running. Reopen it from the system tray.")}
+                  </p>
                 </div>
               </motion.button>
 
               {/* Option 2: Exit Application */}
               <motion.button
                 type="button"
+                aria-pressed={selected === "exit"}
+                disabled={submitting}
                 whileTap={TAP_SCALE_SUBTLE}
                 transition={SPRING_SNAPPY}
                 onClick={() => setSelected("exit")}
@@ -1699,7 +1706,7 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-xs font-semibold text-zinc-900 dark:text-white">
-                    直接退出
+                    {t("退出程序", "Quit App")}
                   </div>
                 </div>
               </motion.button>
@@ -1711,11 +1718,11 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                   onChange={setRemember}
                   label={
                     <span className="text-xs text-zinc-600 dark:text-zinc-400">
-                      记住选择
+                      {t("记住选择", "Remember My Choice")}
                     </span>
                   }
                 />
-                <InfoTip content="下次关闭不再询问，可随时在「设置 → 窗口与托盘」修改。" />
+                <InfoTip content={t("以后可在外观设置的「窗口与托盘」中修改。", "Change this later under Window & Tray in Appearance settings.")} />
               </div>
 
               {/* Footer Actions */}
@@ -1724,10 +1731,11 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                   type="button"
                   whileTap={TAP_SCALE}
                   transition={SPRING_SNAPPY}
-                  onClick={onCancel}
+                  onClick={handleCancel}
+                  disabled={submitting}
                   className="px-4 py-2 rounded-xl border border-zinc-200/95 dark:border-white/[0.1] bg-white dark:bg-white/[0.03] shadow-tactile text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-white/[0.05] transition-colors"
                 >
-                  取消
+                  {t("取消", "Cancel")}
                 </motion.button>
                 <motion.button
                   type="button"
@@ -1737,7 +1745,7 @@ export const CloseActionPromptModal: React.FC<CloseActionPromptModalProps> = ({
                   onClick={handleConfirm}
                   className="btn-sheen px-4 py-2 rounded-xl bg-zinc-900 hover:bg-zinc-800 dark:bg-white dark:hover:bg-zinc-200 disabled:opacity-50 text-white dark:text-zinc-950 text-xs font-semibold shadow-tactile-primary transition-colors"
                 >
-                  确定
+                  {t("确定", "Confirm")}
                 </motion.button>
               </div>
             </div>

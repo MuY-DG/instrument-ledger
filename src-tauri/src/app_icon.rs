@@ -44,6 +44,8 @@ pub fn apply_app_icon_by_id(
     custom_icons: &[CustomAppIcon],
 ) -> Result<(), String> {
     let bytes = resolve_icon_png_bytes(data_dir, icon_id, custom_icons);
+    #[cfg(windows)]
+    crate::windows_icon::apply(app, &bytes)?;
     apply_app_icon_png(app, bytes)
 }
 
@@ -78,10 +80,10 @@ pub fn apply_app_icon_png(app: &AppHandle, png_bytes: Vec<u8>) -> Result<(), Str
         .map_err(|e| format!("解析应用图标 PNG 失败: {}", e))?;
 
     if let Some(win) = app.get_webview_window("main") {
-        let _ = win.set_icon(img.clone());
+        win.set_icon(img.clone()).map_err(|err| err.to_string())?;
     }
     if let Some(tray) = app.tray_by_id("main-tray") {
-        let _ = tray.set_icon(Some(img));
+        tray.set_icon(Some(img)).map_err(|err| err.to_string())?;
     }
     Ok(())
 }

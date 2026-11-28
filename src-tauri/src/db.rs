@@ -117,6 +117,7 @@ pub fn init_db(db_path: &Path) -> Result<Connection, String> {
     .map_err(|e| format!("初始化数据表失败: {}", e))?;
 
     seed_default_settings(&conn)?;
+    migrate_close_behavior(&conn)?;
     migrate_auth_state(&conn)?;
     Ok(conn)
 }
@@ -124,7 +125,7 @@ pub fn init_db(db_path: &Path) -> Result<Connection, String> {
 pub const DEFAULT_GITHUB_REPO: &str = "MuY-DG/instrument-ledger";
 pub const DEFAULT_UPDATE_PROXY_URL: &str = "https://gh-proxy.com/";
 pub const DEFAULT_ALERT_POPUP_FREQUENCY: &str = "every_open";
-pub const DEFAULT_CLOSE_BEHAVIOR: &str = "minimize_to_tray";
+pub const DEFAULT_CLOSE_BEHAVIOR: &str = "ask";
 pub const DEFAULT_UI_LANGUAGE: &str = "system";
 pub const DEFAULT_UI_SCALE_MODE: &str = "auto";
 pub const DEFAULT_UI_SCALE: f64 = 1.0;
@@ -219,6 +220,33 @@ pub fn sanitize_close_behavior(raw: &str) -> String {
         "ask" | "minimize_to_tray" | "exit" => raw.trim().to_string(),
         _ => DEFAULT_CLOSE_BEHAVIOR.to_string(),
     }
+}
+
+pub fn load_close_behavior(conn: &Connection) -> String {
+    get_setting(conn, "close_behavior")
+        .ok()
+        .flatten()
+        .map(|value| sanitize_close_behavior(&value))
+        .unwrap_or_else(|| DEFAULT_CLOSE_BEHAVIOR.to_string())
+}
+
+fn migrate_close_behavior(conn: &Connection) -> Result<(), String> {
+    let version: i64 = conn
+        .pragma_query_value(None, "user_version", |row| row.get(0))
+        .map_err(|e| e.to_string())?;
+    if version >= 1 {
+        return Ok(());
+    }
+
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    // Older versions used this value as the default before the prompt was wired up.
+    tx.execute(
+        "UPDATE app_settings SET value = ?1 WHERE key = 'close_behavior' AND value = 'minimize_to_tray'",
+        [DEFAULT_CLOSE_BEHAVIOR],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.pragma_update(None, "user_version", 1).map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())
 }
 
 pub fn sanitize_ui_language(raw: &str) -> String {
@@ -459,7 +487,7 @@ pub fn load_app_settings(conn: &Connection) -> Result<AppSettings, String> {
         .parse::<i64>()
         .unwrap_or(4)
         .clamp(1, 168);
-    let close_behavior = sanitize_close_behavior(&get_or("close_behavior", DEFAULT_CLOSE_BEHAVIOR));
+    let close_behavior = load_close_behavior(conn);
     let show_tray_icon = get_or("show_tray_icon", "1") != "0";
     let ui_language = sanitize_ui_language(&get_or("ui_language", DEFAULT_UI_LANGUAGE));
     let ui_scale_mode = sanitize_ui_scale_mode(&get_or("ui_scale_mode", DEFAULT_UI_SCALE_MODE));
@@ -841,6 +869,25 @@ mod tests {
     }
 
     #[test]
+    fn test_close_behavior_migrates_the_legacy_default_once() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", [])
+            .unwrap();
+        set_setting(&conn, "close_behavior", "minimize_to_tray").unwrap();
+        migrate_close_behavior(&conn).unwrap();
+        assert_eq!(load_close_behavior(&conn), "ask");
+
+        set_setting(&conn, "close_behavior", "minimize_to_tray").unwrap();
+        migrate_close_behavior(&conn).unwrap();
+        assert_eq!(load_close_behavior(&conn), "minimize_to_tray");
+
+        conn.pragma_update(None, "user_version", 0).unwrap();
+        set_setting(&conn, "close_behavior", "exit").unwrap();
+        migrate_close_behavior(&conn).unwrap();
+        assert_eq!(load_close_behavior(&conn), "exit");
+    }
+
+    #[test]
     fn test_window_tray_and_independent_app_lock_defaults() {
         use crate::auth::hash_password;
         let root = std::env::temp_dir().join(format!("inst_lock_test_{}", uuid::Uuid::new_v4()));
@@ -848,7 +895,7 @@ mod tests {
 
         let conn = init_db(&db_path).expect("init_db failed");
         let s1 = load_app_settings(&conn).unwrap();
-        assert_eq!(s1.close_behavior, "minimize_to_tray");
+        assert_eq!(s1.close_behavior, "ask");
         assert!(s1.show_tray_icon);
         assert_eq!(s1.ui_language, "system");
         assert_eq!(s1.ui_scale_mode, "auto");
@@ -866,7 +913,7 @@ mod tests {
 
         assert_eq!(sanitize_close_behavior("minimize_to_tray"), "minimize_to_tray");
         assert_eq!(sanitize_close_behavior("exit"), "exit");
-        assert_eq!(sanitize_close_behavior("bogus"), "minimize_to_tray");
+        assert_eq!(sanitize_close_behavior("bogus"), "ask");
         assert_eq!(sanitize_ui_language("en"), "en");
         assert_eq!(sanitize_ui_language("zh-CN"), "zh-CN");
         assert_eq!(sanitize_ui_language("other"), "system");

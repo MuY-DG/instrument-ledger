@@ -1,7 +1,7 @@
 import React, { useEffect, useLayoutEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { motion } from "motion/react";
-import { Cloud, Loader2, PanelLeft, Search } from "lucide-react";
+import { Cloud, Copy, Loader2, Minus, PanelLeft, Search, Square, X } from "lucide-react";
 import { isMacPlatform } from "@/components/AuthLockModals";
 import { MorphTooltip } from "@/components/ui/MorphTooltip";
 import { useI18n } from "@/lib/i18n";
@@ -11,7 +11,7 @@ import { cn } from "@/lib/utils";
 import type { SyncState } from "@/types";
 
 interface WindowTitleBarProps {
-  /** When true (e.g., cinematic Onboarding intro), renders a transparent drag region only */
+  /** Keep only the window controls during initial onboarding */
   minimalDragOnly?: boolean;
   /** Hide interactive buttons (e.g., booting or locked) while keeping the top chrome height */
   hideActions?: boolean;
@@ -36,11 +36,6 @@ export function isTauriMacDesktop(): boolean {
   return isTauriEnvironment() && isMacPlatform();
 }
 
-/**
- * Unified seamless top chrome bar shared across macOS (Overlay titlebar) and Windows/Web.
- * Matches the outer shell & left sidebar color with zero dividing hairline, no app title,
- * and clean icon triggers for Sidebar Collapse + Quick Search right beside traffic lights.
- */
 export const WindowTitleBar: React.FC<WindowTitleBarProps> = ({
   minimalDragOnly = false,
   hideActions = false,
@@ -58,68 +53,67 @@ export const WindowTitleBar: React.FC<WindowTitleBarProps> = ({
 }) => {
   const { t } = useI18n();
   const [isMacDesktop] = useState(isTauriMacDesktop);
-  const [isTauri] = useState(isTauriEnvironment);
+  const [isWindowsDesktop] = useState(
+    () => isTauriEnvironment() && /Windows/i.test(navigator.userAgent)
+  );
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isMaximized, setIsMaximized] = useState(false);
   const [windowFocused, setWindowFocused] = useState(true);
   const modKey = isMacPlatform() ? "⌘" : "Ctrl+";
 
   useEffect(() => {
-    if (!isMacDesktop) return;
+    if (!isMacDesktop && !isWindowsDesktop) return;
 
     const appWindow = getCurrentWindow();
-    appWindow.setTitleBarStyle("overlay").catch(() => {});
+    if (isMacDesktop) appWindow.setTitleBarStyle("overlay").catch(() => {});
 
     let active = true;
-    const syncFullscreen = () => {
+    const syncWindowState = () => {
       appWindow
         .isFullscreen()
         .then((fs) => {
           if (active) setIsFullscreen(fs);
         })
         .catch(() => {});
+      if (isWindowsDesktop) {
+        appWindow
+          .isMaximized()
+          .then((maximized) => {
+            if (active) setIsMaximized(maximized);
+          })
+          .catch(() => {});
+      }
     };
 
-    syncFullscreen();
+    syncWindowState();
 
-    const unlistenResize = appWindow.onResized(() => {
-      syncFullscreen();
-    });
-    const unlistenFocus = appWindow.onFocusChanged(({ payload }) => {
+    const unlistenResize = appWindow.onResized(syncWindowState);
+    const unlistenFocus = isMacDesktop ? appWindow.onFocusChanged(({ payload }) => {
       if (active) setWindowFocused(payload);
-    });
+    }) : null;
 
     return () => {
       active = false;
       unlistenResize.then((fn) => fn()).catch(() => {});
-      unlistenFocus.then((fn) => fn()).catch(() => {});
+      unlistenFocus?.then((fn) => fn()).catch(() => {});
     };
-  }, [isMacDesktop]);
+  }, [isMacDesktop, isWindowsDesktop]);
 
+  const showWindowsControls = isWindowsDesktop && !isFullscreen;
   useLayoutEffect(() => {
-    const safeTop = isMacDesktop && !isFullscreen ? `${TOPBAR_HEIGHT_PX}px` : "0px";
-    const h = !minimalDragOnly ? `${TOPBAR_HEIGHT_PX}px` : "0px";
+    const safeTop = ((isMacDesktop && !isFullscreen) || showWindowsControls)
+      ? `${TOPBAR_HEIGHT_PX}px`
+      : "0px";
+    const h = !minimalDragOnly || showWindowsControls ? `${TOPBAR_HEIGHT_PX}px` : "0px";
     document.documentElement.style.setProperty("--titlebar-h", h);
     document.documentElement.style.setProperty("--titlebar-safe-top", safeTop);
-  }, [isMacDesktop, isFullscreen, minimalDragOnly]);
+  }, [isMacDesktop, isFullscreen, minimalDragOnly, showWindowsControls]);
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLElement>) => {
-    if (!isTauri || e.button !== 0) return;
-    const target = e.target as HTMLElement | null;
-    if (target?.closest("button, [role='button'], input, a")) return;
-    const appWindow = getCurrentWindow();
-    if (e.detail === 2) {
-      appWindow.toggleMaximize().catch(() => {});
-    } else {
-      appWindow.startDragging().catch(() => {});
-    }
-  };
-
-  if (minimalDragOnly) {
+  if (minimalDragOnly && !showWindowsControls) {
     if (!isMacDesktop || isFullscreen) return null;
     return (
       <div
         data-tauri-drag-region
-        onMouseDown={handleMouseDown}
         className="fixed top-0 inset-x-0 h-[38px] z-[150] select-none no-print"
       />
     );
@@ -129,22 +123,24 @@ export const WindowTitleBar: React.FC<WindowTitleBarProps> = ({
   const safeZoom = Math.max(0.75, Math.min(1.5, uiZoom || 1));
   const leftPaddingPx =
     isMacDesktop && !isFullscreen ? Math.max(74, Math.ceil(78 / safeZoom)) : 12;
+  const showAppActions = !hideActions && !minimalDragOnly;
+  const maximizeLabel = isMaximized ? t("还原窗口", "Restore Window") : t("最大化", "Maximize");
 
   return (
     <div
       role="banner"
-      data-tauri-drag-region
-      onMouseDown={handleMouseDown}
+      data-tauri-drag-region="deep"
       style={{ height: TOPBAR_HEIGHT_PX, paddingLeft: leftPaddingPx }}
       className={cn(
-        "relative z-[110] shrink-0 w-full pr-3 flex items-center justify-between select-none no-print",
-        "bg-transparent transition-opacity duration-150",
+        "relative shrink-0 w-full flex items-center select-none no-print",
+        showWindowsControls ? "z-[125] bg-[#f4f5f7] dark:bg-[#121318]" : "z-[110] pr-3",
+        "transition-opacity duration-150",
         !windowFocused && isMacDesktop ? "opacity-75" : "opacity-100"
       )}
     >
       {/* Left chrome controls beside macOS traffic lights */}
       <div className="flex items-center gap-1">
-        {!hideActions && onToggleSidebar && (
+        {showAppActions && onToggleSidebar && (
           <MorphTooltip
             placement="bottom"
             content={
@@ -172,7 +168,7 @@ export const WindowTitleBar: React.FC<WindowTitleBarProps> = ({
           </MorphTooltip>
         )}
 
-        {!hideActions && onOpenSearch && (
+        {showAppActions && onOpenSearch && (
           <MorphTooltip
             placement="bottom"
             content={t(`快速检索 (${modKey}K)`, `Quick Search (${modKey}K)`)}
@@ -191,7 +187,7 @@ export const WindowTitleBar: React.FC<WindowTitleBarProps> = ({
           </MorphTooltip>
         )}
 
-        {!hideActions && showSync && onSyncClick && (() => {
+        {showAppActions && showSync && onSyncClick && (() => {
           const isConflict = syncState === "conflict";
           const isRemoteAhead = syncState === "remote_ahead";
           const isLocalAhead = syncState === "local_ahead";
@@ -265,8 +261,48 @@ export const WindowTitleBar: React.FC<WindowTitleBarProps> = ({
         })()}
       </div>
 
-      {/* Right side kept clean & draggable */}
-      <div className="flex-1 h-full" data-tauri-drag-region />
+      <div className="flex-1 self-stretch" />
+      {showWindowsControls && (
+        <div className="flex self-stretch" data-tauri-drag-region="false">
+          {[
+            {
+              id: "minimize",
+              label: t("最小化", "Minimize"),
+              icon: <Minus className="size-3.5" />,
+              run: () => getCurrentWindow().minimize(),
+            },
+            {
+              id: "maximize",
+              label: maximizeLabel,
+              icon: isMaximized ? <Copy className="size-3" /> : <Square className="size-3" />,
+              run: () => getCurrentWindow().toggleMaximize(),
+            },
+            {
+              id: "close",
+              label: t("关闭窗口", "Close Window"),
+              icon: <X className="size-4" />,
+              run: () => getCurrentWindow().close(),
+            },
+          ].map(({ id, label, icon, run }) => (
+            <button
+              key={id}
+              type="button"
+              aria-label={label}
+              title={label}
+              onClick={() => void run().catch(console.error)}
+              className={cn(
+                "grid w-11 place-items-center text-zinc-700 dark:text-zinc-200",
+                "focus-visible:outline focus-visible:-outline-offset-2 focus-visible:outline-indigo-500",
+                id === "close"
+                  ? "hover:bg-[#c42b1c] hover:text-white"
+                  : "hover:bg-black/[0.07] dark:hover:bg-white/[0.10]"
+              )}
+            >
+              {icon}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 };

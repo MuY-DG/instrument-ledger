@@ -52,6 +52,7 @@ import { ActionStatusButton, useActionStatus } from "@/components/ui/Interactive
 import type {
   AppSettings,
   AppearancePreferencesInput,
+  CloseBehavior,
   UiLanguage,
   UiScaleMode,
 } from "@/types";
@@ -112,9 +113,7 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
   );
   const [draftScale, setDraftScale] = useState<number>(clampUiScale(settings.uiScale || 1.0));
   const [draftShowTrayIcon, setDraftShowTrayIcon] = useState<boolean>(settings.showTrayIcon);
-  const [draftQuitOnClose, setDraftQuitOnClose] = useState<boolean>(
-    settings.closeBehavior === "exit"
-  );
+  const [draftCloseBehavior, setDraftCloseBehavior] = useState(settings.closeBehavior);
   const [draftCompactToolbar, setDraftCompactToolbar] = useState<boolean>(
     settings.compactToolbar !== false
   );
@@ -159,7 +158,7 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
     setDraftScaleMode(settings.uiScaleMode || "auto");
     setDraftScale(clampUiScale(settings.uiScale || 1.0));
     setDraftShowTrayIcon(settings.showTrayIcon);
-    setDraftQuitOnClose(settings.closeBehavior === "exit");
+    setDraftCloseBehavior(settings.closeBehavior);
     setDraftCompactToolbar(settings.compactToolbar !== false);
     setDraftShowImportButton(Boolean(settings.showImportButton));
     setDraftSidebarConfig(parseSidebarNavConfig(settings.sidebarNavConfig));
@@ -250,7 +249,7 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
     (draftScaleMode === "manual" &&
       Math.abs(draftScale - clampUiScale(settings.uiScale || 1.0)) > 0.005) ||
     draftShowTrayIcon !== settings.showTrayIcon ||
-    draftQuitOnClose !== (settings.closeBehavior === "exit") ||
+    draftCloseBehavior !== settings.closeBehavior ||
     draftCompactToolbar !== (settings.compactToolbar !== false) ||
     draftShowImportButton !== Boolean(settings.showImportButton) ||
     !areSidebarConfigsEqual(draftSidebarConfig, persistedSidebarConfig);
@@ -278,7 +277,7 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
     setDraftScaleMode(settings.uiScaleMode || "auto");
     setDraftScale(clampUiScale(settings.uiScale || 1.0));
     setDraftShowTrayIcon(settings.showTrayIcon);
-    setDraftQuitOnClose(settings.closeBehavior === "exit");
+    setDraftCloseBehavior(settings.closeBehavior);
     setDraftCompactToolbar(settings.compactToolbar !== false);
     setDraftShowImportButton(Boolean(settings.showImportButton));
     setDraftSidebarConfig(parseSidebarNavConfig(settings.sidebarNavConfig));
@@ -322,8 +321,8 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
       if (draftShowTrayIcon !== settings.showTrayIcon) {
         prefPatch.showTrayIcon = draftShowTrayIcon;
       }
-      if (draftQuitOnClose !== (settings.closeBehavior === "exit")) {
-        prefPatch.closeBehavior = draftQuitOnClose ? "exit" : "minimize_to_tray";
+      if (draftCloseBehavior !== settings.closeBehavior) {
+        prefPatch.closeBehavior = draftCloseBehavior;
       }
       if (draftCompactToolbar !== (settings.compactToolbar !== false)) {
         prefPatch.compactToolbar = draftCompactToolbar;
@@ -399,7 +398,7 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
         uiScaleMode: "auto",
         uiScale: 1.0,
         showTrayIcon: true,
-        closeBehavior: "minimize_to_tray",
+        closeBehavior: "ask",
         compactToolbar: true,
         showImportButton: false,
         sidebarNavConfig: "",
@@ -1014,8 +1013,8 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
                 </div>
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                   {t(
-                    "关闭后不显示图标，但关闭窗口仍会像之前一样隐藏到后台。",
-                    "Hide the icon when disabled; closing the window still minimizes to background."
+                    "窗口隐藏到后台时，图标会显示，方便重新打开窗口。",
+                    "The icon appears while the window is hidden so you can reopen it."
                   )}
                 </p>
               </div>
@@ -1028,18 +1027,24 @@ export const AppearanceSettingsTab: React.FC<AppearanceSettingsTabProps> = ({
             <div className="px-4 py-3 flex items-center justify-between gap-4">
               <div className="space-y-0.5 min-w-0">
                 <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100">
-                  {t("关闭窗口时退出程序", "Quit When Closing Window")}
+                  {t("关闭窗口时", "When Closing the Window")}
                 </div>
                 <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
                   {t(
-                    "开启后，点击窗口关闭按钮将彻底退出程序，而不是隐藏到系统托盘。",
-                    "When enabled, clicking the close button exits the app completely instead of hiding to tray."
+                    "选择点击窗口关闭按钮后的操作。",
+                    "Choose what the window’s close button does."
                   )}
                 </p>
               </div>
-              <PrecisionSwitch
-                checked={draftQuitOnClose}
-                onChange={setDraftQuitOnClose}
+              <PrecisionSelect<CloseBehavior>
+                value={draftCloseBehavior}
+                onChange={setDraftCloseBehavior}
+                align="right"
+                options={[
+                  { value: "ask", label: t("询问我", "Ask Me") },
+                  { value: "minimize_to_tray", label: t("隐藏到托盘 / 菜单栏", "Hide to Tray / Menu Bar") },
+                  { value: "exit", label: t("退出程序", "Quit App") },
+                ]}
               />
             </div>
           </div>

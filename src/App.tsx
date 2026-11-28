@@ -173,7 +173,7 @@ const DEFAULT_SETTINGS: AppSettings = {
   alertPopupFrequency: "every_open",
   alertPopupIntervalHours: 4,
   autoLockMinutes: 0,
-  closeBehavior: "minimize_to_tray",
+  closeBehavior: "ask",
   showTrayIcon: true,
   uiLanguage: "system",
   uiScaleMode: "auto",
@@ -2249,6 +2249,22 @@ export default function App() {
     exempt: { label: t("免校归档", "Exempt"), dot: "bg-zinc-400" },
   };
 
+  const closePrompt = (
+    <CloseActionPromptModal
+      open={closePromptOpen}
+      onCancel={() => setClosePromptOpen(false)}
+      onConfirm={async (action, remember) => {
+        try {
+          await api.performCloseAction(action, remember);
+          setClosePromptOpen(false);
+          if (remember) api.getSettings().then(setSettings).catch(() => {});
+        } catch (err) {
+          notify(String(err), "error");
+        }
+      }}
+    />
+  );
+
   // Prevent flashing main UI before initial auth status loads (adaptive luminous light / obsidian dark)
   if (booting) {
     return (
@@ -2260,6 +2276,7 @@ export default function App() {
               <div className="h-2.5 w-2.5 rounded-full bg-indigo-500/80" />
             </div>
           </div>
+          {closePrompt}
         </div>
       </I18nProvider>
     );
@@ -4235,21 +4252,7 @@ export default function App() {
         }}
       />
 
-      <CloseActionPromptModal
-        open={closePromptOpen}
-        onCancel={() => setClosePromptOpen(false)}
-        onConfirm={async (action, remember) => {
-          setClosePromptOpen(false);
-          try {
-            await api.performCloseAction(action, remember);
-            if (remember) {
-              api.getSettings().then(setSettings).catch(() => {});
-            }
-          } catch (err) {
-            notify(String(err), "error");
-          }
-        }}
-      />
+      {closePrompt}
 
       {/* Right-to-Left Sliding Auto-Update Notification Popup */}
       <UpdateBannerToast

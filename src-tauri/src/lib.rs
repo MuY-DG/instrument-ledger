@@ -10,6 +10,8 @@ mod sync_crypto;
 mod sync_engine;
 mod updater;
 mod workbench_store;
+#[cfg(windows)]
+mod windows_icon;
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
@@ -18,7 +20,7 @@ use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::TrayIconBuilder;
 #[cfg(not(target_os = "macos"))]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
-use tauri::{AppHandle, Manager, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, WebviewWindowBuilder};
 
 use crate::app_icon::{apply_app_icon_by_id, DEFAULT_APP_ICON_ID};
 use crate::auth::SessionState;
@@ -27,7 +29,7 @@ use crate::commands::{
 };
 use crate::db::{
     get_setting, init_db, is_account_initialized, is_app_lock_configured, load_custom_app_icons,
-    resolve_startup_admin_session, sanitize_close_behavior, set_setting, DEFAULT_CLOSE_BEHAVIOR,
+    load_close_behavior, resolve_startup_admin_session, set_setting,
 };
 use crate::storage::{
     ensure_storage_dirs, migrate_legacy_data_dir_if_needed, resolve_app_paths,
@@ -127,7 +129,13 @@ fn setup_tray(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
+    let builder = tauri::Builder::default();
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        show_main_window(app);
+    }));
+
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_process::init())
@@ -171,6 +179,11 @@ pub fn run() {
             let startup_custom_icons = load_custom_app_icons(&conn);
             let data_dir_for_icon = data_dir.clone();
 
+            #[cfg(windows)]
+            if let Err(err) = windows_icon::set_app_id(&app.config().identifier) {
+                eprintln!("设置 Windows 应用标识失败: {err}");
+            }
+
             app.manage(AppState {
                 db: Mutex::new(conn),
                 session: Mutex::new(SessionState {
@@ -188,6 +201,10 @@ pub fn run() {
             if let Some(win_cfg) = app.config().app.windows.first() {
                 if app.get_webview_window(&win_cfg.label).is_none() {
                     let mut builder = WebviewWindowBuilder::from_config(app.handle(), win_cfg)?;
+                    #[cfg(windows)]
+                    {
+                        builder = builder.decorations(false).title("InstrumentLedger");
+                    }
                     if let Some(webview_dir) = resolved_paths.webview_data_dir {
                         builder = builder.data_directory(webview_dir);
                     }
@@ -196,13 +213,15 @@ pub fn run() {
             }
 
             setup_tray(app, show_tray_icon, is_en_tray)?;
-            if startup_icon_id != DEFAULT_APP_ICON_ID {
-                let _ = apply_app_icon_by_id(
+            if cfg!(windows) || startup_icon_id != DEFAULT_APP_ICON_ID {
+                if let Err(err) = apply_app_icon_by_id(
                     app.handle(),
                     &data_dir_for_icon,
                     &startup_icon_id,
                     &startup_custom_icons,
-                );
+                ) {
+                    eprintln!("{err}");
+                }
             }
             Ok(())
         })
@@ -215,25 +234,22 @@ pub fn run() {
                 if state.allow_exit.load(Ordering::SeqCst) {
                     return;
                 }
-                let (initialized, close_behavior) = match state.db.lock() {
-                    Ok(conn) => {
-                        let init = is_account_initialized(&conn).unwrap_or(false);
-                        let behavior = get_setting(&conn, "close_behavior")
-                            .ok()
-                            .flatten()
-                            .map(|v| sanitize_close_behavior(&v))
-                            .unwrap_or_else(|| DEFAULT_CLOSE_BEHAVIOR.to_string());
-                        (init, behavior)
-                    }
-                    Err(_) => (false, "exit".to_string()),
-                };
-
-                if !initialized || close_behavior == "exit" {
-                    return;
-                }
-
+                let close_behavior = state
+                    .db
+                    .lock()
+                    .map(|conn| load_close_behavior(&conn))
+                    .unwrap_or_else(|_| "ask".to_string());
                 api.prevent_close();
-                hide_main_window_and_maybe_lock(window.app_handle());
+                match close_behavior.as_str() {
+                    "exit" => {
+                        state.allow_exit.store(true, Ordering::SeqCst);
+                        window.app_handle().exit(0);
+                    }
+                    "minimize_to_tray" => hide_main_window_and_maybe_lock(window.app_handle()),
+                    _ => {
+                        let _ = window.emit("close-requested-prompt", ());
+                    }
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![

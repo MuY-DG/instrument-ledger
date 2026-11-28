@@ -1,6 +1,6 @@
 [package]
 name = "instrument-ledger"
-version = "1.5.2"
+version = "1.5.3"
 description = "监视与测量设备管理台账 (JSSK-MPR-170)"
 authors = ["JSSK Quality Team"]
 edition = "2021"
@@ -34,6 +34,18 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 ring = "0.17"
 hex = "0.4"
 flate2 = "1"
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
+tauri-plugin-single-instance = "2"
+
+[target.'cfg(windows)'.dependencies]
+image = { version = "0.25", default-features = false, features = ["ico", "png"] }
+windows = { version = "0.62", features = [
+    "Win32_Storage_FileSystem",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
